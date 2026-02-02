@@ -22,16 +22,23 @@ def main() -> int:
     ver_str = ".".join(m.groups())
 
     iss_text = ISS_FILE.read_text(encoding="utf-8")
-    # Replace #define MyAppVersion "..." with full version (handles #ifndef block or single line)
+    # Replace the version string in MyAppVersion definition
+    # This handles both standalone #define and #define inside #ifndef block
+    # Match: MyAppVersion followed by any whitespace and quoted version string
+    pattern = r'(MyAppVersion\s+")([^"]+)(")'
+    match = re.search(pattern, iss_text)
+    
+    if not match:
+        print("[ERROR] Could not find MyAppVersion in Image_Classifier.iss", file=sys.stderr)
+        return 1
+    
+    # Replace just the version number, preserving the structure
     new_text = re.sub(
-        r'#define\s+MyAppVersion\s+"[^"]*"',
-        f'#define MyAppVersion "{ver_str}"',
+        pattern,
+        lambda m: f'{m.group(1)}{ver_str}{m.group(3)}',
         iss_text,
         count=1,
     )
-    if new_text == iss_text:
-        print("[ERROR] Could not find MyAppVersion in Image_Classifier.iss", file=sys.stderr)
-        return 1
     ISS_FILE.write_text(new_text, encoding="utf-8")
     print(f"[INFO] Image_Classifier.iss MyAppVersion -> {ver_str}")
     return 0
