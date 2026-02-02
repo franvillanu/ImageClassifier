@@ -2263,9 +2263,37 @@ class PhotoViewer(QMainWindow):
         if not leaving:
             # ---- ENTER ----
             self.stored_geometry = self.geometry()
+            
+            # Try to disable Windows color management for consistent colors in fullscreen
+            # This may help reduce color differences between fullscreen and windowed mode
+            try:
+                import ctypes
+                from ctypes import wintypes
+                # ICM_OFF = 1, ICM_ON = 2, ICM_QUERY = 3
+                ICM_OFF = 1
+                gdi32 = ctypes.windll.gdi32
+                # Get window handle
+                hwnd = int(self.winId()) if hasattr(self, 'winId') else None
+                if hwnd:
+                    hdc = ctypes.windll.user32.GetDC(hwnd)
+                    if hdc:
+                        # Try to disable ICM for this device context
+                        gdi32.SetICMMode(hdc, ICM_OFF)
+                        ctypes.windll.user32.ReleaseDC(hwnd, hdc)
+            except Exception:
+                # If Windows API call fails, continue anyway
+                pass
+            
             super().showFullScreen()
             self.is_fullscreen = True
             self.float_exit.show()
+            
+            # Force OpenGL context to refresh with sRGB color space
+            vp = self.image_viewer.viewport()
+            if isinstance(vp, QOpenGLWidget):
+                vp.makeCurrent()
+                vp.doneCurrent()
+                QTimer.singleShot(50, lambda: vp.update())
 
         else:
             # ---- EXIT ----
