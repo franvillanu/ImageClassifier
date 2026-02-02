@@ -5,7 +5,7 @@ translations = {
         # 1. Application Identity & General UI
         "about_button": "About",
         "photo_viewer_title": "Image Classifier",
-        "app_version_label": "Image Classifier - Version 2.0.1",
+        "app_version_label": "Image Classifier - Version 2.0.2",
         "copyright_label": "© 2025 Francisco Villanueva\nAll rights reserved",
         
         # 2. Navigation & Folder Operations
@@ -323,7 +323,7 @@ translations = {
         # 1. Identidad de la Aplicación e Interfaz General
         "about_button": "Acerca de",
         "photo_viewer_title": "Clasificador de Imágenes",
-        "app_version_label": "Clasificador de Imágenes - Versión 2.0.1",
+        "app_version_label": "Clasificador de Imágenes - Versión 2.0.2",
         "copyright_label": "© 2025 Francisco Villanueva\nTodos los derechos reservados",
         
         # 2. Operaciones de Navegación / Carpetas

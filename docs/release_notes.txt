@@ -1,0 +1,5 @@
+# User-facing release notes (for customers). One sentence per version.
+# Used for changelog page and home "Novedades" — not internal/DevOps changes.
+# Format: version|English sentence|Spanish sentence
+2.0.2|About dialog size adjusted for Spanish text; minor improvements.|Ajustado el tamaño del cuadro Acerca de para texto en español; mejoras menores.
+2.0.1|Improved error messages when loading images; fixed About dialog in Spanish.|Mejores mensajes de error al cargar imágenes; corregido el cuadro Acerca de en español.

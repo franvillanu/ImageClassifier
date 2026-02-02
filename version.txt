@@ -2,8 +2,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 1, 0),
-    prodvers=(2, 0, 1, 0),
+    filevers=(2, 0, 2, 0),
+    prodvers=(2, 0, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'Francisco Villanueva'),
             StringStruct('FileDescription', 'Image Classifier'),
-            StringStruct('FileVersion', '2.0.1'),
+            StringStruct('FileVersion', '2.0.2'),
             StringStruct('InternalName', 'ImageClassifier'),
             StringStruct('LegalCopyright', '© 2025 All rights reserved.'),
             StringStruct('OriginalFilename', ''),
             StringStruct('ProductName', 'Image Classifier'),
-            StringStruct('ProductVersion', '2.0.1')
+            StringStruct('ProductVersion', '2.0.2')
           ]
         ),
         StringTable(
@@ -32,12 +32,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'Francisco Villanueva'),
             StringStruct('FileDescription', 'Clasificador de Imágenes'),
-            StringStruct('FileVersion', '2.0.1'),
+            StringStruct('FileVersion', '2.0.2'),
             StringStruct('InternalName', 'ClasificadorImágenes'),
             StringStruct('LegalCopyright', '© 2025 Todos los derechos reservados.'),
             StringStruct('OriginalFilename', ''),
             StringStruct('ProductName', 'Clasificador de Imágenes'),
-            StringStruct('ProductVersion', '2.0.1')
+            StringStruct('ProductVersion', '2.0.2')
           ]
         )
       ]
