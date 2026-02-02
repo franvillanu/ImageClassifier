@@ -6,7 +6,7 @@
 #define MyAppName      "Image Classifier"
 ; MyAppVersion: synced from version.txt by scripts/update_iss_version.py before release
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.1"
+  #define MyAppVersion "2.0.2"
 #endif
 #define MyAppPublisher "Francisco Villanueva"
 #define MyAppURL       "https://imageclassifier.neocities.org/"

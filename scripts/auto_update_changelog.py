@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
-Automatically update changelog.html by extracting changes from git commits.
+Update changelog.html with user-facing release notes (for customers).
+
+Uses docs/release_notes.txt (one sentence per version, EN|ES) so the changelog
+shows what changed in the application for users — not internal/DevOps commits.
 
 This script:
 1. Reads version from version.txt
-2. Extracts commit messages since last release (or uses default)
-3. Updates changelog.html automatically
-4. Returns changelog entries for website update
+2. Reads user-facing note from docs/release_notes.txt (if present)
+3. Otherwise uses default "Bug fixes and improvements" / "Correcciones y mejoras"
+4. Updates changelog.html
 
 Usage:
     py scripts/auto_update_changelog.py
 """
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_TXT = REPO_ROOT / "version.txt"
+RELEASE_NOTES_TXT = REPO_ROOT / "docs" / "release_notes.txt"
 CHANGELOG_HTML = REPO_ROOT / "docs" / "changelog.html"
 
 
@@ -37,75 +40,22 @@ def get_today_date() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
-def get_git_commits_since_last_release() -> list[str]:
-    """Extract commit messages since the last version tag or main branch."""
-    try:
-        # Try to find the last version tag
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0"],
-            capture_output=True,
-            text=True,
-            cwd=REPO_ROOT,
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            # Get commits since last tag
-            since_tag = result.stdout.strip()
-            result = subprocess.run(
-                ["git", "log", f"{since_tag}..HEAD", "--pretty=%s", "--no-merges"],
-                capture_output=True,
-                text=True,
-                cwd=REPO_ROOT,
-            )
-        else:
-            # No tags found, get commits since main branch
-            result = subprocess.run(
-                ["git", "log", "main..HEAD", "--pretty=%s", "--no-merges"],
-                capture_output=True,
-                text=True,
-                cwd=REPO_ROOT,
-            )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            commits = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
-            # Filter out release commits and merge commits
-            commits = [c for c in commits if not c.startswith("release:") and not c.startswith("Merge")]
-            return commits[:10]  # Limit to 10 most recent
-    except Exception:
-        pass
-    
-    return []
-
-
-def create_changelog_entries(commits: list[str]) -> list[tuple[str, str]]:
-    """Convert commit messages to changelog entries (EN, ES)."""
-    entries = []
-    
-    for commit in commits:
-        # Clean up commit message
-        commit = commit.strip()
-        
-        # Skip if it's a release commit
-        if commit.startswith("release:"):
+def get_user_release_notes(version: str) -> list[tuple[str, str]]:
+    """
+    Get user-facing release note (EN, ES) for this version from docs/release_notes.txt.
+    Format per line: version|English sentence|Spanish sentence
+    Returns one entry (or default) so changelog is for customers, not internal commits.
+    """
+    if not RELEASE_NOTES_TXT.exists():
+        return [("Bug fixes and improvements", "Correcciones y mejoras")]
+    for line in RELEASE_NOTES_TXT.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
             continue
-        
-        # Remove type prefixes (feat:, fix:, etc.)
-        commit_clean = re.sub(r"^(feat|fix|refactor|docs|chore|style|test|perf):\s*", "", commit, flags=re.IGNORECASE)
-        
-        # Capitalize first letter
-        if commit_clean:
-            commit_clean = commit_clean[0].upper() + commit_clean[1:] if len(commit_clean) > 1 else commit_clean.upper()
-        
-        # Use same text for EN and ES (can be improved later with translation)
-        entries.append((commit_clean, commit_clean))
-    
-    # If no commits found, use default entry
-    if not entries:
-        entries = [
-            ("Bug fixes and improvements", "Correcciones y mejoras")
-        ]
-    
-    return entries
+        parts = line.split("|", 2)
+        if len(parts) >= 3 and parts[0].strip() == version:
+            return [(parts[1].strip(), parts[2].strip())]
+    return [("Bug fixes and improvements", "Correcciones y mejoras")]
 
 
 def create_version_block(version: str, date: str, entries: list[tuple[str, str]]) -> str:
@@ -150,10 +100,9 @@ def main() -> int:
         pattern = rf'    <div class="version-block">\s*<h2>v{re.escape(version)}</h2>.*?</div>\s*\n'
         html = re.sub(pattern, '', html, flags=re.DOTALL)
     
-    # Get commits and create entries
-    commits = get_git_commits_since_last_release()
-    print(f"Found {len(commits)} commits since last release")
-    entries = create_changelog_entries(commits)
+    # Use user-facing release note (from release_notes.txt), not git commits
+    entries = get_user_release_notes(version)
+    print(f"Using user-facing note for v{version} (1 entry)")
     
     new_block = create_version_block(version, date, entries)
     
@@ -173,7 +122,7 @@ def main() -> int:
     
     CHANGELOG_HTML.write_text(html, encoding="utf-8")
     print(f"\n[SUCCESS] Updated {CHANGELOG_HTML}")
-    print(f"Added {len(entries)} changelog entries")
+    print(f"Added {len(entries)} user-facing changelog entry/entries")
     
     return 0
 

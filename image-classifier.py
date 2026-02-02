@@ -3323,10 +3323,11 @@ class PhotoViewer(QMainWindow):
                 background-color: #B22222;
             }
         """)
-        container.setFixedSize(315, 200)
+        # Min width so Spanish ("Clasificador de Imágenes - Versión 2.0.1") doesn't clip
+        container.setMinimumSize(400, 200)
 
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(10)
 
         title_label = QLabel(t["about_button"], container)

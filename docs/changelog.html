@@ -84,50 +84,27 @@
 
 
 
+
+    <div class="version-block">
+      <h2>v2.0.2</h2>
+      <h3>02/02/2026</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="About dialog size adjusted for Spanish text; minor improvements."
+            data-es="Ajustado el tamaño del cuadro Acerca de para texto en español; mejoras menores.">
+          About dialog size adjusted for Spanish text; minor improvements.
+        </li>
+      </ul>
+    </div>
+
     <div class="version-block">
       <h2>v2.0.1</h2>
       <h3>02/02/2026</h3>
       <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
       <ul>
-        <li data-en="Handle git add warnings and reset .iss file after Release.bat"
-            data-es="Handle git add warnings and reset .iss file after Release.bat">
-          Handle git add warnings and reset .iss file after Release.bat
-        </li>
-        <li data-en="Standardize version to 3 digits (major.minor.patch)"
-            data-es="Estandarizar versión a 3 dígitos (major.minor.patch)">
-          Standardize version to 3 digits (major.minor.patch)
-        </li>
-        <li data-en="Show user-friendly error message when image loading fails instead of silent print"
-            data-es="Show user-friendly error message when image loading fails instead of silent print">
-          Show user-friendly error message when image loading fails instead of silent print
-        </li>
-        <li data-en="Always create GitHub Release if missing, not just on version change"
-            data-es="Always create GitHub Release if missing, not just on version change">
-          Always create GitHub Release if missing, not just on version change
-        </li>
-        <li data-en="Check for uncommitted changes and fail gracefully instead of auto-stashing"
-            data-es="Check for uncommitted changes and fail gracefully instead of auto-stashing">
-          Check for uncommitted changes and fail gracefully instead of auto-stashing
-        </li>
-        <li data-en="Stash uncommitted changes before switching to main in PR script"
-            data-es="Stash uncommitted changes before switching to main in PR script">
-          Stash uncommitted changes before switching to main in PR script
-        </li>
-        <li data-en="Clarify PR shortcut is user keybinding (all repos)"
-            data-es="Clarify PR shortcut is user keybinding (all repos)">
-          Clarify PR shortcut is user keybinding (all repos)
-        </li>
-        <li data-en="Add keybinding instructions for PR task (Ctrl+Shift+5)"
-            data-es="Add keybinding instructions for PR task (Ctrl+Shift+5)">
-          Add keybinding instructions for PR task (Ctrl+Shift+5)
-        </li>
-        <li data-en="Add architecture review document"
-            data-es="Add architecture review document">
-          Add architecture review document
-        </li>
-        <li data-en="Create GitHub Release AFTER merge, not during Release.bat"
-            data-es="Create GitHub Release AFTER merge, not during Release.bat">
-          Create GitHub Release AFTER merge, not during Release.bat
+        <li data-en="Improved error messages when loading images; fixed About dialog in Spanish."
+            data-es="Mejores mensajes de error al cargar imágenes; corregido el cuadro Acerca de en español.">
+          Improved error messages when loading images; fixed About dialog in Spanish.
         </li>
       </ul>
     </div>
@@ -268,7 +245,8 @@
       document.getElementById('backTextBottom').innerText =
         lang === 'es' ? '← Volver a la página principal' : '← Back to Homepage';
       document.querySelectorAll('[data-en]').forEach(el => {
-        el.innerText = el.getAttribute('data-' + lang);
+        const text = el.getAttribute('data-' + lang) || el.getAttribute('data-en') || '';
+        el.innerText = text;
       });
       
       // Update back links to include language parameter
