@@ -1,30 +1,32 @@
-# Restore Ctrl+Shift+5 for PR script
+# Ctrl+Shift+5 for PR script (user shortcut, all repos)
 
-Keybindings are stored in your **user** settings, not in the repo. If Ctrl+Shift+5 stopped working (e.g. after an update or new profile), re-add it like this.
+Add the shortcut in your **user** keybindings so it’s available in every repo. The keybinding is global; the task that runs is defined in this repo’s `.vscode/tasks.json`.
+
+- **In this repo:** Ctrl+Shift+5 runs the PR script.
+- **In other repos:** The same shortcut still runs “Run Task” for that task name; if the task doesn’t exist there, you’ll get the task list or nothing. No harm.
 
 ## Option 1: Keyboard Shortcuts UI (easiest)
 
-1. **Open Keyboard Shortcuts**  
+1. **Open Keyboard Shortcuts (user)**  
    `Ctrl+K` then `Ctrl+S`  
    (or: File → Preferences → Keyboard Shortcuts)
 
-2. **Search** for: `Tasks: Run Task`
+2. **Search:** `Tasks: Run Task`
 
-3. **Click the +** next to **"Tasks: Run Task"** to add a keybinding.
+3. **Click the +** next to **“Tasks: Run Task”** and press **Ctrl+Shift+5**.
 
-4. **Press** `Ctrl+Shift+5` when prompted.
-
-5. **When asked "Which task?"**, choose:  
+4. When asked **“Which task?”**, choose:  
    **PR: create + merge (squash) + update main**
 
-6. Save. Ctrl+Shift+5 should now run the PR script.
+5. Save. The shortcut is now in your **user** keybindings and applies to all repos.
 
-## Option 2: Edit keybindings.json
+## Option 2: Edit user keybindings.json
 
 1. **Open Command Palette**  
    `Ctrl+Shift+P`
 
-2. Run: **"Preferences: Open Keyboard Shortcuts (JSON)"**
+2. Run: **“Preferences: Open Keyboard Shortcuts (JSON)”**  
+   (This opens your **user** keybindings file, e.g. `%APPDATA%\Code\User\keybindings.json` or Cursor’s equivalent.)
 
 3. **Add** this entry inside the `[]` array (use a comma after existing entries):
 
@@ -36,10 +38,10 @@ Keybindings are stored in your **user** settings, not in the repo. If Ctrl+Shift
 }
 ```
 
-4. Save the file.
+4. Save. The shortcut is global and works in all repos.
 
 ## Run the task without the keybinding
 
-- **Command Palette** (`Ctrl+Shift+P`) → **"Tasks: Run Task"** → **"PR: create + merge (squash) + update main"**
-- Or from terminal:  
+- **Command Palette** (`Ctrl+Shift+P`) → **“Tasks: Run Task”** → **“PR: create + merge (squash) + update main”**
+- Or from terminal (in this repo):  
   `powershell -NoProfile -ExecutionPolicy Bypass -File .vscode/pr_create_merge_update.ps1`
