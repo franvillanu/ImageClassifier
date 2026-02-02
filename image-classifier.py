@@ -2240,8 +2240,11 @@ class PhotoViewer(QMainWindow):
         """
         make_cover = True   → use fade-out overlay (❌, F11, etc.)
         make_cover = False  → leave FS with NO overlay (click-away path)
+        
+        Uses borderless maximized window instead of true fullscreen to avoid
+        Windows color management differences between fullscreen and windowed mode.
         """
-        leaving = self.isFullScreen()
+        leaving = self.is_fullscreen
 
         # 1 – pre-exit repaint (to flush GPU buffer)
         if leaving:
@@ -2262,8 +2265,16 @@ class PhotoViewer(QMainWindow):
         # 2 – switch state
         if not leaving:
             # ---- ENTER ----
+            # Use borderless maximized window instead of true fullscreen to avoid
+            # Windows color management differences between fullscreen and windowed mode
             self.stored_geometry = self.geometry()
-            super().showFullScreen()
+            screen = self.screen().availableGeometry()
+            self.setWindowFlags(
+                Qt.WindowType.Window |
+                Qt.WindowType.FramelessWindowHint
+            )
+            self.setGeometry(screen)
+            self.show()
             self.is_fullscreen = True
             self.float_exit.show()
 
@@ -2273,9 +2284,13 @@ class PhotoViewer(QMainWindow):
                 # hide window immediately so no flash
                 self.setWindowOpacity(0.0)
 
-            super().showNormal()
+            # Restore normal window with frame
+            self.setWindowFlags(Qt.WindowType.Window)
             if hasattr(self, "stored_geometry"):
                 self.setGeometry(self.stored_geometry)
+            else:
+                self.setGeometry(100, 100, 1024, 768)
+            self.show()
             self.is_fullscreen = False
             self.float_exit.hide()
 
@@ -2314,7 +2329,7 @@ class PhotoViewer(QMainWindow):
     # ------------------------------------------------------------------
     def exit_fullscreen(self):
         """Leave fullscreen via the normal overlay path."""
-        if self.isFullScreen():
+        if self.is_fullscreen:
             self.toggle_fullscreen(make_cover=True)
 
 
@@ -2328,14 +2343,14 @@ class PhotoViewer(QMainWindow):
         Now we just call the same exit path as the ❌ button,
         so we get the identical fade-out overlay instead of a flash.
         """
-        if self.isFullScreen():
+        if self.is_fullscreen:
             self.exit_fullscreen()
 
     # ------------------------------------------------------------------
     # 4)  event  – detects “click‑away” focus loss
     # ------------------------------------------------------------------
     def event(self, ev):
-        if ev.type() == QEvent.Type.WindowDeactivate and self.isFullScreen():
+        if ev.type() == QEvent.Type.WindowDeactivate and self.is_fullscreen:
             # give the new frame a few ms to appear before we exit
             QTimer.singleShot(10, self._leave_fullscreen_clickaway)
             return True
