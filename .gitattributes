@@ -1,0 +1,16 @@
+# Normalize line endings so Git does not show false "modified" on Windows.
+# Repo stores LF; Git converts on checkout per rule below.
+
+* text=auto eol=lf
+
+# Windows scripts: keep CRLF so they run correctly on Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: do not touch
+*.exe binary
+*.ico binary
+*.png binary
+*.jpeg binary
+*.jpg binary
+*.pfx binary
