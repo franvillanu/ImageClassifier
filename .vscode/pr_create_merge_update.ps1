@@ -62,7 +62,7 @@ if ($versionChanged) {
     } else {
       Write-Host "✅ Release build completed!" -ForegroundColor Green
       
-      # Stage website files updated by Release.bat (Output/ is gitignored, don't add it)
+      # Stage all website and changelog files updated by Release.bat
       git add docs/index.html docs/changelog.html 2>$null
       
       # If there are changes, commit them
@@ -70,8 +70,8 @@ if ($versionChanged) {
       if ($status) {
         # Extract short version (e.g., "2.0" from "2.0.0.0")
         $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
-        git commit -m "release: v$shortVersion - website updates"
-        Write-Host "✅ Committed website updates" -ForegroundColor Green
+        git commit -m "release: v$shortVersion - website and changelog updates"
+        Write-Host "✅ Committed website and changelog updates" -ForegroundColor Green
       }
     }
   }

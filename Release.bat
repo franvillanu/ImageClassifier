@@ -40,10 +40,17 @@ set "VER_SHORT=%VER_MAJOR%.%VER_MINOR%"
 echo Detected full version: %VER_STR%
 echo Using short version: %VER_SHORT%
 
-REM --- 2.5) Update website with current version (always sync, even if changelog not updated) ---
+REM --- 2.5) Automatically update changelog from git commits ---
 echo.
-set "CHANGELOG_UPDATED=0"
-REM Always update website to sync version number and download link
+echo [INFO] Updating changelog from git commits...
+py "%~dp0scripts\auto_update_changelog.py"
+if errorlevel 1 (
+  echo [WARNING] Changelog update failed, continuing anyway...
+)
+
+REM --- 2.6) Update website with current version and changelog ---
+echo.
+echo [INFO] Updating website with version and download link...
 py "%~dp0scripts\update_website.py"
 if errorlevel 1 (
   echo [WARNING] Website update failed, continuing anyway...
