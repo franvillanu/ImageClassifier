@@ -62,8 +62,22 @@ if ($versionChanged) {
     } else {
       Write-Host "✅ Release build completed!" -ForegroundColor Green
       
+      # Reset .iss file if it was modified (build process updates version, but we don't commit it)
+      $issStatus = git status --porcelain -- Image_Classifier.iss
+      if ($issStatus) {
+        git checkout -- Image_Classifier.iss
+        Write-Host "✅ Reset Image_Classifier.iss (build artifact)" -ForegroundColor Gray
+      }
+      
       # Stage all website and changelog files updated by Release.bat
-      git add docs/index.html docs/changelog.html 2>$null
+      # Temporarily disable error action to handle git warnings gracefully
+      $oldErrorAction = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        git add docs/index.html docs/changelog.html 2>&1 | Out-Null
+      } finally {
+        $ErrorActionPreference = $oldErrorAction
+      }
       
       # If there are changes, commit them
       $status = git status --porcelain -- docs/
