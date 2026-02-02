@@ -116,8 +116,34 @@ Write-Host "PR creado: $url"
 Write-Host 'Mergeado a main ✅'
 Write-Host 'Branch local actualizado'
 
+# If version changed, create GitHub Release AFTER merge
 if ($versionChanged) {
   $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
   Write-Host ''
-  Write-Host "🎉 Release v$shortVersion created and published!" -ForegroundColor Green
+  Write-Host "🚀 Creating GitHub Release for v$shortVersion..." -ForegroundColor Cyan
+  
+  # Check if GitHub token exists
+  $hasToken = $false
+  if ($env:GITHUB_TOKEN) {
+    $hasToken = $true
+  } elseif (Test-Path '.github_token') {
+    $hasToken = $true
+  }
+  
+  if ($hasToken) {
+    py scripts/create_github_release.py
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "✅ GitHub Release created!" -ForegroundColor Green
+    } else {
+      Write-Warning "GitHub Release creation failed, but website will still deploy."
+    }
+  } else {
+    Write-Host "⚠️  Skipping GitHub Release (no token found)." -ForegroundColor Yellow
+    Write-Host "   Set GITHUB_TOKEN env var or create .github_token file to enable."
+  }
+  
+  Write-Host ''
+  Write-Host "🎉 Release v$shortVersion ready!" -ForegroundColor Green
+  Write-Host "   Website deploying to Cloudflare Pages..." -ForegroundColor Cyan
+  Write-Host "   Download link will be available once deployment completes." -ForegroundColor Cyan
 }

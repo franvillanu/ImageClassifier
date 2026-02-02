@@ -129,29 +129,8 @@ if exist "docs\changelog.html" (
   echo [INFO] Changelog copied to Output\changelog.html
 )
 
-REM --- 7) Automatically create GitHub Release if token is available ---
-echo.
-set "CREATE_GITHUB_RELEASE=0"
-REM Check if GitHub token exists (env var or file)
-if defined GITHUB_TOKEN (
-  set "CREATE_GITHUB_RELEASE=1"
-) else if exist "%~dp0.github_token" (
-  set "CREATE_GITHUB_RELEASE=1"
-)
-if "%CREATE_GITHUB_RELEASE%"=="1" (
-  echo [4/4] Creating GitHub Release...
-  py "%~dp0scripts\create_github_release.py"
-  if errorlevel 1 (
-    echo [WARNING] GitHub Release creation failed, but installer is ready.
-  ) else (
-    echo [SUCCESS] GitHub Release created successfully!
-  )
-) else (
-  echo [INFO] Skipping GitHub Release (no token found).
-  echo        Set GITHUB_TOKEN env var or create .github_token file to enable.
-)
-
-REM --- 8) Success! ---
+REM --- 7) Success! ---
+REM Note: GitHub Release will be created AFTER merge to main (via PR script)
 echo.
 echo [SUCCESS] Release complete!
 echo    • EXE:       installer\Image Classifier.exe
