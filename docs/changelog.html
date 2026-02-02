@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Classifier – Release Notes</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Montserrat', sans-serif;
+      background-color: #0d1117;
+      color: #ffffff;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+    }
+    .version-block {
+      background-color: #1f1f1f;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    }
+    .version-block h2 {
+      margin-top: 0;
+      font-size: 1.6rem;
+      color: #66ccff;
+    }
+    .version-block p {
+      margin: 6px 0 16px;
+      font-size: 0.95rem;
+      color: #ccc;
+    }
+    .version-block ul {
+      padding-left: 1.5rem;
+    }
+    .back-link {
+      display: block;
+      margin: 30px 0;
+      text-align: center;
+      font-size: 1rem;
+      color: #66ccff;
+      text-decoration: underline;
+    }
+    .lang-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+    .lang-toggle button {
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    .lang-toggle img {
+      height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="lang-toggle">
+      <button type="button" onclick="setLang('en')">
+        <img src="https://flagcdn.com/24x18/gb.png" alt="English" />
+      </button>
+      <button type="button" onclick="setLang('es')">
+        <img src="https://flagcdn.com/24x18/es.png" alt="Español" />
+      </button>
+    </div>
+
+    <h1 id="pageTitle">📄 Release Notes</h1>
+    <a class="back-link" href="index.html" id="backTextTop">← Back to Homepage</a>
+
+
+    <div class="version-block">
+      <h2>v2.0</h2>
+      <h3>02/02/2026</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Fixed Save Modified File behaviour and applied filter issues"
+            data-es="Corregido el comportamiento de Guardar Archivos Modificados y problemas con filtros aplicados">
+          Fixed Save Modified File behaviour and applied filter issues
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.9</h2>
+      <h3>05/06/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Fixed Save Modified File behaviour"
+            data-es="Corregido el comportamiento de Guardar Archivos Modificados">
+          Enhanced anti-aliasing engine for smoother edges and crisper visuals
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.8</h2>
+      <h3>24/05/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Fixed several brightness overlay issues"
+            data-es="Corregidos varios problemas con la funcionalidad de Brillo">
+          Enhanced anti-aliasing engine for smoother edges and crisper visuals
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.7</h2>
+      <h3>18/05/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Enhanced anti-aliasing engine for smoother edges and crisper visuals"
+            data-es="Motor de antialiasing mejorado para bordes más suaves y visuales más nítidos">
+          Enhanced anti-aliasing engine for smoother edges and crisper visuals
+        </li>
+        <li data-en="Fixed brightness adjustment bugs to ensure consistent exposure control"
+            data-es="Corregidos errores de ajuste de brillo para garantizar un control de exposición consistente">
+          Fixed brightness adjustment bugs to ensure consistent exposure control
+        </li>
+        <li data-en="Upgraded sharpness tool with finer slider precision"
+            data-es="Herramienta de nitidez mejorada con mayor precisión">
+          Upgraded sharpness tool with finer slider precision and performance boosts
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.6</h2>
+      <h3>14/05/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Added sharpness control"
+            data-es="Añadido control de nitidez">
+          Added sharpness control
+        </li>
+        <li data-en="Fixed sort in 'Save a Copy of Modified File 💾'"
+            data-es="Corregido orden en 'Crear copia de imagen modificada 💾'">
+          Fixed sort in 'Save a Copy of Modified File 💾'
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.5</h2>
+      <h3>06/05/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Fixed filter display breaking when changing sort options"
+            data-es="Corregido error en los filtros al cambiar el tipo de orden">
+          Fixed filter display breaking when changing sort options
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.4</h2>
+      <h3>03/05/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="Added Theme selection in Settings"
+            data-es="Añadida selección de Tema en Configuración">
+          Added Theme selection in Settings
+        </li>
+        <li data-en="Added Dark Grey and Inkstone background theme option"
+            data-es="Añadidas opciones de tema de fondo Gris Oscuro y Cobalto">
+          Added Inkstone (Cobalto) background theme option
+        </li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.3</h2>
+      <h3>25/04/2025</h3>
+      <p class="desc" data-en="Latest release includes:" data-es="Última versión incluye:">Latest release includes:</p>
+      <ul>
+        <li data-en="Improved Crop Feature" data-es="Función de recorte mejorada">Improved Crop Feature</li>
+        <li data-en="Added Original Aspect option" data-es="Opción de aspecto original añadida">Added Original Aspect option</li>
+        <li data-en="Fixed Combobox selection behaviour" data-es="Comportamiento del menú desplegable corregido">Fixed Combobox selection behaviour</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.2</h2>
+      <h3>28/03/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="New option to delete all non-favorite images" data-es="Nueva opción para eliminar imágenes no marcadas como favoritas">New option to delete all non-favorite images</li>
+        <li data-en="Added new setting to define image sorting" data-es="Nueva configuración para definir el orden de imágenes">Added new setting to define image sorting</li>
+        <li data-en="Multiple file selection enabled when selecting folder" data-es="Selección múltiple de archivos habilitada al elegir carpetas">Multiple file selection enabled when selecting folder</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <h2>v1.1</h2>
+      <h3>14/02/2025</h3>
+      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
+      <ul>
+        <li data-en="UI refinements and layout cleanup" data-es="Mejoras en la interfaz y limpieza de diseño">UI refinements and layout cleanup</li>
+        <li data-en="Faster folder scanning performance" data-es="Escaneo de carpetas más rápido">Faster folder scanning performance</li>
+        <li data-en="Minor bug fixes" data-es="Correcciones menores de errores">Minor bug fixes</li>
+      </ul>
+    </div>
+
+    <a class="back-link" href="index.html" id="backTextBottom">← Back to Homepage</a>
+  </div>
+
+  <script>
+    function setLang(lang) {
+      document.getElementById('pageTitle').innerText =
+        lang === 'es' ? '📄 Historial de Cambios' : '📄 Release Notes';
+      document.getElementById('backTextTop').innerText =
+        lang === 'es' ? '← Volver a la página principal' : '← Back to Homepage';
+      document.getElementById('backTextBottom').innerText =
+        lang === 'es' ? '← Volver a la página principal' : '← Back to Homepage';
+      document.querySelectorAll('[data-en]').forEach(el => {
+        el.innerText = el.getAttribute('data-' + lang);
+      });
+    }
+    const userLang = navigator.language || navigator.userLanguage;
+    const defaultLang = userLang.startsWith('es') ? 'es' : 'en';
+    setLang(defaultLang);
+  </script>
+</body>
+</html>

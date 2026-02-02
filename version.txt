@@ -1,0 +1,50 @@
+# UTF-8 encoded version resource for Windows
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(2, 0, 0, 0),
+    prodvers=(2, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904E4',  # English (United States)
+          [
+            StringStruct('CompanyName', 'Francisco Villanueva'),
+            StringStruct('FileDescription', 'Image Classifier'),
+            StringStruct('FileVersion', '2.0.0.0'),
+            StringStruct('InternalName', 'ImageClassifier'),
+            StringStruct('LegalCopyright', '© 2025 All rights reserved.'),
+            StringStruct('OriginalFilename', ''),
+            StringStruct('ProductName', 'Image Classifier'),
+            StringStruct('ProductVersion', '2.0.0.0')
+          ]
+        ),
+        StringTable(
+          '0C0A04E4',  # Spanish (Spain)
+          [
+            StringStruct('CompanyName', 'Francisco Villanueva'),
+            StringStruct('FileDescription', 'Clasificador de Imágenes'),
+            StringStruct('FileVersion', '2.0.0.0'),
+            StringStruct('InternalName', 'ClasificadorImágenes'),
+            StringStruct('LegalCopyright', '© 2025 Todos los derechos reservados.'),
+            StringStruct('OriginalFilename', ''),
+            StringStruct('ProductName', 'Clasificador de Imágenes'),
+            StringStruct('ProductVersion', '2.0.0.0')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([
+        VarStruct('Translation', [1033, 1200]),  # English
+        VarStruct('Translation', [3082, 1200])   # Spanish (Spain)
+    ])
+  ]
+)

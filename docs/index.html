@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- 
+    Title: Image Classifier ⭐ - PayPal Donate (No Old Modal)
+    Description: Single-page site with dark theme, multi-language support, and a PayPal donation button.
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Classifier ⭐</title>
+  <link rel="icon" href="star.ico" type="image/x-icon">
+
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&amp;display=swap" rel="stylesheet" />
+
+
+  <style>
+    /***************************************************************
+     1) GLOBAL BASE STYLES
+    ***************************************************************/
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      font-family: "Montserrat", sans-serif;
+      color: #ffffff;
+      background: #0d1117;
+      overflow-x: hidden;
+      scroll-behavior: smooth;
+    }
+    body.lang-en { font-size: 16px; }
+    body.lang-es { font-size: 15px; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+    ::-webkit-scrollbar-track { background: #0d1117; }
+
+    /***************************************************************
+     2) BACKGROUND & ANIMATIONS
+    ***************************************************************/
+    body {
+      background: linear-gradient(120deg, #0d1117 0%, #010409 100%);
+      position: relative;
+      overflow-x: hidden;
+    }
+    .aurora-overlay {
+      pointer-events: none;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      z-index: 0;
+    }
+    .aurora-shape {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.6;
+      animation: floatShapes 15s ease-in-out infinite alternate;
+    }
+    @keyframes floatShapes {
+      0% { transform: translateY(0) translateX(0) scale(1); }
+      100% { transform: translateY(-40px) translateX(40px) scale(1.2); }
+    }
+    .aurora-shape1 {
+      top: -150px; left: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle at center, rgba(66,188,250,0.35) 0%, rgba(66,188,250,0) 70%);
+    }
+    .aurora-shape2 {
+      bottom: -200px; right: -150px;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle at center, rgba(177,66,250,0.3) 0%, rgba(177,66,250,0) 70%);
+      animation-duration: 18s;
+    }
+
+    /***************************************************************
+     3) CONTAINER & BASIC LAYOUT
+    ***************************************************************/
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .fade-section {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.8s ease, transform 0.8s ease;
+    }
+    .fade-section.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /***************************************************************
+     4) HERO SECTION
+    ***************************************************************/
+    header {
+      width: 100%;
+      padding: 80px 0 60px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .hero-text {
+      flex: 1 1 500px;
+      margin-right: 40px;
+    }
+    .hero-text h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      display: inline-flex;
+      align-items: center;
+      color: #fff;
+    }
+    .hero-text p {
+      font-size: 1.2rem;
+      line-height: 1.6;
+      opacity: 0.9;
+      margin-bottom: 20px;
+    }
+    .title-with-flags {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #lang-toggler {
+      display: flex;
+      gap: 8px;
+    }
+    #lang-toggler button {
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    #lang-toggler img {
+      max-height: 16px;
+    }
+
+    /***************************************************************
+     4.1) FEATURE CARD STYLES (4 CARDS)
+    ***************************************************************/
+    .feature-card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      margin-top: 1.5rem;
+    }
+    @media (max-width: 600px) {
+      .feature-card-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .feature-card {
+      background: #161b22;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+      transition: transform 0.2s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-4px);
+    }
+    .feature-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+    .feature-card p {
+      font-size: 1rem;
+      opacity: 0.85;
+      margin: 0;
+    }
+
+    @media (max-width: 480px) {
+      .hero-text h1 {
+        font-size: 1.6rem;
+        line-height: 1.2;
+      }
+      .hero-text p {
+        font-size: 1rem;
+      }
+      header {
+        align-items: stretch;
+      }
+      .hero-text {
+        margin-right: 0;
+        margin-top: 30px;
+      }
+    }
+    
+    @media screen and (min-width: 600px) and (orientation: portrait) {
+      header {
+        flex-direction: column;
+        align-items: center;
+      }
+      .hero-text {
+        margin-right: 0;
+        margin-bottom: -100px;
+        text-align: center;
+      }
+      aside.release-card {
+        margin: 0 auto;
+      }
+    }
+
+
+    /***************************************************************
+     5) PINNED RELEASE CARD
+    ***************************************************************/
+    aside.release-card {
+      background-color: #1f1f1f;
+      width: 340px;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+      position: relative;
+      text-align: center;
+      font-family: 'Montserrat', sans-serif;
+    }
+    .release-card h2 {
+      font-size: 1.6rem;
+      margin-bottom: 16px;
+      color: #fff;
+    }
+    .release-card .details {
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 20px;
+      opacity: 0.9;
+      text-align: left;
+      padding: 0 12px;
+    }
+    .release-card ul { margin-left: 1.5rem; }
+    .download-btn {
+      display: inline-block;
+      background: #0069d9;
+      color: #fff;
+      font-weight: 600;
+      padding: 14px 24px;
+      border-radius: 6px;
+      text-decoration: none;
+      width: 80%;
+      margin: 0 auto 4px;
+      box-sizing: border-box;
+      border: none;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+    .download-btn:hover { background: #007aff; }
+    #donate-button-container {
+      width: 80%;
+      margin: 4px auto 8px;
+    }
+    #donate-button-container img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: none;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+    @media (max-width: 900px) {
+      aside.release-card {
+        width: 100%;
+        margin-top: 30px;
+      }
+    }
+    .release-card .publish-date {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      text-align: center;
+      opacity: 0.7;
+    }
+    .platform-indicator {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    .platform-indicator img {
+      height: 24px;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    #avLink { text-decoration: none; }
+
+    /***************************************************************
+     6) GALLERY / SCREENSHOTS SECTION
+    ***************************************************************/
+    section.gallery {
+      margin-top: 50px;
+      margin-bottom: 50px;
+    }
+    .section-title {
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 40px;
+    }
+    .screenshot-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 768px) {
+      .screenshot-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 480px) {
+      .screenshot-grid { grid-template-columns: 1fr; }
+    }
+    .grid-item {
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.3s;
+    }
+    .grid-item:hover { transform: scale(1.02); }
+    .grid-item img {
+      width: 100%;
+      height: auto;
+      display: block;
+      object-fit: cover;
+    }
+    .obs-credit {
+      margin-top: 8px;
+      font-size: 1rem;
+      color: #fff;
+      text-align: center;
+      opacity: 0.7;
+    }
+    .obs-credit a { color: #66ccff; }
+
+    /***************************************************************
+     7) LIGHTBOX
+    ***************************************************************/
+    .lightbox {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .lightbox.show { display: flex; }
+    .lightbox img {
+      max-width: 90%;
+      max-height: 90%;
+      border: 2px solid #333;
+      border-radius: 8px;
+    }
+    .arrow-btn, .close-btn {
+      position: absolute;
+      color: #fff;
+      font-size: 2rem;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.3s;
+    }
+    .arrow-btn:hover, .close-btn:hover { background: rgba(0,0,0,0.8); }
+    .close-btn { top: 20px; right: 20px; }
+    .prev-btn { left: 40px; transform: translateY(-50%); }
+    .next-btn { right: 40px; transform: translateY(-50%); }
+
+    /***************************************************************
+     8) FAQ SECTION
+    ***************************************************************/
+    .faq { margin-top: 50px; }
+    .faq-item { margin-bottom: 20px; }
+    .faq-question { font-weight: bold; margin-bottom: 10px; }
+    .faq-answer { opacity: 0.9; line-height: 1.5; }
+
+    /***************************************************************
+     9) FOOTER
+    ***************************************************************/
+    footer {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #f2f2f2;
+      margin-top: 80px;
+      margin-bottom: 20px;
+      opacity: 0.7;
+    }
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 1160px;
+      padding-bottom: 56.25%;
+      height: 0;
+      overflow: hidden;
+    }
+    .video-container iframe {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    .video-tutorial .video-container { margin: 0 auto; }
+  </style>
+</head>
+<body class="lang-en">
+  <!-- Aurora-like Overlay -->
+  <div class="aurora-overlay">
+    <div class="aurora-shape aurora-shape1"></div>
+    <div class="aurora-shape aurora-shape2"></div>
+  </div>
+
+  <div class="container">
+    <!-- HEADER (Hero + Release Card) -->
+    <header class="fade-section">
+      <!-- Hero Text -->
+      <div class="hero-text">
+        <div class="title-with-flags">
+          <h1 id="heroTitle">Image Classifier ⭐</h1>
+          <div id="lang-toggler">
+            <button type="button" class="lang-toggle" data-lang="en">
+              <img src="https://flagcdn.com/24x18/gb.png" alt="English" />
+            </button>
+            <button type="button" class="lang-toggle" data-lang="es">
+              <img src="https://flagcdn.com/24x18/es.png" alt="Español" />
+            </button>
+          </div>
+        </div>
+        <p id="heroDescription"></p>
+      </div>
+
+      <!-- Release Card -->
+      <aside class="release-card">
+        <h2 id="releaseTitle">Latest Release</h2>
+        <div class="details">
+          <p style="margin-bottom: 0.3em;">
+            <strong><span id="versionText">Version:</span></strong> <span id="versionNumber">2.0</span>
+          </p>
+          <p style="text-align: left; font-size: 1rem; margin-bottom: 1em;">
+            <a id="changelogLink" href="changelog.html" style="color:#FFD700; text-decoration:none;">
+              📄 View Release History
+            </a>
+          </p>
+          <p style="margin-top:1em;"><strong id="whatsNewText">What's New:</strong></p>
+          <ul id="whatsNewList">
+            <li>Fixed Save Modified File behaviour and applied filter issues</li>
+          
+        </div>
+
+        <!-- Download & Donate -->
+        <a class="download-btn" id="downloadBtnText"
+           href="#" id="downloadLink"
+           download target="_blank" rel="noopener noreferrer">
+          Download Now
+        </a>
+        <div id="donate-button-container">
+          <div id="donate-button"></div>
+          <script src="https://www.paypalobjects.com/donate/sdk/donate-sdk.js" charset="UTF-8"></script>
+          <script>
+            PayPal.Donation.Button({
+              env: 'production',
+              hosted_button_id: 'F5NWZLWYG6Y6W',
+              image: {
+                src: 'https://pics.paypal.com/00/s/ZjE1ZTk5NGItMTRjOS00Y2Y2LTljZDMtMGQ0ODZmNzE2ZjI1/file.PNG',
+                alt: 'Donate with PayPal button',
+                title: 'PayPal - The safer, easier way to pay online!'
+              }
+            }).render('#donate-button');
+          </script>
+        </div>
+
+        <a id="avLink" href="#faqSection"
+           style="color:#ccc; display:block; margin-top:8px; font-size:0.85rem; text-align:center;">
+          Issues with antivirus warnings?
+        </a>
+        <p class="publish-date" id="publishDateText"
+           style="text-align:center; margin-top:8px;">
+          Published on: <span id="publishDate">February 02, 2026</span>
+        </p>
+        <div class="platform-indicator">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_logo_-_2012.svg"
+               alt="Windows Logo" />
+          <span>Windows</span>
+        </div>
+      </aside>
+    </header>
+
+    <!-- GALLERY -->
+    <section class="gallery fade-section">
+      <h2 class="section-title" id="galleryTitle">Discover Image Classifier</h2>
+      <div class="screenshot-grid" id="screenshotGrid">
+        <div class="grid-item" data-index="0"><img src="https://i.imgur.com/36R6FVt.jpeg" alt="Screenshot 1"></div>
+        <div class="grid-item" data-index="1"><img src="https://i.imgur.com/OTJS0i8.jpeg" alt="Screenshot 2"></div>
+        <div class="grid-item" data-index="2"><img src="https://i.imgur.com/0n8L8Ts.png" alt="Screenshot 3"></div>
+        <div class="grid-item" data-index="3"><img src="https://i.imgur.com/gTz4seZ.jpeg" alt="Screenshot 4"></div>
+        <div class="grid-item" data-index="4"><img src="https://i.imgur.com/mpoFaCv.jpeg" alt="Screenshot 5"></div>
+        <div class="grid-item" data-index="5"><img src="https://i.imgur.com/7qeq2mK.png" alt="Screenshot 6"></div>
+      </div>
+    </section>
+
+    <!-- VIDEO TUTORIAL -->
+    <section class="video-tutorial fade-section" id="videoTutorial">
+      <h2 class="section-title">Video Tutorial</h2>
+      <div class="video-container">
+        <iframe width="1160" height="652"
+                src="https://www.youtube.com/embed/yfYmeL_Mfko?si=ddfOlRqAVVcJkgPv"
+                title="YouTube video player" frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin" allowfullscreen>
+        </iframe>
+      </div>
+      <p class="obs-credit" id="obsCredit"></p>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq fade-section" id="faqSection">
+      <h2 class="section-title" id="faqTitle">FAQ: Bypassing Security Warnings</h2>
+      <p id="faqSubtitle"
+         style="text-align:center; font-size:1.1rem; opacity:0.85; margin-bottom:20px;">
+      </p>
+      <div class="faq-item">
+        <div class="faq-question" id="faqItem1Q"></div>
+        <div class="faq-answer" id="faqItem1A"></div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-question" id="faqItem2Q"></div>
+        <div class="faq-answer" id="faqItem2A"></div>
+      </div>
+    </section>
+
+    <!-- LIGHTBOX -->
+    <div class="lightbox" id="lightbox">
+      <span class="close-btn" id="closeBtn">&times;</span>
+      <span class="arrow-btn prev-btn" id="prevBtn">&#10094;</span>
+      <img id="lightboxImg" src="#" alt="Screenshot Full" />
+      <span class="arrow-btn next-btn" id="nextBtn">&#10095;</span>
+    </div>
+
+    <!-- FOOTER -->
+    <footer id="footerText">
+      © 2025 Image Classifier by Francisco Villanueva — All rights reserved.
+    </footer>
+  </div>
+
+  <script>
+    /***************************************************************
+     * SCROLL FADE-IN
+    ***************************************************************/
+    const fadeSections = document.querySelectorAll(".fade-section");
+    const observer = new IntersectionObserver((entries, obs) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add("visible");
+          obs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    fadeSections.forEach(s => observer.observe(s));
+
+    /***************************************************************
+     * LIGHTBOX LOGIC
+    ***************************************************************/
+    const grid = document.getElementById("screenshotGrid");
+    const lightbox = document.getElementById("lightbox");
+    const lbImg = document.getElementById("lightboxImg");
+    const items = Array.from(grid.querySelectorAll(".grid-item"));
+    let idx = 0;
+    items.forEach(item => {
+      item.addEventListener("click", () => {
+        idx = +item.dataset.index;
+        show(idx);
+        lightbox.classList.add("show");
+      });
+    });
+    function show(i) {
+      idx = (i + items.length) % items.length;
+      lbImg.src = items[idx].querySelector("img").src;
+    }
+    document.getElementById("closeBtn").onclick = ()=> lightbox.classList.remove("show");
+    document.getElementById("prevBtn").onclick = ()=> show(idx-1);
+    document.getElementById("nextBtn").onclick = ()=> show(idx+1);
+    lightbox.onclick = e => { if(e.target===lightbox) lightbox.classList.remove("show"); }
+    document.addEventListener("keydown", e => {
+      if (e.key==="Escape") lightbox.classList.remove("show");
+      if (e.key==="ArrowLeft") show(idx-1);
+      if (e.key==="ArrowRight") show(idx+1);
+    });
+
+    /***************************************************************
+     * LANGUAGE TOGGLER & TRANSLATIONS (4 cards)
+    ***************************************************************/
+    const translations = {
+      en: {
+        heroTitle: "Image Classifier ⭐",
+        heroDescription: `
+          <div class="feature-card-grid">
+            <div class="feature-card">
+              <h3>🌟  One-Click Favorites</h3>
+              <p>Mark Your Best Shots with a Click</p>
+            </div>
+            <div class="feature-card">
+              <h3>🎚️ Smart Filtering</h3>
+              <p>Organize Your Collection with Ease</p>
+            </div>
+            <div class="feature-card">
+              <h3>✏️ On-the-Fly Adjustments</h3>
+              <p>Quickly Edit Brightness & Rotation</p>
+            </div>
+            <div class="feature-card">
+              <h3>📤 Effortless Bulk Export</h3>
+              <p>Share Curated Favorites in Seconds</p>
+            </div>
+          </div>
+        `,
+        releaseTitle: "Latest Release",
+        changelogText: "📄 View Release History",
+        versionText: "Version:",
+        whatsNewText: "What's New:",
+        downloadBtnText: "Download Now",
+        publishDateText: "Published on: ",
+        galleryTitle: "Discover Image Classifier",
+        footerText: "© 2025 Image Classifier by Francisco Villanueva — All rights reserved.",
+        faqTitle: "FAQ: Bypassing Security Warnings",
+        faqSubtitle: "Quick answers on why antivirus or Windows might complain",
+        faqItem1Q: "Why does my antivirus or Windows SmartScreen say it's unsafe?",
+        faqItem1A: `Because this app is <strong>not digitally signed</strong>, some antivirus programs or Windows will mark it as "Unknown Publisher." Rest assured, it's a harmless personal project.`,
+        faqItem2Q: "How can I run it anyway?",
+        faqItem2A: `In Windows, click "More info" then "Run anyway" if SmartScreen appears. For antivirus, add it to exceptions or whitelist folders to bypass warnings.`,
+        avLinkText: '<span style="color:#ff6666;"><u>Issues with antivirus warnings?</u></span>',
+        videoCreditText: `Recorded with <a href="https://obsproject.com/" target="_blank" rel="noopener">OBS</a> &amp; edited with <a href="https://clipchamp.com/" target="_blank" rel="noopener">Clipchamp</a>.`
+      },
+      es: {
+        heroTitle: "Clasificador de Imágenes ⭐",
+        heroDescription: `
+          <div class="feature-card-grid">
+            <div class="feature-card">
+              <h3>🌟 Favoritos con un Clic</h3> 
+              <p>Marca tus mejores fotos con un click</p>
+            </div>
+            <div class="feature-card">
+              <h3>🎚️ Filtrado Inteligente</h3>
+              <p>Organiza tu colección con facilidad</p>
+            </div>
+            <div class="feature-card">
+              <h3>✏️ Ajustes al Vuelo</h3>
+              <p>Edita Brillo y Rotación Rápidamente</p>
+            </div>
+            <div class="feature-card">
+              <h3>📤 Exportación Masiva️</h3>
+              <p>Comparte favoritas en Segundos</p>
+            </div>
+          </div>
+        `,
+        releaseTitle: "Última Versión",
+        changelogText: "📄 Historial de cambios",
+        versionText: "Versión:",
+        whatsNewText: "Novedades:",
+        downloadBtnText: "Descargar",
+        publishDateText: "Publicado el: ",
+        galleryTitle: "Descubre el Clasificador de Imágenes",
+        footerText: "© 2025 Clasificador de Imágenes por Francisco Villanueva — Todos los derechos reservados.",
+        faqTitle: "Preguntas Frecuentes: Alertas de Seguridad",
+        faqSubtitle: "Respuestas rápidas sobre por qué tu antivirus o Windows se quejan",
+        faqItem1Q: "¿Por qué mi antivirus o Windows SmartScreen lo marca como inseguro?",
+        faqItem1A: `Porque esta app <strong>no está firmada digitalmente</strong>, algunos antivirus o Windows la marcan como "Editor desconocido". Es un proyecto inofensivo.`,
+        faqItem2Q: "¿Cómo puedo ejecutarlo de todas formas?",
+        faqItem2A: `Haz clic en "Más información" y luego "Ejecutar de todas formas" en SmartScreen. O agrégalo a excepciones de tu antivirus para saltar las advertencias.`,
+        avLinkText: '<span style="color:#ff6666;"><u>¿Problemas con avisos del antivirus?</u></span>',
+        videoCreditText: `Grabado con <a href="https://obsproject.com/" target="_blank" rel="noopener">OBS</a> y editado con <a href="https://clipchamp.com/" target="_blank" rel="noopener">Clipchamp</a>.`
+      }
+    };
+
+    function updateLanguage(lang) {
+      document.body.classList.remove("lang-en", "lang-es");
+      document.body.classList.add("lang-" + lang);
+    
+      document.getElementById("heroTitle").innerHTML = translations[lang].heroTitle;
+      document.getElementById("heroDescription").innerHTML = translations[lang].heroDescription;
+      document.getElementById("releaseTitle").innerHTML = translations[lang].releaseTitle;
+      document.getElementById("versionText").innerHTML = translations[lang].versionText;
+      document.getElementById("whatsNewText").innerHTML = translations[lang].whatsNewText;
+      document.getElementById("downloadBtnText").innerHTML = translations[lang].downloadBtnText;
+      document.getElementById("publishDateText").innerHTML = translations[lang].publishDateText + document.getElementById("publishDate").innerHTML;
+      document.getElementById("galleryTitle").innerHTML = translations[lang].galleryTitle;
+      document.getElementById("footerText").innerHTML = translations[lang].footerText;
+      document.getElementById("faqTitle").innerHTML = translations[lang].faqTitle;
+      document.getElementById("faqSubtitle").innerHTML = translations[lang].faqSubtitle;
+      document.getElementById("faqItem1Q").innerHTML = translations[lang].faqItem1Q;
+      document.getElementById("faqItem1A").innerHTML = translations[lang].faqItem1A;
+      document.getElementById("faqItem2Q").innerHTML = translations[lang].faqItem2Q;
+      document.getElementById("faqItem2A").innerHTML = translations[lang].faqItem2A;
+      document.getElementById("avLink").innerHTML = translations[lang].avLinkText;
+      document.getElementById("obsCredit").innerHTML = translations[lang].videoCreditText;
+      document.getElementById("changelogLink").innerHTML = translations[lang].changelogText;
+    }
+    
+    // Detect browser language and apply on load
+    const userLang = navigator.language || navigator.userLanguage;
+    const initialLang = userLang.startsWith("es") ? "es" : "en";
+    updateLanguage(initialLang);
+    
+    // Language toggle buttons
+    document.querySelectorAll(".lang-toggle")
+      .forEach(btn =>
+        btn.addEventListener("click", () => updateLanguage(btn.dataset.lang))
+      );
+  </script>
+</body>
+</html>

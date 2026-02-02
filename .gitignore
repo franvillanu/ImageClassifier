@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+venv/
+.venv/
+env/
+
+# Build & distribution
+build/
+dist/
+OLD/
+installer/*.exe
+installer/*.cer
+Output/
+*.manifest
+
+# Secrets (never commit)
+*.pfx
+*.pem
+imageclassifier_cert.cer
+installer/.pfx_password
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+desktop.ini
+Thumbs.db
+*.url
+
+# Logs & crash reports
+error_log_*.txt
+*.log
+
+# Archives (build artifacts)
+*.zip
+
+# PyInstaller (keep .spec in build/ if you use it)
+*.spec
+!build/*.spec
