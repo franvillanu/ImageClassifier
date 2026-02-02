@@ -154,7 +154,12 @@ if "%CREATE_GITHUB_RELEASE%"=="1" (
   echo    • GitHub Release: Created automatically
 )
 echo.
-pause
+REM Skip pause if CI or non-interactive mode
+if not defined CI (
+  if not "%NON_INTERACTIVE%"=="1" (
+    pause
+  )
+)
 goto :eof
 
 :error
