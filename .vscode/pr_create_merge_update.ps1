@@ -108,7 +108,20 @@ $pr = ($url -split '/')[ -1 ]
 
 gh pr merge $pr --squash --delete-branch
 
+# Check for uncommitted changes and stash them before switching branches
+$uncommitted = git status --porcelain
+if ($uncommitted) {
+  Write-Host ''
+  Write-Host "⚠️  Stashing uncommitted changes before switching to main..." -ForegroundColor Yellow
+  git stash push -m "Auto-stash before PR merge checkout"
+}
+
 git checkout main
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Failed to checkout main. Uncommitted changes may need to be committed or stashed manually."
+  exit 1
+}
+
 git pull
 
 Write-Host ''
