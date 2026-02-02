@@ -448,8 +448,8 @@
           </p>
           <p style="margin-top:1em;"><strong id="whatsNewText">What's New:</strong></p>
           <ul id="whatsNewList">
-            <li>Fixed Save Modified File behaviour and applied filter issues</li>
-          
+            <li id="whatsNewItem1" data-en="Fixed Save Modified File behaviour and applied filter issues" data-es="Corregido el comportamiento de Guardar Archivos Modificados y problemas con filtros aplicados">Fixed Save Modified File behaviour and applied filter issues</li>
+          </ul>
         </div>
 
         <!-- Download & Donate -->
@@ -480,7 +480,7 @@
         </a>
         <p class="publish-date" id="publishDateText"
            style="text-align:center; margin-top:8px;">
-          Published on: <span id="publishDate">February 02, 2026</span>
+          Published on: <span id="publishDate" data-en="February 2, 2026" data-es="2 de febrero de 2026">February 2, 2026</span>
         </p>
         <div class="platform-indicator">
           <img src="https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_logo_-_2012.svg"
@@ -685,7 +685,13 @@
       document.getElementById("versionText").innerHTML = translations[lang].versionText;
       document.getElementById("whatsNewText").innerHTML = translations[lang].whatsNewText;
       document.getElementById("downloadBtnText").innerHTML = translations[lang].downloadBtnText;
-      document.getElementById("publishDateText").innerHTML = translations[lang].publishDateText + document.getElementById("publishDate").innerHTML;
+      // Update publish date with localized date
+      const publishDateEl = document.getElementById("publishDate");
+      if (publishDateEl) {
+        const localizedDate = publishDateEl.getAttribute(`data-${lang}`) || publishDateEl.innerHTML;
+        publishDateEl.innerHTML = localizedDate;
+      }
+      document.getElementById("publishDateText").innerHTML = translations[lang].publishDateText + (publishDateEl ? publishDateEl.innerHTML : "");
       document.getElementById("galleryTitle").innerHTML = translations[lang].galleryTitle;
       document.getElementById("footerText").innerHTML = translations[lang].footerText;
       document.getElementById("faqTitle").innerHTML = translations[lang].faqTitle;
@@ -697,6 +703,12 @@
       document.getElementById("avLink").innerHTML = translations[lang].avLinkText;
       document.getElementById("obsCredit").innerHTML = translations[lang].videoCreditText;
       document.getElementById("changelogLink").innerHTML = translations[lang].changelogText;
+      
+      // Update changelog items (What's New list) with localized text
+      document.querySelectorAll('#whatsNewList li[id^="whatsNewItem"]').forEach(li => {
+        const localizedText = li.getAttribute(`data-${lang}`) || li.innerHTML;
+        li.innerHTML = localizedText;
+      });
     }
     
     // Detect browser language and apply on load
