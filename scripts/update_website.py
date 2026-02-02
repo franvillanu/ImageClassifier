@@ -15,25 +15,25 @@ INDEX_HTML = REPO_ROOT / "docs" / "index.html"
 STAR_ICO = REPO_ROOT / "star.ico"
 
 
-def parse_version() -> tuple[str, str]:
-    """Read version from version.txt and return (short, full) e.g. ('2.0', '2.0.0.0')."""
+def parse_version() -> str:
+    """Read version from version.txt and return 3-digit version (major.minor.patch) e.g. '2.0.1'."""
     text = VERSION_TXT.read_text(encoding="utf-8")
     m = re.search(r"filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)", text)
     if not m:
         raise SystemExit("[ERROR] Could not parse filevers from version.txt")
-    major, minor, build, rev = m.groups()
-    return f"{major}.{minor}", f"{major}.{minor}.{build}.{rev}"
+    major, minor, build, _rev = m.groups()
+    return f"{major}.{minor}.{build}"
 
 
 def get_latest_changelog_entry() -> tuple[str, str, list[tuple[str, str]]]:
     """Extract latest version, date, and changelog items (EN, ES) from changelog.html."""
     html = CHANGELOG_HTML.read_text(encoding="utf-8")
     
-    # Find first version block
-    pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
+    # Find first version block (v2.0 or v2.0.1)
+    pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+(?:\.\d+)?)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
     match = re.search(pattern, html, re.DOTALL)
     if not match:
-        return ("2.0", "02/02/2026", [("Bug fixes and improvements", "Correcciones y mejoras")])
+        return ("2.0.1", "02/02/2026", [("Bug fixes and improvements", "Correcciones y mejoras")])
     
     version = match.group(1)
     date_str = match.group(2)
@@ -70,12 +70,12 @@ def format_date_for_index(date_str: str) -> tuple[str, str]:
         return date_str, date_str
 
 
-def update_index_html(version_short: str, version_full: str, changelog_date: str, changelog_items: list[tuple[str, str]]) -> None:
+def update_index_html(version: str, changelog_date: str, changelog_items: list[tuple[str, str]]) -> None:
     """Update index.html with version info and changelog."""
     html = INDEX_HTML.read_text(encoding="utf-8")
     
-    # Update version number
-    html = re.sub(r'<span id="versionNumber">[^<]+</span>', f'<span id="versionNumber">{version_short}</span>', html)
+    # Update version number (3 digits: major.minor.patch)
+    html = re.sub(r'<span id="versionNumber">[^<]+</span>', f'<span id="versionNumber">{version}</span>', html)
     
     # Update publish date (with data-en and data-es for localization)
     en_date, es_date = format_date_for_index(changelog_date)
@@ -85,9 +85,8 @@ def update_index_html(version_short: str, version_full: str, changelog_date: str
         html
     )
     
-    # Update download link to GitHub Releases
-    # Format: https://github.com/franvillanu/ImageClassifier/releases/download/v{VERSION_SHORT}/ImageClassifierSetup_v{VERSION_FULL}.exe
-    download_url = f"https://github.com/franvillanu/ImageClassifier/releases/download/v{version_short}/ImageClassifierSetup_v{version_full}.exe"
+    # Update download link to GitHub Releases (3-digit version everywhere)
+    download_url = f"https://github.com/franvillanu/ImageClassifier/releases/download/v{version}/ImageClassifierSetup_v{version}.exe"
     html = re.sub(
         r'(<a[^>]*id="downloadLink"[^>]*href=")[^"]*(")',
         f'\\g<1>{download_url}\\g<2>',
@@ -131,14 +130,14 @@ def main() -> int:
     if not CHANGELOG_HTML.exists():
         print(f"[WARNING] changelog.html not found: {CHANGELOG_HTML}", file=sys.stderr)
     
-    version_short, version_full = parse_version()
+    version = parse_version()
     changelog_version, changelog_date, changelog_items = get_latest_changelog_entry()
     
-    print(f"Version: {version_short} (full: {version_full})")
+    print(f"Version: {version}")
     print(f"Latest changelog: v{changelog_version} ({changelog_date})")
     print(f"Changelog items: {len(changelog_items)}")
     
-    update_index_html(version_short, version_full, changelog_date, changelog_items)
+    update_index_html(version, changelog_date, changelog_items)
     copy_star_ico()
     
     print("[SUCCESS] Website files updated")

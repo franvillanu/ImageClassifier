@@ -28,8 +28,9 @@ def parse_version_from_version_txt(path: Path) -> tuple[int, int, int, int]:
 
 
 def bump(major: int, minor: int, build: int, rev: int, kind: str) -> tuple[int, int, int, int]:
+    # 3-digit version: major.minor.patch; patch = build, rev stays 0
     if kind == "patch":
-        return (major, minor, build, rev + 1)
+        return (major, minor, build + 1, 0)
     if kind == "minor":
         return (major, minor + 1, 0, 0)
     if kind == "major":

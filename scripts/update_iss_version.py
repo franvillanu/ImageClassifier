@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Sync MyAppVersion in Image_Classifier.iss from version.txt (filevers=) so the
-installer output filename uses the full version (e.g. ImageClassifierSetup_v1.9.0.4.exe).
+installer output filename uses the 3-digit version (e.g. ImageClassifierSetup_v2.0.1.exe).
 Run before ISCC in Release.bat.
 """
 import re
@@ -19,7 +19,9 @@ def main() -> int:
     if not m:
         print("[ERROR] Could not parse filevers from version.txt", file=sys.stderr)
         return 1
-    ver_str = ".".join(m.groups())
+    # 3-digit version: major.minor.build (revision ignored for display)
+    major, minor, build, _rev = m.groups()
+    ver_str = f"{major}.{minor}.{build}"
 
     iss_text = ISS_FILE.read_text(encoding="utf-8")
     # Replace the version string in MyAppVersion definition
