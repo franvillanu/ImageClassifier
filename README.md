@@ -114,6 +114,20 @@ See **[docs/BUILD.md](docs/BUILD.md)** for prerequisites, steps, and where to pu
 
 The website files are in `docs/` (index.html, changelog.html). The release process automatically updates these files.
 
+### Local Website Preview
+
+Preview the website locally:
+
+```bash
+npm run dev
+```
+
+This starts a local server at `http://localhost:8787` and opens it in your browser. The server serves files from the `docs/` folder.
+
+**Commands:**
+- `npm run dev` - Start server and open browser
+- `npm run dev:no-open` - Start server without opening browser
+
 ### GitHub Repository Setup
 
 1. **Create the repository on GitHub:**
