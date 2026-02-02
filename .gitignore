@@ -31,6 +31,8 @@ installer/.pfx_password
 .vscode/
 # Exception: track the PR automation script
 !.vscode/pr_create_merge_update.ps1
+!.vscode/KEYBINDING-PR-TASK.md
+!.vscode/tasks.json
 *.swp
 *.swo
 .DS_Store
