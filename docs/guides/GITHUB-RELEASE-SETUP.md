@@ -34,14 +34,38 @@ py -m pip install requests
 
 You have two options:
 
-**Option A: Environment Variable (Recommended)**
-- Set `GITHUB_TOKEN` environment variable with your token value
-- This works system-wide and is more secure
+**Option A: Environment Variable (Recommended for Windows)**
 
-**Option B: Local File**
-- Create a file named `.github_token` in the repository root
+**Windows 10/11 (GUI Method):**
+1. Press `Win + X` and select "System"
+2. Click "Advanced system settings" (or search for it)
+3. Click "Environment Variables"
+4. Under "User variables", click "New"
+5. Variable name: `GITHUB_TOKEN`
+6. Variable value: `your_token_here` (paste your token)
+7. Click OK on all dialogs
+
+**Windows (Command Line Method):**
+```powershell
+# For current session only (temporary)
+$env:GITHUB_TOKEN = "your_token_here"
+
+# For permanent (user-level, persists after restart)
+[System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "your_token_here", "User")
+```
+
+**Option B: Local File (Easier, but less secure)**
+- Create a file named `.github_token` in the repository root (`C:\Users\Fran\Documents\repos\ImageClassifier\.github_token`)
 - Put your token as a single line (no quotes, no spaces)
+- Example content:
+  ```
+  ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  ```
 - This file is gitignored and won't be committed
+
+**Which option to choose?**
+- **Environment Variable**: More secure, works system-wide, persists across terminal sessions
+- **Local File**: Easier to set up, but file could be accidentally deleted or accessed
 
 ## Usage
 
@@ -78,6 +102,7 @@ py scripts/create_github_release.py
 ### "GitHub token required"
 - Make sure you've set `GITHUB_TOKEN` environment variable or created `.github_token` file
 - Verify the token has `repo` scope
+- **After setting environment variable**: Close and reopen your terminal/PowerShell window
 
 ### "requests library not installed"
 ```bash
@@ -96,12 +121,23 @@ py -m pip install requests
 - If you run the script twice, the asset upload will be skipped (warning only)
 - The release will still be updated with new notes if changelog changed
 
+### Testing Your Token Setup
+
+To verify your token is set correctly, open a **new** PowerShell window and run:
+
+```powershell
+echo $env:GITHUB_TOKEN
+```
+
+If it shows your token (or at least something), it's working. If it's empty, the environment variable wasn't set correctly.
+
 ## Security Notes
 
 - **Never commit** `.github_token` file (it's gitignored)
 - **Never share** your GitHub token
 - Tokens with `repo` scope have full access to your repositories
 - You can revoke tokens at any time from GitHub settings
+- Environment variables are more secure than files
 
 ## Integration with Website
 
@@ -111,3 +147,5 @@ https://github.com/franvillanu/ImageClassifier/releases/download/v{VERSION}/Imag
 ```
 
 This is updated automatically when you run `scripts/update_website.py` (which runs during release).
+
+**Note:** Cloudflare is only for hosting your website. The GitHub token is set **locally on your Windows machine** where you run `Release.bat`.

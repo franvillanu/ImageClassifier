@@ -40,19 +40,13 @@ set "VER_SHORT=%VER_MAJOR%.%VER_MINOR%"
 echo Detected full version: %VER_STR%
 echo Using short version: %VER_SHORT%
 
-REM --- 2.5) Optional: Update changelog.html and sync website ---
+REM --- 2.5) Update website with current version (always sync, even if changelog not updated) ---
 echo.
 set "CHANGELOG_UPDATED=0"
-set /p UPDATE_CHANGELOG="Update changelog.html? (y/N): "
-if /i "%UPDATE_CHANGELOG%"=="y" (
-  py "%~dp0scripts\update_changelog.py"
-  if errorlevel 1 (
-    echo [WARNING] Changelog update failed, continuing anyway...
-  ) else (
-    set "CHANGELOG_UPDATED=1"
-    REM Sync website files (index.html) with latest version/changelog
-    py "%~dp0scripts\update_website.py"
-  )
+REM Always update website to sync version number and download link
+py "%~dp0scripts\update_website.py"
+if errorlevel 1 (
+  echo [WARNING] Website update failed, continuing anyway...
 )
 
 REM --- 3) Build & sign the EXE (pass VER_STR if needed) ---
@@ -122,25 +116,32 @@ if errorlevel 1 (
   goto :error
 )
 
-REM --- 6) Copy changelog.html to Output if it was updated ---
-if "%CHANGELOG_UPDATED%"=="1" (
-  if exist "docs\changelog.html" (
-    copy /Y "docs\changelog.html" "Output\changelog.html" >nul
-    echo [INFO] Changelog copied to Output\changelog.html
-  )
+REM --- 6) Copy changelog.html to Output (always copy latest version) ---
+if exist "docs\changelog.html" (
+  copy /Y "docs\changelog.html" "Output\changelog.html" >nul
+  echo [INFO] Changelog copied to Output\changelog.html
 )
 
-REM --- 7) Optional: Create GitHub Release ---
+REM --- 7) Automatically create GitHub Release if token is available ---
 echo.
 set "CREATE_GITHUB_RELEASE=0"
-set /p CREATE_GITHUB_RELEASE="Create GitHub Release? (y/N): "
-if /i "%CREATE_GITHUB_RELEASE%"=="y" (
-  echo.
+REM Check if GitHub token exists (env var or file)
+if defined GITHUB_TOKEN (
+  set "CREATE_GITHUB_RELEASE=1"
+) else if exist "%~dp0.github_token" (
+  set "CREATE_GITHUB_RELEASE=1"
+)
+if "%CREATE_GITHUB_RELEASE%"=="1" (
   echo [4/4] Creating GitHub Release...
   py "%~dp0scripts\create_github_release.py"
   if errorlevel 1 (
     echo [WARNING] GitHub Release creation failed, but installer is ready.
+  ) else (
+    echo [SUCCESS] GitHub Release created successfully!
   )
+) else (
+  echo [INFO] Skipping GitHub Release (no token found).
+  echo        Set GITHUB_TOKEN env var or create .github_token file to enable.
 )
 
 REM --- 8) Success! ---
@@ -148,8 +149,9 @@ echo.
 echo [SUCCESS] Release complete!
 echo    • EXE:       installer\Image Classifier.exe
 echo    • Installer: Output\!INST_NAME!
-if "%CHANGELOG_UPDATED%"=="1" (
-  echo    • Changelog: Output\changelog.html
+echo    • Changelog: Output\changelog.html
+if "%CREATE_GITHUB_RELEASE%"=="1" (
+  echo    • GitHub Release: Created automatically
 )
 echo.
 pause
