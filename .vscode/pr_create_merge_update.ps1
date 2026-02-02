@@ -20,6 +20,7 @@ if ($branch -eq 'main') {
 
 # Check if version changed (3-digit version: major.minor.patch)
 $versionChanged = $false
+$currentVersion = ''
 if (Test-Path 'version.txt') {
   $versionContent = Get-Content 'version.txt' -Raw
   if ($versionContent -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
@@ -41,8 +42,26 @@ if (Test-Path 'version.txt') {
   }
 }
 
-# If version changed, run Release.bat before creating PR
-if ($versionChanged) {
+# If no GitHub release exists for current version, we must run Release.bat first (build installer)
+$releaseNeeded = $false
+if ($currentVersion) {
+  $tag = "v$currentVersion"
+  $oldErr = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $null = gh release view $tag 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $releaseNeeded = $true
+      Write-Host ''
+      Write-Host "⚠️  No GitHub Release $tag yet → will run Release.bat to build installer first" -ForegroundColor Yellow
+    }
+  } finally {
+    $ErrorActionPreference = $oldErr
+  }
+}
+
+# Run Release.bat when version changed OR when release for current version is missing
+if ($versionChanged -or $releaseNeeded) {
   Write-Host ''
   Write-Host "🚀 Running Release.bat to build installer and create GitHub Release..." -ForegroundColor Cyan
   
@@ -97,12 +116,12 @@ $bodyLines = @(
   '- [ ] '
 )
 
-# Add release note if version changed
-if ($versionChanged) {
+# Add release note if we ran a release build (version changed or release was missing)
+if ($versionChanged -or $releaseNeeded) {
   $bodyLines += ''
   $bodyLines += '## Release'
-  $bodyLines += "- ✅ Version updated to $currentVersion"
-  $bodyLines += "- ✅ Installer built and GitHub Release created automatically"
+  $bodyLines += "- ✅ Installer built (v$currentVersion)"
+  $bodyLines += "- ✅ GitHub Release will be created after merge"
 }
 
 $body = $bodyLines -join "`n"
@@ -157,10 +176,16 @@ if (Test-Path 'version.txt') {
 $releaseExists = $false
 if ($currentVersion) {
   $tag = "v$currentVersion"
-  $releaseCheck = gh release view $tag 2>$null
-  if ($LASTEXITCODE -eq 0) {
-    $releaseExists = $true
-    Write-Host "✅ GitHub Release $tag already exists" -ForegroundColor Green
+  $oldErr = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $null = gh release view $tag 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $releaseExists = $true
+      Write-Host "✅ GitHub Release $tag already exists" -ForegroundColor Green
+    }
+  } finally {
+    $ErrorActionPreference = $oldErr
   }
 }
 
