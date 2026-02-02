@@ -62,8 +62,22 @@ if ($versionChanged) {
     } else {
       Write-Host "✅ Release build completed!" -ForegroundColor Green
       
+      # Reset .iss file if it was modified (build process updates version, but we don't commit it)
+      $issStatus = git status --porcelain -- Image_Classifier.iss
+      if ($issStatus) {
+        git checkout -- Image_Classifier.iss
+        Write-Host "✅ Reset Image_Classifier.iss (build artifact)" -ForegroundColor Gray
+      }
+      
       # Stage all website and changelog files updated by Release.bat
-      git add docs/index.html docs/changelog.html 2>$null
+      # Temporarily disable error action to handle git warnings gracefully
+      $oldErrorAction = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        git add docs/index.html docs/changelog.html 2>&1 | Out-Null
+      } finally {
+        $ErrorActionPreference = $oldErrorAction
+      }
       
       # If there are changes, commit them
       $status = git status --porcelain -- docs/
@@ -135,11 +149,40 @@ Write-Host "PR creado: $url"
 Write-Host 'Mergeado a main ✅'
 Write-Host 'Branch local actualizado'
 
-# If version changed, create GitHub Release AFTER merge
-if ($versionChanged) {
-  $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
-  Write-Host ''
-  Write-Host "🚀 Creating GitHub Release for v$shortVersion..." -ForegroundColor Cyan
+# Always check if GitHub Release exists for current version and create if missing
+# Get current version from main branch
+$currentVersion = ''
+$currentVersionShort = ''
+if (Test-Path 'version.txt') {
+  $versionContent = Get-Content 'version.txt' -Raw
+  if ($versionContent -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
+    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
+    $currentVersionShort = "$($matches[1]).$($matches[2])"
+  }
+}
+
+# Check if release exists for current version
+$releaseExists = $false
+if ($currentVersionShort) {
+  $tag = "v$currentVersionShort"
+  $releaseCheck = gh release view $tag 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    $releaseExists = $true
+    Write-Host "✅ GitHub Release $tag already exists" -ForegroundColor Green
+  }
+}
+
+# Create GitHub Release if version changed OR if release doesn't exist
+if ($versionChanged -or (-not $releaseExists -and $currentVersionShort)) {
+  if ($versionChanged) {
+    $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
+    Write-Host ''
+    Write-Host "🚀 Creating GitHub Release for v$shortVersion (version changed)..." -ForegroundColor Cyan
+  } else {
+    $shortVersion = $currentVersionShort
+    Write-Host ''
+    Write-Host "🚀 Creating GitHub Release for v$shortVersion (release missing)..." -ForegroundColor Cyan
+  }
   
   # Check if GitHub token exists
   $hasToken = $false

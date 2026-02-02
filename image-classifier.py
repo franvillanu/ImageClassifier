@@ -244,7 +244,20 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             lambda pix, id=self.current_load_id:
                 self.onImageLoaded(pix, reset_zoom, preserve_zoom, id)
         )
-        worker.signals.error.connect(lambda err: print("Error loading image:", err))
+        # Show user-friendly error message instead of silent print
+        def handle_error(err):
+            window = self.window()
+            if hasattr(window, 'show_custom_dialog'):
+                lang = getattr(window, 'current_language', 'en')
+                if lang == 'es':
+                    msg = f"No se pudo cargar la imagen:\n{err}"
+                else:
+                    msg = f"Failed to load image:\n{err}"
+                window.show_custom_dialog(msg, icon_type="error", buttons="ok")
+            else:
+                # Fallback if dialog method not available
+                print(f"Error loading image: {err}")
+        worker.signals.error.connect(handle_error)
         QThreadPool.globalInstance().start(worker)
         self.loader = worker
 
