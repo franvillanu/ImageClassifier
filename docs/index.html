@@ -320,6 +320,11 @@
       overflow: hidden;
       cursor: pointer;
       transition: transform 0.3s;
+      min-height: 200px;
+      background-color: #161b22;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .grid-item:hover { transform: scale(1.02); }
     .grid-item img {
@@ -327,6 +332,7 @@
       height: auto;
       display: block;
       object-fit: cover;
+      min-height: 200px;
     }
     .obs-credit {
       margin-top: 8px;
@@ -685,13 +691,32 @@
       document.getElementById("versionText").innerHTML = translations[lang].versionText;
       document.getElementById("whatsNewText").innerHTML = translations[lang].whatsNewText;
       document.getElementById("downloadBtnText").innerHTML = translations[lang].downloadBtnText;
-      // Update publish date with localized date
+      // Update publish date with localized date (preserve the span element)
       const publishDateEl = document.getElementById("publishDate");
       if (publishDateEl) {
-        const localizedDate = publishDateEl.getAttribute(`data-${lang}`) || publishDateEl.innerHTML;
-        publishDateEl.innerHTML = localizedDate;
+        const localizedDate = publishDateEl.getAttribute(`data-${lang}`) || publishDateEl.textContent;
+        publishDateEl.textContent = localizedDate;
       }
-      document.getElementById("publishDateText").innerHTML = translations[lang].publishDateText + (publishDateEl ? publishDateEl.innerHTML : "");
+      // Update the label text only (preserve the span structure)
+      const publishDateTextEl = document.getElementById("publishDateText");
+      if (publishDateTextEl) {
+        // Replace only the text content before the span, keep the span intact
+        const labelText = translations[lang].publishDateText;
+        // Find text node before span
+        let foundTextNode = false;
+        for (let i = 0; i < publishDateTextEl.childNodes.length; i++) {
+          const node = publishDateTextEl.childNodes[i];
+          if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith("Published")) {
+            node.textContent = labelText + " ";
+            foundTextNode = true;
+            break;
+          }
+        }
+        // If no text node found, insert one before the span
+        if (!foundTextNode && publishDateEl) {
+          publishDateTextEl.insertBefore(document.createTextNode(labelText + " "), publishDateEl);
+        }
+      }
       document.getElementById("galleryTitle").innerHTML = translations[lang].galleryTitle;
       document.getElementById("footerText").innerHTML = translations[lang].footerText;
       document.getElementById("faqTitle").innerHTML = translations[lang].faqTitle;
