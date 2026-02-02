@@ -32,3 +32,4 @@ jobs:
           projectName: imageclassifier
           directory: docs
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: '3'

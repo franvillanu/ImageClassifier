@@ -320,6 +320,11 @@
       overflow: hidden;
       cursor: pointer;
       transition: transform 0.3s;
+      min-height: 200px;
+      background-color: #161b22;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .grid-item:hover { transform: scale(1.02); }
     .grid-item img {
@@ -327,6 +332,7 @@
       height: auto;
       display: block;
       object-fit: cover;
+      min-height: 200px;
     }
     .obs-credit {
       margin-top: 8px;
@@ -448,8 +454,8 @@
           </p>
           <p style="margin-top:1em;"><strong id="whatsNewText">What's New:</strong></p>
           <ul id="whatsNewList">
-            <li>Fixed Save Modified File behaviour and applied filter issues</li>
-          
+            <li id="whatsNewItem1" data-en="Fixed Save Copy of Modified File behaviour while applied filters were set" data-es="Corregido el comportamiento de Guardar Copia de Archivo Modificado cuando los filtros estaban aplicados">Fixed Save Copy of Modified File behaviour while applied filters were set</li>
+          </ul>
         </div>
 
         <!-- Download & Donate -->
@@ -480,7 +486,7 @@
         </a>
         <p class="publish-date" id="publishDateText"
            style="text-align:center; margin-top:8px;">
-          Published on: <span id="publishDate">February 02, 2026</span>
+          Published on: <span id="publishDate" data-en="February 2, 2026" data-es="2 de febrero de 2026">February 2, 2026</span>
         </p>
         <div class="platform-indicator">
           <img src="https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_logo_-_2012.svg"
@@ -494,12 +500,12 @@
     <section class="gallery fade-section">
       <h2 class="section-title" id="galleryTitle">Discover Image Classifier</h2>
       <div class="screenshot-grid" id="screenshotGrid">
-        <div class="grid-item" data-index="0"><img src="https://i.imgur.com/36R6FVt.jpeg" alt="Screenshot 1"></div>
-        <div class="grid-item" data-index="1"><img src="https://i.imgur.com/OTJS0i8.jpeg" alt="Screenshot 2"></div>
-        <div class="grid-item" data-index="2"><img src="https://i.imgur.com/0n8L8Ts.png" alt="Screenshot 3"></div>
-        <div class="grid-item" data-index="3"><img src="https://i.imgur.com/gTz4seZ.jpeg" alt="Screenshot 4"></div>
-        <div class="grid-item" data-index="4"><img src="https://i.imgur.com/mpoFaCv.jpeg" alt="Screenshot 5"></div>
-        <div class="grid-item" data-index="5"><img src="https://i.imgur.com/7qeq2mK.png" alt="Screenshot 6"></div>
+        <div class="grid-item" data-index="0"><img src="screenshots/screenshot1.jpeg" alt="Screenshot 1"></div>
+        <div class="grid-item" data-index="1"><img src="screenshots/screenshot2.jpeg" alt="Screenshot 2"></div>
+        <div class="grid-item" data-index="2"><img src="screenshots/screenshot3.png" alt="Screenshot 3"></div>
+        <div class="grid-item" data-index="3"><img src="screenshots/screenshot4.jpeg" alt="Screenshot 4"></div>
+        <div class="grid-item" data-index="4"><img src="screenshots/screenshot5.jpeg" alt="Screenshot 5"></div>
+        <div class="grid-item" data-index="5"><img src="screenshots/screenshot6.png" alt="Screenshot 6"></div>
       </div>
     </section>
 
@@ -676,6 +682,9 @@
     };
 
     function updateLanguage(lang) {
+      // Store language preference in localStorage
+      localStorage.setItem('imageClassifierLang', lang);
+      
       document.body.classList.remove("lang-en", "lang-es");
       document.body.classList.add("lang-" + lang);
     
@@ -685,7 +694,32 @@
       document.getElementById("versionText").innerHTML = translations[lang].versionText;
       document.getElementById("whatsNewText").innerHTML = translations[lang].whatsNewText;
       document.getElementById("downloadBtnText").innerHTML = translations[lang].downloadBtnText;
-      document.getElementById("publishDateText").innerHTML = translations[lang].publishDateText + document.getElementById("publishDate").innerHTML;
+      // Update publish date with localized date (preserve the span element)
+      const publishDateEl = document.getElementById("publishDate");
+      if (publishDateEl) {
+        const localizedDate = publishDateEl.getAttribute(`data-${lang}`) || publishDateEl.textContent;
+        publishDateEl.textContent = localizedDate;
+      }
+      // Update the label text only (preserve the span structure)
+      const publishDateTextEl = document.getElementById("publishDateText");
+      if (publishDateTextEl) {
+        // Replace only the text content before the span, keep the span intact
+        const labelText = translations[lang].publishDateText;
+        // Find text node before span
+        let foundTextNode = false;
+        for (let i = 0; i < publishDateTextEl.childNodes.length; i++) {
+          const node = publishDateTextEl.childNodes[i];
+          if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith("Published")) {
+            node.textContent = labelText + " ";
+            foundTextNode = true;
+            break;
+          }
+        }
+        // If no text node found, insert one before the span
+        if (!foundTextNode && publishDateEl) {
+          publishDateTextEl.insertBefore(document.createTextNode(labelText + " "), publishDateEl);
+        }
+      }
       document.getElementById("galleryTitle").innerHTML = translations[lang].galleryTitle;
       document.getElementById("footerText").innerHTML = translations[lang].footerText;
       document.getElementById("faqTitle").innerHTML = translations[lang].faqTitle;
@@ -697,11 +731,26 @@
       document.getElementById("avLink").innerHTML = translations[lang].avLinkText;
       document.getElementById("obsCredit").innerHTML = translations[lang].videoCreditText;
       document.getElementById("changelogLink").innerHTML = translations[lang].changelogText;
+      
+      // Update changelog link to include language parameter
+      const changelogLink = document.getElementById("changelogLink");
+      if (changelogLink) {
+        changelogLink.href = `changelog.html?lang=${lang}`;
+      }
+      
+      // Update changelog items (What's New list) with localized text
+      document.querySelectorAll('#whatsNewList li[id^="whatsNewItem"]').forEach(li => {
+        const localizedText = li.getAttribute(`data-${lang}`) || li.innerHTML;
+        li.innerHTML = localizedText;
+      });
     }
     
-    // Detect browser language and apply on load
+    // Get language preference: URL parameter > localStorage > browser language
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlLang = urlParams.get('lang');
+    const storedLang = localStorage.getItem('imageClassifierLang');
     const userLang = navigator.language || navigator.userLanguage;
-    const initialLang = userLang.startsWith("es") ? "es" : "en";
+    const initialLang = urlLang || storedLang || (userLang.startsWith("es") ? "es" : "en");
     updateLanguage(initialLang);
     
     // Language toggle buttons

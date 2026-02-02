@@ -25,65 +25,83 @@ def parse_version() -> tuple[str, str]:
     return f"{major}.{minor}", f"{major}.{minor}.{build}.{rev}"
 
 
-def get_latest_changelog_entry() -> tuple[str, str, list[str]]:
-    """Extract latest version, date, and changelog items from changelog.html."""
+def get_latest_changelog_entry() -> tuple[str, str, list[tuple[str, str]]]:
+    """Extract latest version, date, and changelog items (EN, ES) from changelog.html."""
     html = CHANGELOG_HTML.read_text(encoding="utf-8")
     
     # Find first version block
     pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
     match = re.search(pattern, html, re.DOTALL)
     if not match:
-        return ("2.0", "02/02/2026", ["Bug fixes and improvements"])
+        return ("2.0", "02/02/2026", [("Bug fixes and improvements", "Correcciones y mejoras")])
     
     version = match.group(1)
     date_str = match.group(2)
     items_html = match.group(3)
     
-    # Extract English text from each <li>
+    # Extract both English and Spanish text from each <li>
     items = []
-    for li_match in re.finditer(r'<li[^>]*data-en="([^"]*)"', items_html):
-        items.append(li_match.group(1))
+    for li_match in re.finditer(r'<li[^>]*data-en="([^"]*)"[^>]*data-es="([^"]*)"', items_html):
+        en_text = li_match.group(1)
+        es_text = li_match.group(2)
+        items.append((en_text, es_text))
     
     if not items:
-        items = ["Bug fixes and improvements"]
+        items = [("Bug fixes and improvements", "Correcciones y mejoras")]
     
     return version, date_str, items
 
 
-def format_date_for_index(date_str: str) -> str:
-    """Convert DD/MM/YYYY to 'Month Day, Year' format."""
+def format_date_for_index(date_str: str) -> tuple[str, str]:
+    """Convert DD/MM/YYYY to English and Spanish date formats."""
     try:
         dt = datetime.strptime(date_str, "%d/%m/%Y")
-        return dt.strftime("%B %d, %Y")
+        # English: "February 2, 2026"
+        en_date = dt.strftime("%B %d, %Y").replace(" 0", " ")  # Remove leading zero from day
+        # Spanish: "2 de Febrero de 2026"
+        months_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        day = dt.day
+        month_es = months_es[dt.month - 1]
+        year = dt.year
+        es_date = f"{day} de {month_es} de {year}"
+        return en_date, es_date
     except:
-        return date_str
+        return date_str, date_str
 
 
-def update_index_html(version_short: str, version_full: str, changelog_date: str, changelog_items: list[str]) -> None:
+def update_index_html(version_short: str, version_full: str, changelog_date: str, changelog_items: list[tuple[str, str]]) -> None:
     """Update index.html with version info and changelog."""
     html = INDEX_HTML.read_text(encoding="utf-8")
     
     # Update version number
     html = re.sub(r'<span id="versionNumber">[^<]+</span>', f'<span id="versionNumber">{version_short}</span>', html)
     
-    # Update publish date
-    formatted_date = format_date_for_index(changelog_date)
-    html = re.sub(r'<span id="publishDate">[^<]+</span>', f'<span id="publishDate">{formatted_date}</span>', html)
+    # Update publish date (with data-en and data-es for localization)
+    en_date, es_date = format_date_for_index(changelog_date)
+    html = re.sub(
+        r'<span id="publishDate">[^<]+</span>',
+        f'<span id="publishDate" data-en="{en_date}" data-es="{es_date}">{en_date}</span>',
+        html
+    )
     
-    # Update changelog items in "What's New" list
+    # Update changelog items in "What's New" list with data-en/data-es attributes
     items_html = ""
-    for item in changelog_items[:3]:  # Max 3 items
-        items_html += f'            <li>{item}</li>\n'
+    for en_text, es_text in changelog_items[:3]:  # Max 3 items
+        # Escape quotes in the text
+        en_escaped = en_text.replace('"', '&quot;')
+        es_escaped = es_text.replace('"', '&quot;')
+        items_html += f'            <li id="whatsNewItem{len(items_html.split(chr(10))) + 1}" data-en="{en_escaped}" data-es="{es_escaped}">{en_text}</li>\n'
     
     # Find and replace the <ul id="whatsNewList"> content
     pattern = r'(<ul id="whatsNewList">)(.*?)(</ul>)'
-    html = re.sub(pattern, r'\1\n' + items_html + '          \3', html, flags=re.DOTALL)
+    html = re.sub(pattern, r'\1\n' + items_html.rstrip() + '\n          \3', html, flags=re.DOTALL)
     
-    # Update download link (placeholder - user should set their Dropbox/GitHub Releases URL)
-    # For now, keep the placeholder href="#"
-    # html = re.sub(r'href="#" id="downloadLink"', f'href="YOUR_DOWNLOAD_URL" id="downloadLink"', html)
+    # Remove any control characters (except newlines and tabs)
+    import re as re_module
+    html = re_module.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', html)
     
-    INDEX_HTML.write_text(html, encoding="utf-8")
+    INDEX_HTML.write_text(html, encoding="utf-8", newline='\n')
     print(f"[INFO] Updated {INDEX_HTML}")
 
 

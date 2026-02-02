@@ -114,6 +114,20 @@ See **[docs/BUILD.md](docs/BUILD.md)** for prerequisites, steps, and where to pu
 
 The website files are in `docs/` (index.html, changelog.html). The release process automatically updates these files.
 
+### Local Website Preview
+
+Preview the website locally:
+
+```bash
+npm run dev
+```
+
+This starts a local server at `http://localhost:8787` and opens it in your browser. The server serves files from the `docs/` folder.
+
+**Commands:**
+- `npm run dev` - Start server and open browser
+- `npm run dev:no-open` - Start server without opening browser
+
 ### GitHub Repository Setup
 
 1. **Create the repository on GitHub:**
@@ -165,13 +179,42 @@ The website files are in `docs/` (index.html, changelog.html). The release proce
 When you run `Release.bat`:
 1. It prompts to update `changelog.html` (optional)
 2. If updated, it automatically runs `update_website.py` to sync `index.html` with the latest version
-3. After release, commit and push to GitHub:
+3. After release, **create a branch** and commit website changes:
    ```bash
+   git checkout -b release/v2.0
    git add docs/
-   git commit -m "Release v2.0"
-   git push
+   git commit -m "release: v2.0"
+   git push -u origin release/v2.0
    ```
-4. Cloudflare Pages will automatically deploy the updated website
+4. Create a Pull Request on GitHub to merge to `main`
+5. After merging, Cloudflare Pages will automatically deploy the updated website
+
+---
+
+## 🔀 Git Workflow Protocol
+
+**IMPORTANT:** This repository follows strict git protocols. **Never commit directly to `main`.**
+
+### The Rule
+
+1. **Always create a branch** before making changes:
+   ```bash
+   git checkout -b fix/description
+   # or feature/, refactor/, docs/, chore/, release/
+   ```
+
+2. **Commit and push** all changes to your branch:
+   ```bash
+   git add .
+   git commit -m "type: description"
+   git push -u origin fix/description
+   ```
+
+3. **Create a Pull Request** on GitHub to merge to `main`
+
+See **[docs/guides/GIT-PROTOCOL.md](docs/guides/GIT-PROTOCOL.md)** for the complete protocol.
+
+**AI Assistants:** See `.cursor/rules/git-branch-gate.mdc` and `.cursor/rules/git-commit-push-gate.mdc` for mandatory rules.
 
 ---
 
