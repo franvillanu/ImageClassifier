@@ -18,19 +18,17 @@ if ($branch -eq 'main') {
   Write-Host "Rama creada automaticamente: $branch"
 }
 
-# Check if version changed
+# Check if version changed (3-digit version: major.minor.patch)
 $versionChanged = $false
 if (Test-Path 'version.txt') {
-  # Get current version from version.txt
   $versionContent = Get-Content 'version.txt' -Raw
   if ($versionContent -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
-    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
+    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3])"
     
-    # Check if version.txt was modified in this branch compared to main
     $mainVersion = ''
     git show main:version.txt 2>$null | ForEach-Object {
       if ($_ -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
-        $mainVersion = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
+        $mainVersion = "$($matches[1]).$($matches[2]).$($matches[3])"
       }
     }
     
@@ -82,9 +80,7 @@ if ($versionChanged) {
       # If there are changes, commit them
       $status = git status --porcelain -- docs/
       if ($status) {
-        # Extract short version (e.g., "2.0" from "2.0.0.0")
-        $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
-        git commit -m "release: v$shortVersion - website and changelog updates"
+        git commit -m "release: v$currentVersion - website and changelog updates"
         Write-Host "✅ Committed website and changelog updates" -ForegroundColor Green
       }
     }
@@ -149,22 +145,18 @@ Write-Host "PR creado: $url"
 Write-Host 'Mergeado a main ✅'
 Write-Host 'Branch local actualizado'
 
-# Always check if GitHub Release exists for current version and create if missing
-# Get current version from main branch
+# Check if GitHub Release exists for current version (3-digit tag e.g. v2.0.1)
 $currentVersion = ''
-$currentVersionShort = ''
 if (Test-Path 'version.txt') {
   $versionContent = Get-Content 'version.txt' -Raw
   if ($versionContent -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
-    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
-    $currentVersionShort = "$($matches[1]).$($matches[2])"
+    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3])"
   }
 }
 
-# Check if release exists for current version
 $releaseExists = $false
-if ($currentVersionShort) {
-  $tag = "v$currentVersionShort"
+if ($currentVersion) {
+  $tag = "v$currentVersion"
   $releaseCheck = gh release view $tag 2>$null
   if ($LASTEXITCODE -eq 0) {
     $releaseExists = $true
@@ -172,16 +164,13 @@ if ($currentVersionShort) {
   }
 }
 
-# Create GitHub Release if version changed OR if release doesn't exist
-if ($versionChanged -or (-not $releaseExists -and $currentVersionShort)) {
-  if ($versionChanged) {
-    $shortVersion = $currentVersion -replace '^(\d+\.\d+)\..*$', '$1'
-    Write-Host ''
-    Write-Host "🚀 Creating GitHub Release for v$shortVersion (version changed)..." -ForegroundColor Cyan
+# Create or update GitHub Release when version changed or when release is missing
+if (($versionChanged -or -not $releaseExists) -and $currentVersion) {
+  Write-Host ''
+  if ($releaseExists) {
+    Write-Host "🚀 Updating GitHub Release v$currentVersion (uploading new installer)..." -ForegroundColor Cyan
   } else {
-    $shortVersion = $currentVersionShort
-    Write-Host ''
-    Write-Host "🚀 Creating GitHub Release for v$shortVersion (release missing)..." -ForegroundColor Cyan
+    Write-Host "🚀 Creating GitHub Release v$currentVersion..." -ForegroundColor Cyan
   }
   
   # Check if GitHub token exists
@@ -205,7 +194,7 @@ if ($versionChanged -or (-not $releaseExists -and $currentVersionShort)) {
   }
   
   Write-Host ''
-  Write-Host "🎉 Release v$shortVersion ready!" -ForegroundColor Green
+  Write-Host "🎉 Release v$currentVersion ready!" -ForegroundColor Green
   Write-Host "   Website deploying to Cloudflare Pages..." -ForegroundColor Cyan
   Write-Host "   Download link will be available once deployment completes." -ForegroundColor Cyan
 }

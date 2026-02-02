@@ -54,14 +54,14 @@ def get_github_token() -> Optional[str]:
     return None
 
 
-def parse_version() -> tuple[str, str]:
-    """Read version from version.txt and return (short, full) e.g. ('2.0', '2.0.0.0')."""
+def parse_version() -> str:
+    """Read version from version.txt and return 3-digit version (major.minor.patch) e.g. '2.0.1'."""
     text = VERSION_TXT.read_text(encoding="utf-8")
     m = re.search(r"filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)", text)
     if not m:
         raise SystemExit("[ERROR] Could not parse filevers from version.txt")
-    major, minor, build, rev = m.groups()
-    return f"{major}.{minor}", f"{major}.{minor}.{build}.{rev}"
+    major, minor, build, _rev = m.groups()
+    return f"{major}.{minor}.{build}"
 
 
 def get_release_notes() -> str:
@@ -71,8 +71,8 @@ def get_release_notes() -> str:
     
     html = CHANGELOG_HTML.read_text(encoding="utf-8")
     
-    # Find first version block
-    pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
+    # Find first version block (v2.0 or v2.0.1)
+    pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+(?:\.\d+)?)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
     match = re.search(pattern, html, re.DOTALL)
     if not match:
         return "See changelog.html for details."
@@ -94,9 +94,9 @@ def get_release_notes() -> str:
     return notes
 
 
-def find_installer_file(version_full: str) -> Optional[Path]:
+def find_installer_file(version: str) -> Optional[Path]:
     """Find the installer .exe file in Output/ directory."""
-    expected_name = f"ImageClassifierSetup_v{version_full}.exe"
+    expected_name = f"ImageClassifierSetup_v{version}.exe"
     installer = OUTPUT_DIR / expected_name
     if installer.exists():
         return installer
@@ -131,16 +131,20 @@ def create_release(token: str, tag: str, name: str, body: str) -> dict:
     if response.status_code == 201:
         return response.json()
     elif response.status_code == 422:
-        # Release might already exist
-        error_msg = response.json().get("message", "Unknown error")
-        if "already exists" in error_msg.lower():
-            print(f"[WARNING] Release {tag} already exists. Fetching existing release...")
-            # Try to get the existing release
-            get_url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag}"
-            get_response = requests.get(get_url, headers=headers)
-            if get_response.status_code == 200:
-                return get_response.json()
-        raise SystemExit(f"[ERROR] Failed to create release: {error_msg}")
+        # Tag may already exist - fetch existing release and we'll upload/update asset
+        try:
+            j = response.json()
+        except Exception:
+            j = {}
+        get_url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag}"
+        get_response = requests.get(get_url, headers=headers)
+        if get_response.status_code == 200:
+            print(f"[INFO] Release {tag} already exists. Using existing release to upload new installer.")
+            return get_response.json()
+        error_msg = j.get("message", "Unknown error")
+        errors = j.get("errors", [])
+        err_detail = f" {errors}" if errors else ""
+        raise SystemExit(f"[ERROR] Failed to create release: {error_msg}{err_detail}")
     else:
         raise SystemExit(
             f"[ERROR] Failed to create release: {response.status_code} - {response.text}"
@@ -195,20 +199,20 @@ def main() -> int:
         )
         return 1
     
-    # Parse version
-    version_short, version_full = parse_version()
-    tag = f"v{version_short}"
-    release_name = f"Image Classifier {version_short}"
+    # Parse version (3 digits: major.minor.patch)
+    version = parse_version()
+    tag = f"v{version}"
+    release_name = f"Image Classifier {version}"
     
-    print(f"Version: {version_short} (full: {version_full})")
+    print(f"Version: {version}")
     print(f"Tag: {tag}")
     
     # Find installer file
-    installer = find_installer_file(version_full)
+    installer = find_installer_file(version)
     if not installer:
         print(
             f"[ERROR] Installer file not found in {OUTPUT_DIR}\n"
-            f"  Expected: ImageClassifierSetup_v{version_full}.exe",
+            f"  Expected: ImageClassifierSetup_v{version}.exe",
             file=sys.stderr,
         )
         return 1

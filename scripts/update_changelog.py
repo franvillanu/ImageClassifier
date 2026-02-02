@@ -14,13 +14,13 @@ CHANGELOG_HTML = REPO_ROOT / "docs" / "changelog.html"
 
 
 def parse_version() -> str:
-    """Read version from version.txt and return short version (e.g. 1.9)."""
+    """Read version from version.txt and return 3-digit version (e.g. 2.0.1)."""
     text = VERSION_TXT.read_text(encoding="utf-8")
     m = re.search(r"filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)", text)
     if not m:
         raise SystemExit("[ERROR] Could not parse filevers from version.txt")
-    major, minor = m.group(1), m.group(2)
-    return f"{major}.{minor}"
+    major, minor, build, _rev = m.groups()
+    return f"{major}.{minor}.{build}"
 
 
 def get_today_date() -> str:
