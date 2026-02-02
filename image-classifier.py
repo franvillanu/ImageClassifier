@@ -3323,8 +3323,7 @@ class PhotoViewer(QMainWindow):
                 background-color: #B22222;
             }
         """)
-        # Min width so Spanish ("Clasificador de Imágenes - Versión 2.0.1") doesn't clip
-        container.setMinimumSize(400, 200)
+        # Size to content; padding from layout margins
 
         layout = QVBoxLayout(container)
         layout.setContentsMargins(24, 20, 24, 20)
