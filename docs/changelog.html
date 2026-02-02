@@ -220,6 +220,9 @@
 
   <script>
     function setLang(lang) {
+      // Store language preference in localStorage
+      localStorage.setItem('imageClassifierLang', lang);
+      
       document.getElementById('pageTitle').innerText =
         lang === 'es' ? '📄 Historial de Cambios' : '📄 Release Notes';
       document.getElementById('backTextTop').innerText =
@@ -229,9 +232,20 @@
       document.querySelectorAll('[data-en]').forEach(el => {
         el.innerText = el.getAttribute('data-' + lang);
       });
+      
+      // Update back links to include language parameter
+      const backLinks = document.querySelectorAll('.back-link');
+      backLinks.forEach(link => {
+        link.href = `index.html?lang=${lang}`;
+      });
     }
+    
+    // Get language preference: URL parameter > localStorage > browser language
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlLang = urlParams.get('lang');
+    const storedLang = localStorage.getItem('imageClassifierLang');
     const userLang = navigator.language || navigator.userLanguage;
-    const defaultLang = userLang.startsWith('es') ? 'es' : 'en';
+    const defaultLang = urlLang || storedLang || (userLang.startsWith('es') ? 'es' : 'en');
     setLang(defaultLang);
   </script>
 </body>

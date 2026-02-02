@@ -682,6 +682,9 @@
     };
 
     function updateLanguage(lang) {
+      // Store language preference in localStorage
+      localStorage.setItem('imageClassifierLang', lang);
+      
       document.body.classList.remove("lang-en", "lang-es");
       document.body.classList.add("lang-" + lang);
     
@@ -729,6 +732,12 @@
       document.getElementById("obsCredit").innerHTML = translations[lang].videoCreditText;
       document.getElementById("changelogLink").innerHTML = translations[lang].changelogText;
       
+      // Update changelog link to include language parameter
+      const changelogLink = document.getElementById("changelogLink");
+      if (changelogLink) {
+        changelogLink.href = `changelog.html?lang=${lang}`;
+      }
+      
       // Update changelog items (What's New list) with localized text
       document.querySelectorAll('#whatsNewList li[id^="whatsNewItem"]').forEach(li => {
         const localizedText = li.getAttribute(`data-${lang}`) || li.innerHTML;
@@ -736,9 +745,12 @@
       });
     }
     
-    // Detect browser language and apply on load
+    // Get language preference: URL parameter > localStorage > browser language
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlLang = urlParams.get('lang');
+    const storedLang = localStorage.getItem('imageClassifierLang');
     const userLang = navigator.language || navigator.userLanguage;
-    const initialLang = userLang.startsWith("es") ? "es" : "en";
+    const initialLang = urlLang || storedLang || (userLang.startsWith("es") ? "es" : "en");
     updateLanguage(initialLang);
     
     // Language toggle buttons
