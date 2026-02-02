@@ -5,6 +5,12 @@ How to build the signed EXE and the Inno Setup installer from this repo.
 ## One script to click (same as before)
 
 1. **Edit version** – Open `version.txt` and change `filevers=(1, 9, 0, 0)` and the `'1.9.0.0'` strings to your new version (e.g. 1.10.0). Or run `py scripts/bump_version.py patch` to bump automatically.
+   
+   **⚠️ CRITICAL: Also update About dialog version manually:**
+   - `image_classifier/i18n/translations.py` - Update `app_version_label` in BOTH English and Spanish
+   - `image_classifier/__init__.py` - Update `__version__`
+   
+   See `docs/guides/RELEASE-PROTOCOL.md` for complete version update checklist.
 2. **Password once** – Create `installer/.pfx_password` with one line = your PFX password (gitignored; never commit).
 3. **Double-click `release.bat`** – That’s it. It builds the EXE, signs it, builds the installer, signs the installer.
 
