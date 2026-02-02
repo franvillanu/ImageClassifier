@@ -130,7 +130,20 @@ if "%CHANGELOG_UPDATED%"=="1" (
   )
 )
 
-REM --- 7) Success! ---
+REM --- 7) Optional: Create GitHub Release ---
+echo.
+set "CREATE_GITHUB_RELEASE=0"
+set /p CREATE_GITHUB_RELEASE="Create GitHub Release? (y/N): "
+if /i "%CREATE_GITHUB_RELEASE%"=="y" (
+  echo.
+  echo [4/4] Creating GitHub Release...
+  py "%~dp0scripts\create_github_release.py"
+  if errorlevel 1 (
+    echo [WARNING] GitHub Release creation failed, but installer is ready.
+  )
+)
+
+REM --- 8) Success! ---
 echo.
 echo [SUCCESS] Release complete!
 echo    • EXE:       installer\Image Classifier.exe

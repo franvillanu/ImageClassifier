@@ -24,6 +24,7 @@ Output/
 *.pem
 imageclassifier_cert.cer
 installer/.pfx_password
+.github_token
 
 # IDE & OS
 .idea/
