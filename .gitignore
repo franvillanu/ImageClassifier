@@ -29,6 +29,8 @@ installer/.pfx_password
 # IDE & OS
 .idea/
 .vscode/
+# Exception: track the PR automation script
+!.vscode/pr_create_merge_update.ps1
 *.swp
 *.swo
 .DS_Store
