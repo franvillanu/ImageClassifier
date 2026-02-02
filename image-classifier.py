@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import (
     QPixmap, QKeySequence, QShortcut, QWheelEvent, QMouseEvent, QCursor, QIcon,
     QPainter, QFont, QTransform, QColor, QImageReader, QGuiApplication, QImage, QVector3D, QPen, QKeyEvent, QBrush, QPalette, QOpenGLContext, QAction,
-    QSurfaceFormat  
+    QSurfaceFormat, QColorSpace
 )
 from PyQt6.QtCore import (
     Qt, QPoint, QTimer, QByteArray, QSize, QMimeData, QUrl, QObject, QEvent, QPropertyAnimation, QRect, QPointF, QEventLoop, QEasingCurve, pyqtSignal,
@@ -128,6 +128,8 @@ fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
 fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
 fmt.setVersion(3, 3)
 fmt.setSamples(16)   # 4× MSAA globally
+# Set sRGB color space for consistent color rendering in fullscreen and windowed mode
+fmt.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
 QSurfaceFormat.setDefaultFormat(fmt)
 # ------------------------------------------------------------------------
 # Translations (localized: image_classifier/i18n/translations.py)
@@ -140,6 +142,14 @@ except ImportError:
 class NearestViewport(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Ensure this widget uses sRGB color space for consistent rendering
+        fmt = QSurfaceFormat()
+        fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        fmt.setVersion(3, 3)
+        fmt.setSamples(16)
+        fmt.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
+        self.setFormat(fmt)
 
     def initializeGL(self):
         super().initializeGL()
@@ -165,6 +175,9 @@ class NearestViewport(QOpenGLWidget):
 
         # 6) Alpha-to-coverage so MSAA respects your alpha edges perfectly
         GL.glEnable(GL.GL_SAMPLE_ALPHA_TO_COVERAGE)
+        
+        # Note: sRGB color space is handled automatically by Qt when set on QSurfaceFormat
+        # No manual GL_FRAMEBUFFER_SRGB enable needed - Qt manages the conversion
 
 
 # ------------------------------------------------------------------------
