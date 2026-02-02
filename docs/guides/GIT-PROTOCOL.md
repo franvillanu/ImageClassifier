@@ -57,10 +57,12 @@ git push -u origin fix/foo
 
 When running `Release.bat`:
 1. Create branch: `git checkout -b release/v2.0`
-2. Run release (updates changelog, website, builds installer)
+2. Run release (updates changelog, website, builds installer, creates GitHub Release)
 3. Commit website changes: `git add docs/ && git commit -m "release: v2.0"`
 4. Push: `git push -u origin release/v2.0`
 5. Create PR to merge to `main`
+6. **Merge PR using "Squash and merge"** (recommended - keeps history clean)
+7. After merge, GitHub Release is already created automatically by `Release.bat`
 
 ### Website Updates
 

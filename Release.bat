@@ -40,19 +40,20 @@ set "VER_SHORT=%VER_MAJOR%.%VER_MINOR%"
 echo Detected full version: %VER_STR%
 echo Using short version: %VER_SHORT%
 
-REM --- 2.5) Optional: Update changelog.html and sync website ---
+REM --- 2.5) Automatically update changelog from git commits ---
 echo.
-set "CHANGELOG_UPDATED=0"
-set /p UPDATE_CHANGELOG="Update changelog.html? (y/N): "
-if /i "%UPDATE_CHANGELOG%"=="y" (
-  py "%~dp0scripts\update_changelog.py"
-  if errorlevel 1 (
-    echo [WARNING] Changelog update failed, continuing anyway...
-  ) else (
-    set "CHANGELOG_UPDATED=1"
-    REM Sync website files (index.html) with latest version/changelog
-    py "%~dp0scripts\update_website.py"
-  )
+echo [INFO] Updating changelog from git commits...
+py "%~dp0scripts\auto_update_changelog.py"
+if errorlevel 1 (
+  echo [WARNING] Changelog update failed, continuing anyway...
+)
+
+REM --- 2.6) Update website with current version and changelog ---
+echo.
+echo [INFO] Updating website with version and download link...
+py "%~dp0scripts\update_website.py"
+if errorlevel 1 (
+  echo [WARNING] Website update failed, continuing anyway...
 )
 
 REM --- 3) Build & sign the EXE (pass VER_STR if needed) ---
@@ -122,24 +123,29 @@ if errorlevel 1 (
   goto :error
 )
 
-REM --- 6) Copy changelog.html to Output if it was updated ---
-if "%CHANGELOG_UPDATED%"=="1" (
-  if exist "docs\changelog.html" (
-    copy /Y "docs\changelog.html" "Output\changelog.html" >nul
-    echo [INFO] Changelog copied to Output\changelog.html
-  )
+REM --- 6) Copy changelog.html to Output (always copy latest version) ---
+if exist "docs\changelog.html" (
+  copy /Y "docs\changelog.html" "Output\changelog.html" >nul
+  echo [INFO] Changelog copied to Output\changelog.html
 )
 
 REM --- 7) Success! ---
+REM Note: GitHub Release will be created AFTER merge to main (via PR script)
 echo.
 echo [SUCCESS] Release complete!
 echo    • EXE:       installer\Image Classifier.exe
 echo    • Installer: Output\!INST_NAME!
-if "%CHANGELOG_UPDATED%"=="1" (
-  echo    • Changelog: Output\changelog.html
+echo    • Changelog: Output\changelog.html
+if "%CREATE_GITHUB_RELEASE%"=="1" (
+  echo    • GitHub Release: Created automatically
 )
 echo.
-pause
+REM Skip pause if CI or non-interactive mode
+if not defined CI (
+  if not "%NON_INTERACTIVE%"=="1" (
+    pause
+  )
+)
 goto :eof
 
 :error

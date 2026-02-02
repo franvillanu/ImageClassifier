@@ -1,0 +1,29 @@
+# Version Update Checklist — MANDATORY
+
+**You MUST update the About dialog version whenever updating the app version.**
+
+## When Updating Version
+
+Whenever you update the version number (in `version.txt`, `pyproject.toml`, etc.), you **MUST** also update:
+
+### 1. About Dialog Version (CRITICAL - Often Forgotten!)
+
+**File:** `image_classifier/i18n/translations.py`
+
+Update **BOTH** language entries:
+- English: `"app_version_label": "Image Classifier - Version X.Y"`
+- Spanish: `"app_version_label": "Clasificador de Imágenes - Versión X.Y"`
+
+### 2. Package Version
+
+**File:** `image_classifier/__init__.py`
+
+Update: `__version__ = "X.Y"`
+
+## Complete Checklist
+
+See `docs/guides/RELEASE-PROTOCOL.md` for the complete version update checklist.
+
+## Rule
+
+**Violation = About dialog showing wrong version. Always check translations.py when updating version.**

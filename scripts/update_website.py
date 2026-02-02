@@ -85,6 +85,15 @@ def update_index_html(version_short: str, version_full: str, changelog_date: str
         html
     )
     
+    # Update download link to GitHub Releases
+    # Format: https://github.com/franvillanu/ImageClassifier/releases/download/v{VERSION_SHORT}/ImageClassifierSetup_v{VERSION_FULL}.exe
+    download_url = f"https://github.com/franvillanu/ImageClassifier/releases/download/v{version_short}/ImageClassifierSetup_v{version_full}.exe"
+    html = re.sub(
+        r'(<a[^>]*id="downloadLink"[^>]*href=")[^"]*(")',
+        f'\\g<1>{download_url}\\g<2>',
+        html
+    )
+    
     # Update changelog items in "What's New" list with data-en/data-es attributes
     items_html = ""
     for en_text, es_text in changelog_items[:3]:  # Max 3 items
@@ -103,6 +112,7 @@ def update_index_html(version_short: str, version_full: str, changelog_date: str
     
     INDEX_HTML.write_text(html, encoding="utf-8", newline='\n')
     print(f"[INFO] Updated {INDEX_HTML}")
+    print(f"[INFO] Download link set to: {download_url}")
 
 
 def copy_star_ico() -> None:
