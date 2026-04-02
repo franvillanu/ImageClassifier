@@ -5,7 +5,7 @@ translations = {
         # 1. Application Identity & General UI
         "about_button": "About",
         "photo_viewer_title": "Image Classifier",
-        "app_version_label": "Image Classifier - Version 2.0.2",
+        "app_version_label": "Image Classifier - Version 2.0.3",
         "copyright_label": "© 2025 Francisco Villanueva\nAll rights reserved",
         
         # 2. Navigation & Folder Operations
@@ -323,7 +323,7 @@ translations = {
         # 1. Identidad de la Aplicación e Interfaz General
         "about_button": "Acerca de",
         "photo_viewer_title": "Clasificador de Imágenes",
-        "app_version_label": "Clasificador de Imágenes - Versión 2.0.2",
+        "app_version_label": "Clasificador de Imágenes - Versión 2.0.3",
         "copyright_label": "© 2025 Francisco Villanueva\nTodos los derechos reservados",
         
         # 2. Operaciones de Navegación / Carpetas
@@ -421,6 +421,8 @@ translations = {
         "shortcut_end_desc": "Ir a la última imagen.",
         "shortcut_copy_key": "Ctrl+C",
         "shortcut_copy_desc": "Copia la imagen al portapapeles.",
+        "shortcut_copy_advanced_key": "Ctrl+Shift+C",
+        "shortcut_copy_advanced_desc": "Desmarca 🔄 todas las imágenes marcadas para Comparar <>.",
         "shortcut_clear_compare_key": "Ctrl+Shift+C",
         "shortcut_clear_compare_desc": "Desmarca 🔄 todas las imágenes marcadas para Comparar <>.",
         "shortcut_clear_favorites_key": "Ctrl+Shift+F",

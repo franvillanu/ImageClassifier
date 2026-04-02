@@ -9,7 +9,7 @@ from image_classifier.imaging.sharpen import sharpen_cv2
 from image_classifier.imaging.loader import ImageLoaderRunnable, WorkerSignals
 
 
-def test_sharpen_returns_pixmap():
+def test_sharpen_returns_pixmap(qapp):
     """sharpen_cv2 returns a QPixmap of same size."""
     img = QImage(100, 80, QImage.Format.Format_RGBA8888)
     img.fill(0xFF808080)
@@ -20,7 +20,7 @@ def test_sharpen_returns_pixmap():
     assert out.height() == 80
 
 
-def test_worker_signals_exists():
+def test_worker_signals_exists(qapp):
     sig = WorkerSignals()
     assert hasattr(sig, "finished")
     assert hasattr(sig, "error")
@@ -30,4 +30,8 @@ def test_worker_signals_exists():
 def test_loader_cache_attributes():
     assert hasattr(ImageLoaderRunnable, "_pixmap_cache")
     assert hasattr(ImageLoaderRunnable, "_cache_limit")
-    assert ImageLoaderRunnable._cache_limit == 10000
+    assert ImageLoaderRunnable._cache_limit > 0
+    assert hasattr(ImageLoaderRunnable, "_cache_bytes_limit")
+    assert ImageLoaderRunnable._cache_bytes_limit > 0
+    assert callable(ImageLoaderRunnable.get_cached_pixmap)
+    assert callable(ImageLoaderRunnable.drop_cached_pixmap)

@@ -6,7 +6,7 @@
 #define MyAppName      "Image Classifier"
 ; MyAppVersion: synced from version.txt by scripts/update_iss_version.py before release
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.2"
+  #define MyAppVersion "2.0.3"
 #endif
 #define MyAppPublisher "Francisco Villanueva"
 #define MyAppURL       "https://imageclassifier.neocities.org/"
@@ -72,7 +72,7 @@ english.CreateDesktopIcon=Create Desktop icon
 spanish.CreateDesktopIcon=Crear un acceso directo en el Escritorio
 
 [Files]
-Source: "installer\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "installer\{#MyAppName}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installer\{#MyCertFile}";   DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "installer\{#ReadmeFile}";   DestDir: "{app}"; Flags: ignoreversion
 

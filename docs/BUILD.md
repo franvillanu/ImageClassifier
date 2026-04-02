@@ -57,8 +57,13 @@ build-and-sign.bat
 
 This script:
 
-- Runs PyInstaller on `image-classifier.py` → produces `installer\Image Classifier.exe`
+- Runs PyInstaller on `image-classifier.py` → produces `installer\Image Classifier\Image Classifier.exe` by default
 - Signs that EXE with `signtool` using your `.pfx`
+
+**Packaging mode:**
+
+- Default: `onedir` for faster startup
+- Optional: set `IMAGE_CLASSIFIER_PACKAGE_MODE=onefile` before running if you explicitly want a single-file build
 
 **Required before running:**
 
@@ -76,7 +81,7 @@ Inno Setup expects these files under `installer\`:
 
 | File | Source |
 |------|--------|
-| `Image Classifier.exe` | Output of `build-and-sign.bat` |
+| `Image Classifier\Image Classifier.exe` | Output of `build-and-sign.bat` |
 | `imageclassifier_cert.cer` | Export from your signing cert (public part only); copy into `installer\` |
 | `README.txt` | User-facing readme; already in `installer\` |
 
@@ -107,22 +112,25 @@ Version is read from `version.txt` (e.g. `filevers=(1, 9, 0, 0)` → v1.9).
 
 ```
 ImageClassifier/
-├── image-classifier.py      # App entry (PyInstaller target)
+├── image-classifier.py      # Thin app entry (PyInstaller target)
 ├── run.py                   # Dev run (optional)
 ├── version.txt              # Version for EXE + installer
 ├── star.ico                 # App + setup icon
 ├── release.bat              # One-command release (bump + build + sign)
-├── build-and-sign.bat       # Build EXE → installer\ + sign
+├── build-and-sign.bat       # Build EXE → installer\Image Classifier\ + sign
 ├── Release.bat              # Full release (build + Inno + sign setup)
 ├── Image_Classifier.iss    # Inno Setup script
 ├── scripts/
 │   └── bump_version.py     # Bump/set version in version.txt + pyproject.toml
 ├── installer/
 │   ├── README.txt           # Shipped with app (commit this)
-│   ├── Image Classifier.exe # Created by build-and-sign.bat
+│   ├── Image Classifier\
+│   │   └── Image Classifier.exe  # Created by build-and-sign.bat
 │   └── imageclassifier_cert.cer  # You copy here (do not commit if sensitive)
+├── image_classifier/
+│   └── app.py               # Main application module
 └── Output/
     └── ImageClassifierSetup_v1.9.exe  # Final installer
 ```
 
-`.gitignore` already excludes `installer/*.exe`, `installer/*.cer`, `Output/*.exe`, and `*.pfx`, so the repo stays clean and safe.
+`.gitignore` already excludes `installer/*.exe`, `installer/Image Classifier/`, `installer/*.cer`, `Output/*.exe`, and `*.pfx`, so the repo stays clean and safe.

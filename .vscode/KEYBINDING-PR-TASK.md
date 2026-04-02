@@ -16,7 +16,7 @@ Add the shortcut in your **user** keybindings so it’s available in every repo.
 3. **Click the +** next to **“Tasks: Run Task”** and press **Ctrl+Shift+5**.
 
 4. When asked **“Which task?”**, choose:  
-   **PR: create + merge (squash) + update main**
+   **PR: create + merge (squash) + update main + delete branch**
 
 5. Save. The shortcut is now in your **user** keybindings and applies to all repos.
 
@@ -34,7 +34,7 @@ Add the shortcut in your **user** keybindings so it’s available in every repo.
 {
   "key": "ctrl+shift+5",
   "command": "workbench.action.tasks.runTask",
-  "args": "PR: create + merge (squash) + update main"
+  "args": "PR: create + merge (squash) + update main + delete branch"
 }
 ```
 
@@ -42,6 +42,6 @@ Add the shortcut in your **user** keybindings so it’s available in every repo.
 
 ## Run the task without the keybinding
 
-- **Command Palette** (`Ctrl+Shift+P`) → **“Tasks: Run Task”** → **“PR: create + merge (squash) + update main”**
+- **Command Palette** (`Ctrl+Shift+P`) → **“Tasks: Run Task”** → **“PR: create + merge (squash) + update main + delete branch”**
 - Or from terminal (in this repo):  
   `powershell -NoProfile -ExecutionPolicy Bypass -File .vscode/pr_create_merge_update.ps1`
