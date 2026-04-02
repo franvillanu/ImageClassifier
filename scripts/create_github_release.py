@@ -19,6 +19,7 @@ Usage:
 import os
 import re
 import sys
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -49,6 +50,17 @@ def get_github_token() -> Optional[str]:
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         return token.strip()
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
     if GITHUB_TOKEN_FILE.exists():
         return GITHUB_TOKEN_FILE.read_text(encoding="utf-8").strip()
     return None
@@ -185,6 +197,20 @@ def upload_release_asset(token: str, release_id: int, file_path: Path) -> None:
         )
 
 
+def ensure_release_asset(
+    token: str,
+    release: dict,
+    file_path: Path,
+) -> None:
+    """Upload installer unless the same named asset already exists."""
+    existing_assets = release.get("assets", [])
+    for asset in existing_assets:
+        if asset.get("name") == file_path.name:
+            print(f"[INFO] Asset already present: {file_path.name}")
+            return
+    upload_release_asset(token, release["id"], file_path)
+
+
 def main() -> int:
     # Check for GitHub token
     token = get_github_token()
@@ -234,7 +260,7 @@ def main() -> int:
     
     # Upload installer
     try:
-        upload_release_asset(token, release_id, installer)
+        ensure_release_asset(token, release, installer)
     except SystemExit as e:
         print(str(e), file=sys.stderr)
         return 1
