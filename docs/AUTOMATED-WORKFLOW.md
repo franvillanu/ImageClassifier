@@ -33,11 +33,10 @@ git push
    - Updates changelog from git commits
    - Updates website with new version
    - Updates download link to GitHub Releases
-   - Creates GitHub Release
-   - Uploads installer
 3. ✅ Commits website/changelog updates
 4. ✅ Creates PR
 5. ✅ Merges PR automatically
+6. ✅ Verifies or creates the GitHub Release and uploads the installer after merge
 
 **If version NOT changed:**
 - Just creates PR and merges (normal workflow)
@@ -55,9 +54,9 @@ git push
 - **When:** Automatically during `Release.bat`
 
 ### GitHub Release
-- **Created:** Automatically if `.github_token` exists
+- **Created:** Automatically after merge if auth is available (`gh auth` or token)
 - **Contains:** Installer file, release notes from changelog
-- **When:** Automatically during `Release.bat`
+- **When:** Automatically after the PR merge script updates `main`
 
 ## Requirements
 

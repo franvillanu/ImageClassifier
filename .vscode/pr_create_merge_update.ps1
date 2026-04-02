@@ -91,7 +91,56 @@ if ($LASTEXITCODE -ne 0) {
 
 git fetch --prune origin
 
-# ── 7. Delete local feature branch (gh pr merge --delete-branch may have already done this) ──
+# ── 7. Ensure release asset exists for the merged version ────────────────────
+$currentVersion = ''
+if (Test-Path 'version.txt') {
+  $versionContent = Get-Content 'version.txt' -Raw
+  if ($versionContent -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
+    $currentVersion = "$($matches[1]).$($matches[2]).$($matches[3])"
+  }
+}
+
+if ($currentVersion) {
+  $tag = "v$currentVersion"
+  $assetName = "ImageClassifierSetup_v$currentVersion.exe"
+  $releaseJson = $null
+  $releaseMissing = $false
+
+  try {
+    $releaseJson = gh release view $tag --json assets,url 2>$null
+  } catch {
+    $releaseMissing = $true
+  }
+
+  $assetExists = $false
+  if ($releaseJson) {
+    $release = $releaseJson | ConvertFrom-Json
+    foreach ($asset in $release.assets) {
+      if ($asset.name -eq $assetName) {
+        $assetExists = $true
+        break
+      }
+    }
+  }
+
+  if ($releaseMissing -or -not $assetExists) {
+    Write-Host ""
+    Write-Host "GitHub Release asset missing for $tag. Creating or updating release..." -ForegroundColor Cyan
+    $installerPath = Join-Path $repoRoot "Output\\$assetName"
+    if (-not (Test-Path $installerPath)) {
+      Write-Warning "Installer not found at $installerPath. Run Release.bat before using this PR merge task for releases."
+    } else {
+      py scripts/create_github_release.py
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host "GitHub Release ready: $tag" -ForegroundColor Green
+      } else {
+        Write-Warning "GitHub Release creation/upload failed for $tag."
+      }
+    }
+  }
+}
+
+# ── 8. Delete local feature branch (gh pr merge --delete-branch may have already done this) ──
 if (git branch --list $branch) {
   git branch -d $branch 2>$null | Out-Null
 }
