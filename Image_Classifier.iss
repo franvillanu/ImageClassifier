@@ -72,7 +72,7 @@ english.CreateDesktopIcon=Create Desktop icon
 spanish.CreateDesktopIcon=Crear un acceso directo en el Escritorio
 
 [Files]
-Source: "installer\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "installer\{#MyAppName}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installer\{#MyCertFile}";   DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "installer\{#ReadmeFile}";   DestDir: "{app}"; Flags: ignoreversion
 

@@ -67,7 +67,7 @@ pytest tests/ -v
 
 ```
 ImageClassifier/
-├── image-classifier.py   # Main application (UI + PhotoViewer)
+├── image-classifier.py   # Thin launcher
 ├── run.py                # Run the app (python run.py)
 ├── requirements.txt      # Dependencies
 ├── pyproject.toml        # Version & metadata
@@ -75,6 +75,7 @@ ImageClassifier/
 ├── version.txt           # Version for EXE + installer
 ├── star.ico              # App icon
 ├── image_classifier/     # Package
+│   ├── app.py            # Main application (UI + PhotoViewer)
 │   ├── config.py         # Config path & defaults
 │   ├── shell_win.py      # Windows Shell (open in Explorer)
 │   ├── i18n/
@@ -106,7 +107,7 @@ ImageClassifier/
 
 ## 📦 Building the installer (Windows)
 
-See **[docs/BUILD.md](docs/BUILD.md)** for prerequisites, steps, and where to put the signing cert. Summary: run `build-and-sign.bat` (produces `installer\Image Classifier.exe`), copy your `.cer` into `installer\`, then run `Release.bat` to create the signed setup in `Output\`.
+See **[docs/BUILD.md](docs/BUILD.md)** for prerequisites, steps, and where to put the signing cert. Summary: run `build-and-sign.bat` (produces `installer\Image Classifier\Image Classifier.exe` by default), copy your `.cer` into `installer\`, then run `Release.bat` to create the signed setup in `Output\`.
 
 ---
 

@@ -15,6 +15,7 @@ build/
 dist/
 OLD/
 installer/*.exe
+installer/Image Classifier/
 installer/*.cer
 Output/
 *.manifest

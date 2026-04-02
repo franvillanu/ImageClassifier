@@ -421,6 +421,8 @@ translations = {
         "shortcut_end_desc": "Ir a la última imagen.",
         "shortcut_copy_key": "Ctrl+C",
         "shortcut_copy_desc": "Copia la imagen al portapapeles.",
+        "shortcut_copy_advanced_key": "Ctrl+Shift+C",
+        "shortcut_copy_advanced_desc": "Desmarca 🔄 todas las imágenes marcadas para Comparar <>.",
         "shortcut_clear_compare_key": "Ctrl+Shift+C",
         "shortcut_clear_compare_desc": "Desmarca 🔄 todas las imágenes marcadas para Comparar <>.",
         "shortcut_clear_favorites_key": "Ctrl+Shift+F",

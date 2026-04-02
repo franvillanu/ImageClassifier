@@ -133,7 +133,7 @@ REM --- 7) Success! ---
 REM Note: GitHub Release will be created AFTER merge to main (via PR script)
 echo.
 echo [SUCCESS] Release complete!
-echo    • EXE:       installer\Image Classifier.exe
+echo    • App EXE:   installer\Image Classifier\Image Classifier.exe
 echo    • Installer: Output\!INST_NAME!
 echo    • Changelog: Output\changelog.html
 if "%CREATE_GITHUB_RELEASE%"=="1" (
