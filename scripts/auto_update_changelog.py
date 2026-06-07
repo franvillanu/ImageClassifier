@@ -7,8 +7,8 @@ shows what changed in the application for users — not internal/DevOps commits.
 
 This script:
 1. Reads version from version.txt
-2. Reads user-facing note from docs/release_notes.txt (if present)
-3. Otherwise uses default "Bug fixes and improvements" / "Correcciones y mejoras"
+2. Reads user-facing notes from docs/release_notes.txt
+3. Stops the release if notes for the current version are missing
 4. Updates changelog.html
 
 Usage:
@@ -44,10 +44,10 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
     """
     Get user-facing release note (EN, ES) for this version from docs/release_notes.txt.
     Format per line: version|English sentence|Spanish sentence
-    Returns one entry (or default) so changelog is for customers, not internal commits.
+    Release notes are mandatory so vague fallback text is never published.
     """
     if not RELEASE_NOTES_TXT.exists():
-        return [("Bug fixes and improvements", "Correcciones y mejoras")]
+        raise SystemExit(f"[ERROR] Release notes file not found: {RELEASE_NOTES_TXT}")
     for line in RELEASE_NOTES_TXT.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -55,7 +55,10 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
         parts = line.split("|", 2)
         if len(parts) >= 3 and parts[0].strip() == version:
             return [(parts[1].strip(), parts[2].strip())]
-    return [("Bug fixes and improvements", "Correcciones y mejoras")]
+    raise SystemExit(
+        f"[ERROR] Missing customer-facing release notes for v{version} in "
+        f"{RELEASE_NOTES_TXT}"
+    )
 
 
 def create_version_block(version: str, date: str, entries: list[tuple[str, str]]) -> str:

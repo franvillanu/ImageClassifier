@@ -33,7 +33,7 @@ def get_latest_changelog_entry() -> tuple[str, str, list[tuple[str, str]]]:
     pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+(?:\.\d+)?)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
     match = re.search(pattern, html, re.DOTALL)
     if not match:
-        return ("2.0.1", "02/02/2026", [("Bug fixes and improvements", "Correcciones y mejoras")])
+        raise SystemExit("[ERROR] Could not parse the latest entry in docs/changelog.html")
     
     version = match.group(1)
     date_str = match.group(2)
@@ -47,7 +47,7 @@ def get_latest_changelog_entry() -> tuple[str, str, list[tuple[str, str]]]:
         items.append((en_text, es_text))
     
     if not items:
-        items = [("Bug fixes and improvements", "Correcciones y mejoras")]
+        raise SystemExit("[ERROR] Latest changelog entry has no customer-facing notes")
     
     return version, date_str, items
 
@@ -80,9 +80,10 @@ def update_index_html(version: str, changelog_date: str, changelog_items: list[t
     # Update publish date (with data-en and data-es for localization)
     en_date, es_date = format_date_for_index(changelog_date)
     html = re.sub(
-        r'<span id="publishDate">[^<]+</span>',
+        r'<span id="publishDate"[^>]*>.*?</span>',
         f'<span id="publishDate" data-en="{en_date}" data-es="{es_date}">{en_date}</span>',
-        html
+        html,
+        flags=re.DOTALL,
     )
     
     # Update download link to GitHub Releases (3-digit version everywhere)
@@ -94,16 +95,23 @@ def update_index_html(version: str, changelog_date: str, changelog_items: list[t
     )
     
     # Update changelog items in "What's New" list with data-en/data-es attributes
-    items_html = ""
-    for en_text, es_text in changelog_items[:3]:  # Max 3 items
+    items = []
+    for index, (en_text, es_text) in enumerate(changelog_items[:3], start=1):
         # Escape quotes in the text
         en_escaped = en_text.replace('"', '&quot;')
         es_escaped = es_text.replace('"', '&quot;')
-        items_html += f'            <li id="whatsNewItem{len(items_html.split(chr(10))) + 1}" data-en="{en_escaped}" data-es="{es_escaped}">{en_text}</li>\n'
-    
-    # Find and replace the <ul id="whatsNewList"> content
-    pattern = r'(<ul id="whatsNewList">)(.*?)(</ul>)'
-    html = re.sub(pattern, r'\1\n' + items_html.rstrip() + '\n          \3', html, flags=re.DOTALL)
+        items.append(
+            f'            <li id="whatsNewItem{index}" data-en="{en_escaped}" '
+            f'data-es="{es_escaped}">{en_text}</li>'
+        )
+    items_html = "\n".join(items)
+
+    # Replace a valid list or repair a list whose closing tag was lost by an older release script.
+    pattern = r'<ul id="whatsNewList">.*?(?:</ul>|(?=\s*</div>))'
+    replacement = f'<ul id="whatsNewList">\n{items_html}\n          </ul>'
+    html, replacement_count = re.subn(pattern, replacement, html, count=1, flags=re.DOTALL)
+    if replacement_count != 1:
+        raise SystemExit("[ERROR] Could not update the What's New list in docs/index.html")
     
     # Remove any control characters (except newlines and tabs)
     import re as re_module

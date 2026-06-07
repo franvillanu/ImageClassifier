@@ -60,8 +60,7 @@ def prompt_changelog_entries() -> list[tuple[str, str]]:
         entries.append((en, es))
         i += 1
     if not entries:
-        print("[WARNING] No entries provided. Using placeholder.")
-        entries = [("Bug fixes and improvements", "Correcciones y mejoras")]
+        raise SystemExit("[ERROR] At least one customer-facing changelog entry is required")
     return entries
 
 
