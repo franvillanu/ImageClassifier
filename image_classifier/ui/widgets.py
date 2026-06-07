@@ -14,7 +14,10 @@ from PyQt6.QtCore import Qt, QPoint, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QGuiApplication
 
 
-ALLOWED_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tiff', '.tif')
+ALLOWED_EXTENSIONS = (
+    '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tiff', '.tif',
+    '.heic', '.heif',
+)
 
 
 # ------------------------------------------------------------------------

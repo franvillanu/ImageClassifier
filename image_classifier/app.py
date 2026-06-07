@@ -23,7 +23,7 @@ from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 # Windows Shell (COM + open in Explorer); imaging (sharpen, loader); config; workers; UI
 from image_classifier.shell_win import open_folder_and_select_item
-from image_classifier.imaging import sharpen_cv2, ImageLoaderRunnable, WorkerSignals
+from image_classifier.imaging import sharpen_cv2, ImageLoaderRunnable, WorkerSignals, save_pixmap
 from image_classifier.config import get_config_file
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
 from image_classifier.ui import (
@@ -4331,7 +4331,8 @@ class PhotoViewer(QMainWindow):
         self.dialog = QFileDialog(self, t["select_folder"])
         # Allow multiple selection
         self.dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-        self.dialog.setNameFilter("Images (*.png *.jpg *.jpeg *.tif *.tiff *.webp *.bmp *.gif)")
+        image_patterns = " ".join(f"*{extension}" for extension in ALLOWED_EXTENSIONS)
+        self.dialog.setNameFilter(f"Images ({image_patterns})")
         self.dialog.setViewMode(QFileDialog.ViewMode.List)
         if self.current_directory and os.path.exists(self.current_directory):
             self.dialog.setDirectory(self.current_directory)
@@ -4348,7 +4349,7 @@ class PhotoViewer(QMainWindow):
             chosen_folder = os.path.dirname(chosen_file)
             images_in_folder = [
                 f for f in os.listdir(chosen_folder)
-                if f.lower().endswith(('png', 'jpg', 'jpeg', 'tif', 'tiff', 'webp', 'bmp', 'gif'))
+                if f.lower().endswith(ALLOWED_EXTENSIONS)
             ]
             if not images_in_folder:
                 self.show_custom_dialog(
@@ -5626,7 +5627,7 @@ class PhotoViewer(QMainWindow):
             save_path = self.get_unique_copy_filename(folder, name, ext)
 
         # 3) Attempt to write the pixmap to disk
-        if not modified.save(save_path):
+        if not save_pixmap(modified, save_path):
             # If saving fails, alert the user and bail out
             self.show_custom_dialog("Failed to save image", icon_type="error", buttons="ok")
             return

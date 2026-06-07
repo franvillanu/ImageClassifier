@@ -65,6 +65,7 @@ echo [INFO] Running PyInstaller...
   --icon "%ICON%" ^
   --name "%EXE_NAME%" ^
   --version-file "%VERSION_FILE%" ^
+  --collect-all pillow_heif ^
   --distpath "%DIST_DIR%" ^
   --workpath "build" ^
   --specpath "build" ^

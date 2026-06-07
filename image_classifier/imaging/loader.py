@@ -1,8 +1,51 @@
 """Async image loader with shared LRU cache."""
 import os
 from collections import OrderedDict
+
+from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QImage, QImageReader, QPixmap
+
+register_heif_opener()
+
+
+def _read_with_pillow(image_path: str) -> QImage:
+    """Read formats unavailable to Qt, including HEIC/HEIF."""
+    with Image.open(image_path) as pil_image:
+        pil_image = ImageOps.exif_transpose(pil_image).convert("RGBA")
+        data = pil_image.tobytes("raw", "RGBA")
+        image = QImage(
+            data,
+            pil_image.width,
+            pil_image.height,
+            pil_image.width * 4,
+            QImage.Format.Format_RGBA8888,
+        )
+        return image.copy()
+
+
+def save_pixmap(pixmap: QPixmap, image_path: str) -> bool:
+    """Save a pixmap, using Pillow for HEIC/HEIF output."""
+    if os.path.splitext(image_path)[1].lower() not in (".heic", ".heif"):
+        return pixmap.save(image_path)
+
+    try:
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+        bits = image.bits()
+        bits.setsize(image.sizeInBytes())
+        pil_image = Image.frombytes(
+            "RGBA",
+            (image.width(), image.height()),
+            bytes(bits),
+            "raw",
+            "RGBA",
+            image.bytesPerLine(),
+        )
+        pil_image.save(image_path, format="HEIF", quality=90)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 class WorkerSignals(QObject):
@@ -85,8 +128,11 @@ class ImageLoaderRunnable(QRunnable):
 
         img = reader.read()
         if img.isNull():
-            self.signals.error.emit(f"Failed to read {self.image_path}")
-            return
+            try:
+                img = _read_with_pillow(self.image_path)
+            except (OSError, ValueError):
+                self.signals.error.emit(f"Failed to read {self.image_path}")
+                return
         qimg = img.convertToFormat(QImage.Format.Format_RGBA8888)
         pix = QPixmap.fromImage(qimg)
 
