@@ -82,16 +82,46 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
 
 
 def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
-    calls = []
+    loaded = []
 
     class FakeFileDialog:
-        class Option:
-            ShowDirsOnly = object()
+        class FileMode:
+            Directory = "directory"
 
-        @staticmethod
-        def getExistingDirectory(parent, title, start_directory, options):
-            calls.append((parent, title, start_directory, options))
-            return str(tmp_path)
+        class Option:
+            DontUseNativeDialog = "non-native"
+            ShowDirsOnly = "show-dirs-only"
+
+        class ViewMode:
+            Detail = "detail"
+
+        def __init__(self, parent):
+            self.parent = parent
+            self.calls = []
+
+        def setOption(self, option, enabled):
+            self.calls.append(("option", option, enabled))
+
+        def setWindowTitle(self, title):
+            self.calls.append(("title", title))
+
+        def setDirectory(self, directory):
+            self.calls.append(("directory", directory))
+
+        def setFileMode(self, mode):
+            self.calls.append(("file-mode", mode))
+
+        def setNameFilter(self, name_filter):
+            self.calls.append(("name-filter", name_filter))
+
+        def setViewMode(self, view_mode):
+            self.calls.append(("view-mode", view_mode))
+
+        def exec(self):
+            return True
+
+        def selectedFiles(self):
+            return [str(tmp_path)]
 
     viewer = type(
         "FakeViewer",
@@ -99,7 +129,7 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
         {
             "current_language": "en",
             "current_directory": None,
-            "load_directory_from_input": lambda self, directory: calls.append(
+            "load_directory_from_input": lambda self, directory: loaded.append(
                 directory
             ),
         },
@@ -108,8 +138,26 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
 
     PhotoViewer.open_directory(viewer)
 
-    assert calls[-1] == str(tmp_path)
-    assert calls[0][1] == "Select Folder"
+    assert loaded == [str(tmp_path)]
+    assert viewer.dialog.calls[0] == (
+        "option",
+        FakeFileDialog.Option.DontUseNativeDialog,
+        True,
+    )
+    assert ("title", "Select Folder") in viewer.dialog.calls
+    assert (
+        "file-mode",
+        FakeFileDialog.FileMode.Directory,
+    ) in viewer.dialog.calls
+    assert (
+        "option",
+        FakeFileDialog.Option.ShowDirsOnly,
+        False,
+    ) in viewer.dialog.calls
+    assert any(
+        call[0] == "name-filter" and "*.jpg" in call[1]
+        for call in viewer.dialog.calls
+    )
 
 
 def test_load_directory_from_input_rejects_empty_folder(tmp_path):

@@ -4333,14 +4333,22 @@ class PhotoViewer(QMainWindow):
         else:
             start_directory = os.path.expanduser("~")
 
-        chosen_folder = QFileDialog.getExistingDirectory(
-            self,
-            t["select_folder"],
-            start_directory,
-            QFileDialog.Option.ShowDirsOnly,
+        self.dialog = QFileDialog(self)
+        self.dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        self.dialog.setWindowTitle(t["select_folder"])
+        self.dialog.setDirectory(start_directory)
+        self.dialog.setFileMode(QFileDialog.FileMode.Directory)
+        self.dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)
+        image_patterns = " ".join(
+            f"*{extension}" for extension in ALLOWED_EXTENSIONS
         )
-        if chosen_folder:
-            self.load_directory_from_input(chosen_folder)
+        self.dialog.setNameFilter(f"Images ({image_patterns})")
+        self.dialog.setViewMode(QFileDialog.ViewMode.Detail)
+
+        if self.dialog.exec():
+            selected_paths = self.dialog.selectedFiles()
+            if selected_paths:
+                self.load_directory_from_input(selected_paths[0])
 
     def load_directory_from_input(self, directory, selected_file=None):
         t = translations[self.current_language]
