@@ -300,10 +300,24 @@ class MyDragOverlay(QWidget):
 
     def _urls_allowed(self, urls):
         for url in urls:
-            path = url.toLocalFile().lower()
-            if path.endswith(ALLOWED_EXTENSIONS):
+            path = url.toLocalFile()
+            if os.path.isdir(path) or path.lower().endswith(ALLOWED_EXTENSIONS):
                 return True
         return False
+
+    def _resolve_drop_target(self, urls):
+        paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        directories = [path for path in paths if os.path.isdir(path)]
+        if directories:
+            return directories[0], None
+
+        images = [
+            path for path in paths
+            if path.lower().endswith(ALLOWED_EXTENSIONS)
+        ]
+        if images:
+            return os.path.dirname(images[0]), images[0]
+        return None
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls() and self._urls_allowed(event.mimeData().urls()):
@@ -328,23 +342,15 @@ class MyDragOverlay(QWidget):
     def dropEvent(self, event):
         if event.mimeData().hasUrls() and self._urls_allowed(event.mimeData().urls()):
             event.acceptProposedAction()
-            urls = event.mimeData().urls()
-            if len(urls) > 1:
-                paths = [url.toLocalFile() for url in urls
-                         if url.toLocalFile().lower().endswith(ALLOWED_EXTENSIONS)]
-                if paths:
-                    folder = os.path.dirname(paths[0])
-                    self.window().load_directory(folder, selected_file=paths[0])
-            else:
-                for url in urls:
-                    path = url.toLocalFile()
-                    if not path.lower().endswith(ALLOWED_EXTENSIONS):
-                        continue
-                    main = self.window()
-                    if os.path.isdir(path):
-                        main.load_directory(path)
-                    else:
-                        main.load_directory(os.path.dirname(path), selected_file=path)
+            target = self._resolve_drop_target(event.mimeData().urls())
+            if target:
+                folder, selected_file = target
+                main = self.window()
+                load_from_input = getattr(main, "load_directory_from_input", None)
+                if load_from_input:
+                    load_from_input(folder, selected_file=selected_file)
+                else:
+                    main.load_directory(folder, selected_file=selected_file)
             self.hide()
         else:
             event.ignore()
