@@ -1,6 +1,7 @@
 # User-facing release notes (for customers). One sentence per version.
 # Used for changelog page and home "Novedades" — not internal/DevOps changes.
 # Format: version|English sentence|Spanish sentence
+2.0.7|Added folder drag-and-drop while keeping the native image picker, with dropped folders opening the first image in the configured sort order.|Añadida la función de arrastrar y soltar carpetas manteniendo el selector nativo de imágenes; las carpetas arrastradas abren la primera imagen según el orden configurado.
 2.0.6|Folder selection now keeps image files visible while choosing the folder to load.|La selección de carpetas ahora mantiene visibles los archivos de imagen mientras se elige la carpeta que se va a cargar.
 2.0.5|Added direct folder selection and folder drag-and-drop for loading images.|Añadida la selección directa de carpetas y la función de arrastrar y soltar carpetas para cargar imágenes.
 2.0.4|Added iPhone HEIC and HEIF photo support across file selection, drag and drop, folder browsing, editing, saving, and the packaged Windows app.|Añadido soporte para fotos HEIC y HEIF de iPhone en la selección de archivos, arrastrar y soltar, exploración de carpetas, edición, guardado y la aplicación de Windows.
