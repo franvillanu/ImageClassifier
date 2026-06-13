@@ -147,22 +147,11 @@ This starts a local server at `http://localhost:8787` and opens it in your brows
    - Source code (`image_classifier/`, `image-classifier.py`, etc.)
    - Website files (`docs/index.html`, `docs/changelog.html`)
    - Build scripts (`Release.bat`, `build-and-sign.bat`)
-   - GitHub Actions workflow (`.github/workflows/deploy-cloudflare.yml`)
+   - Website files deployed by the connected Cloudflare Pages project
 
 ### Cloudflare Pages Setup
 
-1. **Get Cloudflare API credentials:**
-   - Go to Cloudflare Dashboard → My Profile → API Tokens
-   - Create a token with "Cloudflare Pages:Edit" permissions
-   - Get your Account ID from the dashboard URL
-
-2. **Add GitHub Secrets:**
-   - Go to your GitHub repo → Settings → Secrets and variables → Actions
-   - Add these secrets:
-     - `CLOUDFLARE_API_TOKEN` - Your API token
-     - `CLOUDFLARE_ACCOUNT_ID` - Your account ID
-
-3. **Create Cloudflare Pages project:**
+1. **Create or connect the Cloudflare Pages project:**
    - Go to Cloudflare Dashboard → Pages → Create a project
    - Connect your GitHub repository
    - Build settings:
@@ -171,9 +160,9 @@ This starts a local server at `http://localhost:8787` and opens it in your brows
      - **Build output directory:** `docs`
      - **Root directory:** `/` (root)
 
-4. **Deploy:**
-   - The GitHub Actions workflow will automatically deploy on push to `main`
-   - Or deploy manually: GitHub repo → Actions → "Deploy to Cloudflare Pages" → Run workflow
+2. **Deploy:**
+   - Cloudflare Pages automatically deploys when changes reach `main`
+   - Preview deployments are created for feature branches
 
 ### Website Update Process
 
