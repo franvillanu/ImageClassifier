@@ -9,7 +9,6 @@ from image_classifier.ui.widgets import (
     OverlayComboBox,
     SmoothRotationSlider,
     MyDragOverlay,
-    ImageThumbnailIconProvider,
     ALLOWED_EXTENSIONS,
 )
 from image_classifier.ui.dialogs import (
@@ -32,7 +31,6 @@ __all__ = [
     "OverlayComboBox",
     "SmoothRotationSlider",
     "MyDragOverlay",
-    "ImageThumbnailIconProvider",
     "ALLOWED_EXTENSIONS",
     "HelpDialog",
     "TooltipEventFilter",

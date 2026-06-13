@@ -36,7 +36,6 @@ from image_classifier.ui import (
     OverlayComboBox,
     SmoothRotationSlider,
     MyDragOverlay,
-    ImageThumbnailIconProvider,
     ALLOWED_EXTENSIONS,
     HelpDialog,
     TooltipEventFilter,
@@ -4329,63 +4328,65 @@ class PhotoViewer(QMainWindow):
 
     def open_directory(self):
         t = translations[self.current_language]
-        if self.current_directory and os.path.exists(self.current_directory):
-            start_directory = self.current_directory
-        else:
-            start_directory = os.path.expanduser("~")
-
-        self.dialog = QFileDialog(self)
-        self.dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-        self.dialog.setWindowTitle(t["select_folder"])
-        self.dialog.setDirectory(start_directory)
-        self.dialog.setFileMode(QFileDialog.FileMode.Directory)
-        self.dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)
-        image_patterns = " ".join(
-            f"*{extension}" for extension in ALLOWED_EXTENSIONS
-        )
+        self.dialog = QFileDialog(self, t["select_folder"])
+        # Allow multiple selection
+        self.dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        image_patterns = " ".join(f"*{extension}" for extension in ALLOWED_EXTENSIONS)
         self.dialog.setNameFilter(f"Images ({image_patterns})")
-        thumbnail_size = QSize(144, 108)
-        self.dialog.setIconProvider(ImageThumbnailIconProvider(thumbnail_size))
         self.dialog.setViewMode(QFileDialog.ViewMode.List)
-        list_view = self.dialog.findChild(QListView, "listView")
-        if list_view:
-            list_view.setIconSize(thumbnail_size)
-            list_view.setGridSize(QSize(180, 145))
-            list_view.setResizeMode(QListView.ResizeMode.Adjust)
-            list_view.setUniformItemSizes(True)
-
+        if self.current_directory and os.path.exists(self.current_directory):
+            self.dialog.setDirectory(self.current_directory)
+        else:
+            user_home = os.path.expanduser("~")
+            self.dialog.setDirectory(user_home)
         if self.dialog.exec():
-            selected_paths = self.dialog.selectedFiles()
-            if selected_paths:
-                self.load_directory_from_input(selected_paths[0])
-
-    def load_directory_from_input(self, directory, selected_file=None):
-        t = translations[self.current_language]
-        try:
-            has_images = any(
-                entry.is_file()
-                and entry.name.lower().endswith(ALLOWED_EXTENSIONS)
-                for entry in os.scandir(directory)
-            )
-        except OSError:
-            has_images = False
-
-        if not has_images:
-            self.show_custom_dialog(
-                t["folder_no_images"],
-                icon_type="warning",
-                buttons="ok",
-            )
-            return False
-
-        self.load_directory(directory, selected_file=selected_file)
-        return True
+            selected_files = self.dialog.selectedFiles()
+            if not selected_files:
+                return
+            # Assume all selected files are in the same folder.
+            # Use the last selected file as the "primary" selection.
+            chosen_file = selected_files[0]
+            chosen_folder = os.path.dirname(chosen_file)
+            images_in_folder = [
+                f for f in os.listdir(chosen_folder)
+                if f.lower().endswith(ALLOWED_EXTENSIONS)
+            ]
+            if not images_in_folder:
+                self.show_custom_dialog(
+                    t["folder_no_images"],
+                    icon_type="warning",
+                    buttons="ok"
+                )
+                self.dialog.selectFile("")
+                return
+            self.load_directory(chosen_folder, selected_file=chosen_file)
 
     def set_load_last_folder(self, value: bool):
         self.load_last_folder = value
         self.save_config()
 
-    def load_directory(self, directory, selected_file=None, do_show=True):
+    def _starting_image_index(self, selected_file=None, start_at_first=False):
+        norm_selected = (
+            os.path.normcase(os.path.normpath(selected_file))
+            if selected_file else None
+        )
+        norm_images = [
+            os.path.normcase(os.path.normpath(path))
+            for path in self.image_files
+        ]
+        if norm_selected and norm_selected in norm_images:
+            return norm_images.index(norm_selected)
+        if start_at_first:
+            return 0
+        return getattr(self, "last_index", 0)
+
+    def load_directory(
+        self,
+        directory,
+        selected_file=None,
+        do_show=True,
+        start_at_first=False,
+    ):
         # ——— Clear all per-image history when loading a new folder ———
         self._history.clear()
         self._modified.clear()
@@ -4429,15 +4430,10 @@ class PhotoViewer(QMainWindow):
 
         # Choose starting index
         if self.image_files:
-            norm_selected = (
-                os.path.normcase(os.path.normpath(selected_file))
-                if selected_file else None
+            self.current_index = self._starting_image_index(
+                selected_file=selected_file,
+                start_at_first=start_at_first,
             )
-            norm_images = [os.path.normcase(os.path.normpath(p)) for p in self.image_files]
-            if norm_selected and norm_selected in norm_images:
-                self.current_index = norm_images.index(norm_selected)
-            else:
-                self.current_index = getattr(self, "last_index", 0)
             if do_show:
                 self.show_image()
 
