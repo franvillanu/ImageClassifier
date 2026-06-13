@@ -34,4 +34,6 @@ DEFAULT_CONFIG = {
     "sort_option": "file_name",
     "sort_ascending": True,
     "theme": "black",
+    "preview_cache_enabled": True,
+    "preview_cache_limit_mb": 1024,
 }

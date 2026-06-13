@@ -23,7 +23,13 @@ from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 # Windows Shell (COM + open in Explorer); imaging (sharpen, loader); config; workers; UI
 from image_classifier.shell_win import open_folder_and_select_item
-from image_classifier.imaging import sharpen_cv2, ImageLoaderRunnable, WorkerSignals, save_pixmap
+from image_classifier.imaging import (
+    ImageFrame,
+    ImageLoaderRunnable,
+    WorkerSignals,
+    sharpen_cv2,
+    save_pixmap,
+)
 from image_classifier.config import get_config_file
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
 from image_classifier.ui import (
@@ -183,7 +189,13 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.zoom_factor = 1.0
         self.fit_zoom_factor = 1.0
         self.loader = None
-        self.loading_dialog = None  
+        self.loading_dialog = None
+        self.full_resolution_ready = False
+        self._brightness_timer = QTimer(self)
+        self._brightness_timer.setSingleShot(True)
+        self._brightness_timer.timeout.connect(self._apply_pending_brightness)
+        self._pending_brightness = 1.0
+        self._brightness_program = None
 
     def setImage(self, image_path, reset_zoom=True, preserve_zoom=False):
         import os
@@ -196,12 +208,24 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.load_counter     = getattr(self, "load_counter", 0) + 1
         self.current_load_id  = self.load_counter
         self.current_loading_image = norm
+        preview_dimension = max(
+            1024,
+            min(
+                4096,
+                max(self.viewport().width(), self.viewport().height()) * 2,
+            ),
+        )
 
         # 2) Cache-first: if we’ve already decoded full-res, skip threading
         pix = ImageLoaderRunnable.get_cached_pixmap(norm)
         if pix is not None:
-            # Call onImageLoaded directly (synchronous, <1 ms)
-            self.onImageLoaded(pix, reset_zoom, preserve_zoom, self.current_load_id)
+            self.onImageLoaded(
+                pix,
+                reset_zoom,
+                preserve_zoom,
+                self.current_load_id,
+                full_resolution=True,
+            )
             return
 
         # 3) Otherwise cancel old loader and start a new one…
@@ -211,11 +235,43 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
 
         window = self.window()
         window.image_loading = True
-
-        worker = ImageLoaderRunnable(image_path)
-        worker.signals.finished.connect(
-            lambda pix, id=self.current_load_id:
-                self.onImageLoaded(pix, reset_zoom, preserve_zoom, id)
+        cached_preview = ImageLoaderRunnable.get_cached_preview(
+            norm,
+            preview_dimension,
+        )
+        self._preview_shown_for_load_id = None
+        if cached_preview is not None:
+            self._preview_shown_for_load_id = self.current_load_id
+            self.onImageLoaded(
+                QPixmap.fromImage(cached_preview),
+                reset_zoom,
+                preserve_zoom,
+                self.current_load_id,
+                full_resolution=False,
+            )
+        worker = ImageLoaderRunnable(
+            image_path,
+            max_dimension=preview_dimension,
+            progressive=True,
+            load_full=True,
+        )
+        worker.signals.previewReady.connect(
+            lambda frame, id=self.current_load_id:
+                self.onImageFrameLoaded(
+                    frame,
+                    reset_zoom,
+                    preserve_zoom,
+                    id,
+                )
+        )
+        worker.signals.fullReady.connect(
+            lambda frame, id=self.current_load_id:
+                self.onImageFrameLoaded(
+                    frame,
+                    False,
+                    preserve_zoom,
+                    id,
+                )
         )
         # Show user-friendly error message instead of silent print
         def handle_error(err, load_id=self.current_load_id):
@@ -249,6 +305,29 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # Turn off split-view compare so no diagonal line
         self.compare_enabled   = False
 
+    def onImageFrameLoaded(
+        self,
+        frame: ImageFrame,
+        reset_zoom: bool,
+        preserve_zoom: bool,
+        load_id: int,
+    ):
+        if load_id != self.current_load_id:
+            return
+        if (
+            not frame.full_resolution
+            and load_id == getattr(self, "_preview_shown_for_load_id", None)
+        ):
+            return
+        if frame.full_resolution:
+            self._preview_shown_for_load_id = None
+        self.onImageLoaded(
+            QPixmap.fromImage(frame.image),
+            reset_zoom,
+            preserve_zoom,
+            load_id,
+            full_resolution=frame.full_resolution,
+        )
 
 
     def _cancel_loader(self):
@@ -282,7 +361,8 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
                       pixmap: QPixmap,
                       reset_zoom: bool,
                       preserve_zoom: bool,
-                      load_id: int):
+                      load_id: int,
+                      full_resolution: bool = True):
         main_win = self.window()
 
         # 1) Only update the UI if this load ID is still current.
@@ -303,8 +383,9 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         if pixmap.isNull():
             return
 
-        # 4) Keep a *clean* full-res pixmap (DPR = 1.0) for all logic
-        self.original_pixmap = pixmap.copy()
+        # QPixmap is implicitly shared. Avoid a full-frame copy on every load.
+        self.original_pixmap = pixmap
+        self.full_resolution_ready = full_resolution
         self.cached_texture  = None
 
         # 5) Pull through any pending rotation/brightness
@@ -323,7 +404,6 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             self.auto_fit    = True
             self.zoom_factor = 1.0
             self.resetTransform()
-            self.adjustToFit()
         elif preserve_zoom and hasattr(self, "_saved_transform"):
             self.auto_fit = False
             self.setTransform(self._saved_transform)
@@ -385,6 +465,54 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         out.setDevicePixelRatio(base.devicePixelRatio())
         return out
 
+    def _display_source(self) -> QPixmap:
+        """Return a viewport-sized working frame for fit-mode rendering."""
+        source = self.original_pixmap
+        if source is None or source.isNull() or not self.auto_fit:
+            return source
+        max_dimension = max(
+            1024,
+            min(
+                4096,
+                max(self.viewport().width(), self.viewport().height()) * 2,
+            ),
+        )
+        if max(source.width(), source.height()) <= max_dimension:
+            return source
+        return source.scaled(
+            max_dimension,
+            max_dimension,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def renderFullResolution(self) -> QPixmap:
+        """Render current non-destructive adjustments at source resolution."""
+        if self.original_pixmap is None or self.original_pixmap.isNull():
+            return QPixmap()
+        if self.rotation_angle:
+            rendered = self.original_pixmap.transformed(
+                QTransform().rotate(self.rotation_angle),
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        else:
+            rendered = self.original_pixmap
+        if self.brightness_factor != 1.0:
+            viewport = self.viewport()
+            if isinstance(viewport, QOpenGLWidget):
+                viewport.makeCurrent()
+                rendered = self.applyBrightnessGPU(
+                    rendered,
+                    self.brightness_factor,
+                )
+                viewport.doneCurrent()
+            else:
+                rendered = self.applyBrightness(
+                    rendered,
+                    self.brightness_factor,
+                )
+        return rendered
+
     def clear(self):
         self.pixmap_item.setPixmap(QPixmap())
 
@@ -400,11 +528,15 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # 2) Reset any prior zoom/transform
         self.resetTransform()
 
-        # 3) Always rotate into a fresh pixmap
-        rotated = self.original_pixmap.transformed(
-            QTransform().rotate(self.rotation_angle),
-            Qt.TransformationMode.SmoothTransformation
-        )
+        # Avoid allocating a same-size frame when no rotation is active.
+        source = self._display_source()
+        if self.rotation_angle:
+            rotated = source.transformed(
+                QTransform().rotate(self.rotation_angle),
+                Qt.TransformationMode.SmoothTransformation
+            )
+        else:
+            rotated = source
 
         # 4) Bake brightness (GPU if possible, else CPU)
         if self.brightness_factor != 1.0:
@@ -448,6 +580,9 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def updatePixmap(self):
         if not self.original_pixmap:
             return
+        if self.auto_fit:
+            self.adjustToFit()
+            return
 
         # 0) Save current view transform & anchor
         saved_transform = self.transform()
@@ -490,12 +625,14 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
 
 
     def setBrightness(self, factor):
-        # Turn off split‐view compare overlay
-        self.compare_enabled   = False
-        # Drop the old GL texture so we rebuild fresh
-        self.cached_texture    = None
-        # Apply the new brightness and repaint
-        self.brightness_factor = factor
+        self.compare_enabled = False
+        self._pending_brightness = factor
+        if not self._brightness_timer.isActive():
+            self._brightness_timer.start(16)
+
+    def _apply_pending_brightness(self):
+        self.cached_texture = None
+        self.brightness_factor = self._pending_brightness
         self.updatePixmap()
 
     def wheelEvent(self, event: QWheelEvent):
@@ -878,9 +1015,10 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         GL.glClearColor(0, 0, 0, 0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
-        # 3) Compile + bind brightness‐gamma shader
-        prog = QOpenGLShaderProgram()
-        vertex_src = """
+        # 3) Compile once per GL context and reuse for every slider frame.
+        if self._brightness_program is None:
+            prog = QOpenGLShaderProgram()
+            vertex_src = """
         #version 330 core
         layout(location=0) in vec2 position;
         layout(location=1) in vec2 texCoord;
@@ -890,7 +1028,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             vTC = texCoord;
         }
         """
-        fragment_src = """
+            fragment_src = """
         #version 330 core
         in vec2 vTC;
         out vec4 outColor;
@@ -902,17 +1040,19 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             outColor = vec4(adj, c.a);
         }
         """
-        VERTEX_SHADER   = 0x00000001
-        FRAGMENT_SHADER = 0x00000002
-        prog.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit(VERTEX_SHADER),
-            vertex_src
-        )
-        prog.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit(FRAGMENT_SHADER),
-            fragment_src
-        )
-        prog.link()
+            VERTEX_SHADER = 0x00000001
+            FRAGMENT_SHADER = 0x00000002
+            prog.addShaderFromSourceCode(
+                QOpenGLShader.ShaderTypeBit(VERTEX_SHADER),
+                vertex_src
+            )
+            prog.addShaderFromSourceCode(
+                QOpenGLShader.ShaderTypeBit(FRAGMENT_SHADER),
+                fragment_src
+            )
+            prog.link()
+            self._brightness_program = prog
+        prog = self._brightness_program
         prog.bind()
         prog.setUniformValue("brightness", factor)
 
@@ -953,6 +1093,30 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
 
         result = fbo.toImage().mirrored(False, True)
         return QPixmap.fromImage(result)
+
+    def applyBrightness(self, pixmap: QPixmap, factor: float) -> QPixmap:
+        """CPU fallback matching the gamma shader."""
+        import numpy as np
+
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+        pointer = image.bits()
+        pointer.setsize(image.sizeInBytes())
+        pixels = np.frombuffer(pointer, np.uint8).reshape(
+            image.height(),
+            image.bytesPerLine(),
+        )
+        rgba = pixels[:, : image.width() * 4].reshape(
+            image.height(),
+            image.width(),
+            4,
+        )
+        rgb = rgba[:, :, :3].astype(np.float32) / 255.0
+        rgba[:, :, :3] = np.clip(
+            np.power(rgb, factor) * 255.0,
+            0,
+            255,
+        ).astype(np.uint8)
+        return QPixmap.fromImage(image)
 
 
     def applySharpenGPU(self, pixmap: QPixmap, radius: int, amount: float) -> QPixmap:
@@ -1125,6 +1289,16 @@ class CropOverlayContent(QWidget):
 
         # Continue with the original initialization.
         self.original_pixmap = original_pixmap
+        preview_dimension = 2048
+        if max(original_pixmap.width(), original_pixmap.height()) > preview_dimension:
+            self.preview_pixmap = original_pixmap.scaled(
+                preview_dimension,
+                preview_dimension,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        else:
+            self.preview_pixmap = original_pixmap
         self.current_language = current_language
 
         # Create rotation slider (using your SmoothRotationSlider)
@@ -1312,13 +1486,13 @@ class CropOverlayContent(QWidget):
             return
 
         # 1) Center-pivot rotate full-res
-        w = self.original_pixmap.width()
-        h = self.original_pixmap.height()
+        w = self.preview_pixmap.width()
+        h = self.preview_pixmap.height()
         tf = QTransform()
         tf.translate(w/2, h/2)
         tf.rotate(self.rotation)
         tf.translate(-w/2, -h/2)
-        self._rotated_full = self.original_pixmap.transformed(
+        self._rotated_full = self.preview_pixmap.transformed(
             tf,
             Qt.TransformationMode.SmoothTransformation
         )
@@ -1701,7 +1875,17 @@ class SharpnessOverlayContent(QWidget):
     def __init__(self, parent, original_pixmap: QPixmap, current_language="en"):
         super().__init__(parent)
         self.orig_pix     = original_pixmap
-        self.current      = original_pixmap
+        preview_dimension = 2048
+        if max(original_pixmap.width(), original_pixmap.height()) > preview_dimension:
+            self.preview_orig = original_pixmap.scaled(
+                preview_dimension,
+                preview_dimension,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        else:
+            self.preview_orig = original_pixmap
+        self.current = self.preview_orig
         self.split_x      = 0.5
         self.btn_h        = 35
         self.ctrl_margin  = 20
@@ -1721,6 +1905,9 @@ class SharpnessOverlayContent(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         QTimer.singleShot(0, lambda: self.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.timeout.connect(self._render_preview)
 
         t = translations.get(current_language, translations["en"])
 
@@ -1845,7 +2032,7 @@ class SharpnessOverlayContent(QWidget):
         painter.save()
         painter.setClipRect(split_px, oy, ox + nw - split_px, nh)
         painter.drawPixmap(ox, oy,
-            self.orig_pix.scaled(nw, nh,
+            self.preview_orig.scaled(nw, nh,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
@@ -2062,9 +2249,12 @@ class SharpnessOverlayContent(QWidget):
         ev.accept()
 
     def _update_preview(self):
+        self._preview_timer.start(60)
+
+    def _render_preview(self):
         r = self.sld_r.value()
         a = self.sld_a.value() / 100.0
-        self.current = sharpen_cv2(self.orig_pix, r, a)
+        self.current = sharpen_cv2(self.preview_orig, r, a)
         self.update()
 
 # ------------------------------------------------------------------------
@@ -2075,6 +2265,7 @@ class SharpnessOverlay(QWidget):
         super().__init__(owner)
         self._viewer = owner
         self.orig_pix = original_pixmap
+        self._processing = False
         self.setObjectName("SharpnessOverlay")
 
         # 1) Cover the owner's area
@@ -2143,22 +2334,47 @@ class SharpnessOverlay(QWidget):
         # 2) Snapshot undo now
         self._viewer.push_undo_state(from_crop=False)
 
-        # 3) Perform the sharpen (using your existing function)
-        result = sharpen_cv2(self.orig_pix, r, a)
+        # 3) Run the full-resolution commit away from the GUI thread.
+        worker = SharpenThread(self.orig_pix, r, a, self._viewer)
+        self._viewer.sharpen_thread = worker
+        self._processing = True
+        self.content.setEnabled(False)
 
-        # 4) Apply the sharpen result (this must not push another undo)
-        self._viewer.applySharpenResult(result)
+        def apply_result(image):
+            self._viewer.applySharpenResult(QPixmap.fromImage(image))
+            worker.deleteLater()
+            self._viewer.sharpen_thread = None
+            self._processing = False
+            self.releaseKeyboard()
+            self.close()
 
-        # 5) Release keyboard and close overlay
-        self.releaseKeyboard()
-        self.close()
+        def show_error(message):
+            self._viewer.show_custom_dialog(
+                message,
+                icon_type="error",
+                buttons="ok",
+            )
+            worker.deleteLater()
+            self._viewer.sharpen_thread = None
+            self._processing = False
+            self.releaseKeyboard()
+            self.close()
+
+        worker.finished.connect(apply_result)
+        worker.errorOccurred.connect(show_error)
+        worker.start()
 
     def onCancelled(self):
+        if self._processing:
+            return
         # release the grab and close, just like crop
         self.releaseKeyboard()
         self.close()
 
     def closeEvent(self, ev):
+        if self._processing:
+            ev.ignore()
+            return
         # restore shortcuts & menu on the viewer
         owner = self.parent()
         if hasattr(owner, "enable_all_shortcuts"):
@@ -2211,12 +2427,20 @@ class PhotoViewer(QMainWindow):
         self.norm_to_original = {}
         self._directory_cache = {}
         self._preload_inflight = set()
+        self._marked_save_timer = QTimer(self)
+        self._marked_save_timer.setSingleShot(True)
+        self._marked_save_timer.setInterval(250)
+        self._marked_save_timer.timeout.connect(self._write_marked_images)
         self.menu_dock_left = True
         self.loop_navigation = False
         self._first_image_loaded = True
         self.white_balance_enabled = False
         self.white_balance_gains = (1.0, 1.0, 1.0)
         self.load_config()
+        ImageLoaderRunnable.configure_disk_cache(
+            enabled=self.preview_cache_enabled,
+            limit_mb=self.preview_cache_limit_mb,
+        )
         self.init_ui()
         self.init_floating_controls()
         self.set_theme(self.theme)
@@ -2544,6 +2768,37 @@ class PhotoViewer(QMainWindow):
             cb.setChecked(init_state)
             cb.stateChanged.connect(lambda st, c=callback: c(st))
             layout.addWidget(cb)
+
+        cache_label = (
+            "Cache previews on disk"
+            if self.current_language == "en"
+            else "Guardar vistas previas en disco"
+        )
+        cache_checkbox = QCheckBox(cache_label, container)
+        cache_checkbox.setChecked(self.preview_cache_enabled)
+        cache_checkbox.stateChanged.connect(
+            lambda state: self.set_preview_cache_enabled(bool(state))
+        )
+        layout.addWidget(cache_checkbox)
+
+        cache_size_mb = ImageLoaderRunnable.disk_cache_size() / (1024 * 1024)
+        clear_cache_text = (
+            f"Clear preview cache ({cache_size_mb:.0f} MB)"
+            if self.current_language == "en"
+            else f"Borrar caché de vistas previas ({cache_size_mb:.0f} MB)"
+        )
+        clear_cache_button = QPushButton(clear_cache_text, container)
+
+        def clear_preview_cache():
+            ImageLoaderRunnable.clear_disk_cache()
+            clear_cache_button.setText(
+                "Clear preview cache (0 MB)"
+                if self.current_language == "en"
+                else "Borrar caché de vistas previas (0 MB)"
+            )
+
+        clear_cache_button.clicked.connect(clear_preview_cache)
+        layout.addWidget(clear_cache_button)
         layout.addSpacing(5)
 
         # --- Sorting Options Section (within your existing settings overlay) ---
@@ -4151,6 +4406,8 @@ class PhotoViewer(QMainWindow):
                 self.sort_option              = config.get('sort_option', 'file_name')
                 self.sort_ascending           = config.get('sort_ascending', True)
                 self.theme                    = config.get('theme', 'black')
+                self.preview_cache_enabled    = config.get('preview_cache_enabled', True)
+                self.preview_cache_limit_mb   = config.get('preview_cache_limit_mb', 1024)
             else:
                 self.load_last_folder         = False
                 self.current_directory        = None
@@ -4165,6 +4422,8 @@ class PhotoViewer(QMainWindow):
                 self.sort_option              = 'file_name'
                 self.sort_ascending           = True
                 self.theme                    = 'black'
+                self.preview_cache_enabled    = True
+                self.preview_cache_limit_mb   = 1024
         except Exception as e:
             print(f"Error loading config: {e}")
             self.load_last_folder         = False
@@ -4180,6 +4439,8 @@ class PhotoViewer(QMainWindow):
             self.sort_option              = 'file_name'
             self.sort_ascending           = True
             self.theme                    = 'black'
+            self.preview_cache_enabled    = True
+            self.preview_cache_limit_mb   = 1024
 
     def save_config(self):
         try:
@@ -4197,6 +4458,8 @@ class PhotoViewer(QMainWindow):
                 'sort_option':             self.sort_option,
                 'sort_ascending':          self.sort_ascending,
                 'theme':                   self.theme,
+                'preview_cache_enabled':   self.preview_cache_enabled,
+                'preview_cache_limit_mb':  self.preview_cache_limit_mb,
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
@@ -4204,6 +4467,9 @@ class PhotoViewer(QMainWindow):
             print(f"Error saving config: {e}")
 
     def save_marked_images(self):
+        self._marked_save_timer.start()
+
+    def _write_marked_images(self):
         if not self.current_directory:
             return
         favorites_list = []
@@ -4238,10 +4504,19 @@ class PhotoViewer(QMainWindow):
             'compare': compare_list
         }
         json_path = os.path.join(self.current_directory, 'Favorites.json')
+        temp_path = json_path + ".tmp"
         try:
-            with open(json_path, 'w', encoding='utf-8') as f:
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, json_path)
         except Exception as e:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except OSError:
+                pass
             self.show_custom_dialog(
                 f"{translations[self.current_language]['error_loading_image']}\n{str(e)}",
                 icon_type="error",
@@ -4365,6 +4640,14 @@ class PhotoViewer(QMainWindow):
         self.load_last_folder = value
         self.save_config()
 
+    def set_preview_cache_enabled(self, value: bool):
+        self.preview_cache_enabled = value
+        ImageLoaderRunnable.configure_disk_cache(
+            enabled=value,
+            limit_mb=self.preview_cache_limit_mb,
+        )
+        self.save_config()
+
     def _starting_image_index(self, selected_file=None, start_at_first=False):
         norm_selected = (
             os.path.normcase(os.path.normpath(selected_file))
@@ -4387,6 +4670,10 @@ class PhotoViewer(QMainWindow):
         do_show=True,
         start_at_first=False,
     ):
+        if self._marked_save_timer.isActive():
+            self._marked_save_timer.stop()
+            self._write_marked_images()
+
         # ——— Clear all per-image history when loading a new folder ———
         self._history.clear()
         self._modified.clear()
@@ -4477,36 +4764,61 @@ class PhotoViewer(QMainWindow):
         # ——— Phase 1: mark loading so star updates are skipped ———
         self.image_loading = True
 
-        # ——— Phase 2: preload neighbors into cache ———
-        from PyQt6.QtCore import QThreadPool
-        for neighbor_index in (self.current_index - 1, self.current_index + 1):
-            if 0 <= neighbor_index < len(self.image_files):
-                neighbor_path = self.image_files[neighbor_index]
-                if ImageLoaderRunnable.get_cached_pixmap(neighbor_path) is not None:
-                    continue
-                if neighbor_path in self._preload_inflight:
-                    continue
-                loader = ImageLoaderRunnable(neighbor_path)
-                self._preload_inflight.add(neighbor_path)
-                loader.signals.finished.connect(
-                    lambda _pix, path=neighbor_path: self._preload_inflight.discard(path)
-                )
-                loader.signals.error.connect(
-                    lambda _err, path=neighbor_path: self._preload_inflight.discard(path)
-                )
-                QThreadPool.globalInstance().start(loader)
-
-        # ——— Phase 3: display current image (cache-first) ———
+        # ——— Phase 2: display current image before scheduling speculative work ———
         viewer = self.image_viewer
         pix = ImageLoaderRunnable.get_cached_pixmap(path)
         if pix is not None:
-            # immediate show from cache
             viewer.load_counter = getattr(viewer, "load_counter", 0) + 1
             viewer.current_load_id = viewer.load_counter
-            viewer.onImageLoaded(pix, reset_zoom, preserve_zoom, viewer.current_load_id)
+            viewer.onImageLoaded(
+                pix,
+                reset_zoom,
+                preserve_zoom,
+                viewer.current_load_id,
+                full_resolution=True,
+            )
         else:
-            # fallback to threaded load
             viewer.setImage(path, reset_zoom, preserve_zoom)
+
+        # ——— Phase 3: preload display-sized neighbors, forward first ———
+        from PyQt6.QtCore import QThreadPool
+        preview_dimension = max(
+            1024,
+            min(
+                4096,
+                max(viewer.viewport().width(), viewer.viewport().height()) * 2,
+            ),
+        )
+        for neighbor_index in (self.current_index + 1, self.current_index - 1):
+            if not (0 <= neighbor_index < len(self.image_files)):
+                continue
+            neighbor_path = self.image_files[neighbor_index]
+            if (
+                ImageLoaderRunnable.get_cached_preview(
+                    neighbor_path,
+                    preview_dimension,
+                )
+                is not None
+            ):
+                continue
+            if neighbor_path in self._preload_inflight:
+                continue
+            loader = ImageLoaderRunnable(
+                neighbor_path,
+                max_dimension=preview_dimension,
+                progressive=True,
+                load_full=False,
+            )
+            self._preload_inflight.add(neighbor_path)
+            loader.signals.previewReady.connect(
+                lambda _frame, path=neighbor_path:
+                    self._preload_inflight.discard(path)
+            )
+            loader.signals.error.connect(
+                lambda _err, path=neighbor_path:
+                    self._preload_inflight.discard(path)
+            )
+            QThreadPool.globalInstance().start(loader)
 
         # ——— Phase 4: refresh controls ———
         self.update_floating_controls()
@@ -5026,6 +5338,17 @@ class PhotoViewer(QMainWindow):
 
 
     def open_brightness_overlay(self):
+        if not self.image_viewer.full_resolution_ready:
+            self.show_ephemeral_message(
+                translations.get(
+                    self.current_language,
+                    translations["en"],
+                ).get(
+                    "full_resolution_loading",
+                    "Full-resolution image is still loading.",
+                )
+            )
+            return
         t = translations[self.current_language]
 
         # 1) Disable shortcuts & floating menu
@@ -5586,6 +5909,9 @@ class PhotoViewer(QMainWindow):
             self.show_ephemeral_message(t["compare_filter_disabled"])
 
     def closeEvent(self, event):
+        if self._marked_save_timer.isActive():
+            self._marked_save_timer.stop()
+            self._write_marked_images()
         self.save_config()
         super().closeEvent(event)
 
@@ -5610,6 +5936,15 @@ class PhotoViewer(QMainWindow):
         # 0) Basic checks: do nothing if there is no image
         if not self.image_files or self.current_index < 0:
             return
+        if not self.image_viewer.full_resolution_ready:
+            t = translations.get(self.current_language, translations["en"])
+            self.show_ephemeral_message(
+                t.get(
+                    "full_resolution_loading",
+                    "Full-resolution image is still loading.",
+                )
+            )
+            return
 
         # 1) Determine the normalized path & original file path
         norm_path = self.image_files[self.current_index]
@@ -5618,7 +5953,7 @@ class PhotoViewer(QMainWindow):
         folder = os.path.dirname(orig_path)
 
         # Grab the current QPixmap from the viewer (what the user sees right now)
-        modified = self.image_viewer.pixmap_item.pixmap()
+        modified = self.image_viewer.renderFullResolution()
         if modified.isNull():
             # Nothing to save
             return
@@ -5832,6 +6167,17 @@ class PhotoViewer(QMainWindow):
         self.delete_thread.start()
 
     def open_crop_overlay(self):
+        if not self.image_viewer.full_resolution_ready:
+            self.show_ephemeral_message(
+                translations.get(
+                    self.current_language,
+                    translations["en"],
+                ).get(
+                    "full_resolution_loading",
+                    "Full-resolution image is still loading.",
+                )
+            )
+            return
         # Retrieve the pristine (original) pixmap.
         current_pixmap = self.image_viewer.original_pixmap
         if current_pixmap is None or current_pixmap.isNull():
@@ -6220,6 +6566,18 @@ class PhotoViewer(QMainWindow):
         Launch the Sharpness overlay *without* pushing an undo state.
         We only snapshot when the user actually applies the change.
         """
+        if not self.image_viewer.full_resolution_ready:
+            self.show_ephemeral_message(
+                translations.get(
+                    self.current_language,
+                    translations["en"],
+                ).get(
+                    "full_resolution_loading",
+                    "Full-resolution image is still loading.",
+                )
+            )
+            return
+
         # If you had a leftover flag, clear it:
         if hasattr(self, "_sharpness_undo_pushed"):
             del self._sharpness_undo_pushed

@@ -1,11 +1,17 @@
 """LAB unsharp mask via OpenCV."""
-import cv2
-import numpy as np
 from PyQt6.QtGui import QPixmap, QImage
 
 
-def sharpen_cv2(pixmap: QPixmap, radius: int, amount: float, threshold: int = 2) -> QPixmap:
-    qimg = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+def sharpen_qimage(
+    image: QImage,
+    radius: int,
+    amount: float,
+    threshold: int = 2,
+) -> QImage:
+    import cv2
+    import numpy as np
+
+    qimg = image.convertToFormat(QImage.Format.Format_RGBA8888)
     w, h = qimg.width(), qimg.height()
     ptr = qimg.bits()
     ptr.setsize(w * h * 4)
@@ -39,4 +45,15 @@ def sharpen_cv2(pixmap: QPixmap, radius: int, amount: float, threshold: int = 2)
     bgr_new = cv2.cvtColor(lab_new, cv2.COLOR_LAB2BGR)
     rgba = cv2.cvtColor(bgr_new, cv2.COLOR_BGR2RGBA)
     qimg2 = QImage(rgba.data, w, h, QImage.Format.Format_RGBA8888)
-    return QPixmap.fromImage(qimg2.copy())
+    return qimg2.copy()
+
+
+def sharpen_cv2(
+    pixmap: QPixmap,
+    radius: int,
+    amount: float,
+    threshold: int = 2,
+) -> QPixmap:
+    return QPixmap.fromImage(
+        sharpen_qimage(pixmap.toImage(), radius, amount, threshold)
+    )
