@@ -340,7 +340,7 @@ class MyDragOverlay(QWidget):
                     path = url.toLocalFile()
                     main = self.window()
                     if os.path.isdir(path):
-                        main.load_directory(path)
+                        main.load_directory(path, start_at_first=True)
                     elif path.lower().endswith(ALLOWED_EXTENSIONS):
                         main.load_directory(os.path.dirname(path), selected_file=path)
             self.hide()

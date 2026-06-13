@@ -44,8 +44,8 @@ def test_drag_overlay_loads_dropped_folder(qapp, tmp_path):
     parent = QWidget()
     loaded = []
     parent.load_directory = (
-        lambda directory, selected_file=None: loaded.append(
-            (directory, selected_file)
+        lambda directory, selected_file=None, start_at_first=False: loaded.append(
+            (directory, selected_file, start_at_first)
         )
     )
     overlay = MyDragOverlay(parent)
@@ -57,6 +57,7 @@ def test_drag_overlay_loads_dropped_folder(qapp, tmp_path):
     assert len(loaded) == 1
     assert os.path.normpath(loaded[0][0]) == os.path.normpath(tmp_path)
     assert loaded[0][1] is None
+    assert loaded[0][2] is True
 
 
 def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
@@ -66,8 +67,8 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
     parent = QWidget()
     loaded = []
     parent.load_directory = (
-        lambda directory, selected_file=None: loaded.append(
-            (directory, selected_file)
+        lambda directory, selected_file=None, start_at_first=False: loaded.append(
+            (directory, selected_file, start_at_first)
         )
     )
     overlay = MyDragOverlay(parent)
@@ -79,6 +80,7 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
     assert len(loaded) == 1
     assert os.path.normpath(loaded[0][0]) == os.path.normpath(tmp_path)
     assert os.path.normpath(loaded[0][1]) == os.path.normpath(image)
+    assert loaded[0][2] is False
 
 
 def test_open_directory_keeps_original_image_picker(monkeypatch, tmp_path):
@@ -146,3 +148,59 @@ def test_open_directory_keeps_original_image_picker(monkeypatch, tmp_path):
         call[0] == "name-filter" and "*.jpg" in call[1]
         for call in viewer.dialog.calls
     )
+
+
+def test_dropped_folder_starts_at_first_ascending_image(tmp_path):
+    viewer = type(
+        "FakeViewer",
+        (),
+        {
+            "image_files": [
+                str(tmp_path / "a.jpg"),
+                str(tmp_path / "b.jpg"),
+            ],
+            "last_index": -1,
+        },
+    )()
+
+    index = PhotoViewer._starting_image_index(viewer, start_at_first=True)
+
+    assert index == 0
+    assert viewer.image_files[index].endswith("a.jpg")
+
+
+def test_dropped_folder_starts_at_first_descending_image(tmp_path):
+    viewer = type(
+        "FakeViewer",
+        (),
+        {
+            "image_files": [
+                str(tmp_path / "b.jpg"),
+                str(tmp_path / "a.jpg"),
+            ],
+            "last_index": -1,
+        },
+    )()
+
+    index = PhotoViewer._starting_image_index(viewer, start_at_first=True)
+
+    assert index == 0
+    assert viewer.image_files[index].endswith("b.jpg")
+
+
+def test_normal_folder_restore_still_uses_last_index(tmp_path):
+    viewer = type(
+        "FakeViewer",
+        (),
+        {
+            "image_files": [
+                str(tmp_path / "a.jpg"),
+                str(tmp_path / "b.jpg"),
+            ],
+            "last_index": 1,
+        },
+    )()
+
+    index = PhotoViewer._starting_image_index(viewer)
+
+    assert index == 1

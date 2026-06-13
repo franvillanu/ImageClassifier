@@ -4365,7 +4365,28 @@ class PhotoViewer(QMainWindow):
         self.load_last_folder = value
         self.save_config()
 
-    def load_directory(self, directory, selected_file=None, do_show=True):
+    def _starting_image_index(self, selected_file=None, start_at_first=False):
+        norm_selected = (
+            os.path.normcase(os.path.normpath(selected_file))
+            if selected_file else None
+        )
+        norm_images = [
+            os.path.normcase(os.path.normpath(path))
+            for path in self.image_files
+        ]
+        if norm_selected and norm_selected in norm_images:
+            return norm_images.index(norm_selected)
+        if start_at_first:
+            return 0
+        return getattr(self, "last_index", 0)
+
+    def load_directory(
+        self,
+        directory,
+        selected_file=None,
+        do_show=True,
+        start_at_first=False,
+    ):
         # ——— Clear all per-image history when loading a new folder ———
         self._history.clear()
         self._modified.clear()
@@ -4409,15 +4430,10 @@ class PhotoViewer(QMainWindow):
 
         # Choose starting index
         if self.image_files:
-            norm_selected = (
-                os.path.normcase(os.path.normpath(selected_file))
-                if selected_file else None
+            self.current_index = self._starting_image_index(
+                selected_file=selected_file,
+                start_at_first=start_at_first,
             )
-            norm_images = [os.path.normcase(os.path.normpath(p)) for p in self.image_files]
-            if norm_selected and norm_selected in norm_images:
-                self.current_index = norm_images.index(norm_selected)
-            else:
-                self.current_index = getattr(self, "last_index", 0)
             if do_show:
                 self.show_image()
 
