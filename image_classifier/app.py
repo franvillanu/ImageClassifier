@@ -4328,47 +4328,38 @@ class PhotoViewer(QMainWindow):
 
     def open_directory(self):
         t = translations[self.current_language]
+        self.dialog = QFileDialog(self, t["select_folder"])
+        # Allow multiple selection
+        self.dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        image_patterns = " ".join(f"*{extension}" for extension in ALLOWED_EXTENSIONS)
+        self.dialog.setNameFilter(f"Images ({image_patterns})")
+        self.dialog.setViewMode(QFileDialog.ViewMode.List)
         if self.current_directory and os.path.exists(self.current_directory):
-            start_directory = self.current_directory
+            self.dialog.setDirectory(self.current_directory)
         else:
-            start_directory = os.path.expanduser("~")
-
-        image_patterns = " ".join(
-            f"*{extension}" for extension in ALLOWED_EXTENSIONS
-        )
-        selected_file, _ = QFileDialog.getOpenFileName(
-            self,
-            t["select_image_from_folder"],
-            start_directory,
-            f"Images ({image_patterns})",
-        )
-        if selected_file:
-            self.load_directory_from_input(
-                os.path.dirname(selected_file),
-                selected_file=selected_file,
-            )
-
-    def load_directory_from_input(self, directory, selected_file=None):
-        t = translations[self.current_language]
-        try:
-            has_images = any(
-                entry.is_file()
-                and entry.name.lower().endswith(ALLOWED_EXTENSIONS)
-                for entry in os.scandir(directory)
-            )
-        except OSError:
-            has_images = False
-
-        if not has_images:
-            self.show_custom_dialog(
-                t["folder_no_images"],
-                icon_type="warning",
-                buttons="ok",
-            )
-            return False
-
-        self.load_directory(directory, selected_file=selected_file)
-        return True
+            user_home = os.path.expanduser("~")
+            self.dialog.setDirectory(user_home)
+        if self.dialog.exec():
+            selected_files = self.dialog.selectedFiles()
+            if not selected_files:
+                return
+            # Assume all selected files are in the same folder.
+            # Use the last selected file as the "primary" selection.
+            chosen_file = selected_files[0]
+            chosen_folder = os.path.dirname(chosen_file)
+            images_in_folder = [
+                f for f in os.listdir(chosen_folder)
+                if f.lower().endswith(ALLOWED_EXTENSIONS)
+            ]
+            if not images_in_folder:
+                self.show_custom_dialog(
+                    t["folder_no_images"],
+                    icon_type="warning",
+                    buttons="ok"
+                )
+                self.dialog.selectFile("")
+                return
+            self.load_directory(chosen_folder, selected_file=chosen_file)
 
     def set_load_last_folder(self, value: bool):
         self.load_last_folder = value

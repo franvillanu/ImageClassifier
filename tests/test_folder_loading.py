@@ -43,7 +43,7 @@ def test_drag_overlay_loads_dropped_folder(qapp, tmp_path):
 
     parent = QWidget()
     loaded = []
-    parent.load_directory_from_input = (
+    parent.load_directory = (
         lambda directory, selected_file=None: loaded.append(
             (directory, selected_file)
         )
@@ -65,7 +65,7 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
 
     parent = QWidget()
     loaded = []
-    parent.load_directory_from_input = (
+    parent.load_directory = (
         lambda directory, selected_file=None: loaded.append(
             (directory, selected_file)
         )
@@ -81,20 +81,38 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
     assert os.path.normpath(loaded[0][1]) == os.path.normpath(image)
 
 
-def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
+def test_open_directory_keeps_original_image_picker(monkeypatch, tmp_path):
     loaded = []
     image = tmp_path / "chosen.jpg"
     image.write_bytes(b"test")
 
     class FakeFileDialog:
-        calls = []
+        class FileMode:
+            ExistingFiles = "existing-files"
 
-        @staticmethod
-        def getOpenFileName(parent, title, start_directory, name_filter):
-            FakeFileDialog.calls.append(
-                (parent, title, start_directory, name_filter)
-            )
-            return str(image), name_filter
+        class ViewMode:
+            List = "list"
+
+        def __init__(self, parent, title):
+            self.calls = [("init", parent, title)]
+
+        def setFileMode(self, mode):
+            self.calls.append(("file-mode", mode))
+
+        def setNameFilter(self, name_filter):
+            self.calls.append(("name-filter", name_filter))
+
+        def setViewMode(self, view_mode):
+            self.calls.append(("view-mode", view_mode))
+
+        def setDirectory(self, directory):
+            self.calls.append(("directory", directory))
+
+        def exec(self):
+            return True
+
+        def selectedFiles(self):
+            return [str(image)]
 
     viewer = type(
         "FakeViewer",
@@ -102,7 +120,8 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
         {
             "current_language": "en",
             "current_directory": None,
-            "load_directory_from_input": (
+            "show_custom_dialog": lambda self, *args, **kwargs: None,
+            "load_directory": (
                 lambda self, directory, selected_file=None: loaded.append(
                     (directory, selected_file)
                 )
@@ -114,55 +133,16 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
     PhotoViewer.open_directory(viewer)
 
     assert loaded == [(str(tmp_path), str(image))]
-    assert FakeFileDialog.calls[0][1] == "Choose an image from the folder"
-    assert "*.jpg" in FakeFileDialog.calls[0][3]
-
-
-def test_load_directory_from_input_rejects_empty_folder(tmp_path):
-    dialogs = []
-    loaded = []
-    viewer = type(
-        "FakeViewer",
-        (),
-        {
-            "current_language": "en",
-            "show_custom_dialog": lambda self, message, **kwargs: dialogs.append(
-                (message, kwargs)
-            ),
-            "load_directory": lambda self, directory, selected_file=None: loaded.append(
-                (directory, selected_file)
-            ),
-        },
-    )()
-
-    result = PhotoViewer.load_directory_from_input(viewer, str(tmp_path))
-
-    assert result is False
-    assert not loaded
-    assert dialogs[0][1]["icon_type"] == "warning"
-
-
-def test_load_directory_from_input_loads_supported_images(tmp_path):
-    image = Path(tmp_path) / "photo.webp"
-    image.write_bytes(b"test")
-    loaded = []
-    viewer = type(
-        "FakeViewer",
-        (),
-        {
-            "current_language": "en",
-            "show_custom_dialog": lambda self, *args, **kwargs: None,
-            "load_directory": lambda self, directory, selected_file=None: loaded.append(
-                (directory, selected_file)
-            ),
-        },
-    )()
-
-    result = PhotoViewer.load_directory_from_input(
-        viewer,
-        str(tmp_path),
-        selected_file=str(image),
+    assert viewer.dialog.calls[0][2] == "Select Folder"
+    assert (
+        "file-mode",
+        FakeFileDialog.FileMode.ExistingFiles,
+    ) in viewer.dialog.calls
+    assert (
+        "view-mode",
+        FakeFileDialog.ViewMode.List,
+    ) in viewer.dialog.calls
+    assert any(
+        call[0] == "name-filter" and "*.jpg" in call[1]
+        for call in viewer.dialog.calls
     )
-
-    assert result is True
-    assert loaded == [(str(tmp_path), str(image))]
