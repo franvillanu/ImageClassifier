@@ -36,6 +36,7 @@ from image_classifier.ui import (
     OverlayComboBox,
     SmoothRotationSlider,
     MyDragOverlay,
+    ImageThumbnailIconProvider,
     ALLOWED_EXTENSIONS,
     HelpDialog,
     TooltipEventFilter,
@@ -4343,7 +4344,15 @@ class PhotoViewer(QMainWindow):
             f"*{extension}" for extension in ALLOWED_EXTENSIONS
         )
         self.dialog.setNameFilter(f"Images ({image_patterns})")
-        self.dialog.setViewMode(QFileDialog.ViewMode.Detail)
+        thumbnail_size = QSize(144, 108)
+        self.dialog.setIconProvider(ImageThumbnailIconProvider(thumbnail_size))
+        self.dialog.setViewMode(QFileDialog.ViewMode.List)
+        list_view = self.dialog.findChild(QListView, "listView")
+        if list_view:
+            list_view.setIconSize(thumbnail_size)
+            list_view.setGridSize(QSize(180, 145))
+            list_view.setResizeMode(QListView.ResizeMode.Adjust)
+            list_view.setUniformItemSizes(True)
 
         if self.dialog.exec():
             selected_paths = self.dialog.selectedFiles()

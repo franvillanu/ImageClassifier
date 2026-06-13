@@ -2,12 +2,13 @@
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QFileInfo, QSize, QUrl
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QWidget
 
 import image_classifier.app as app_module
 from image_classifier.app import PhotoViewer
-from image_classifier.ui.widgets import MyDragOverlay
+from image_classifier.ui.widgets import ImageThumbnailIconProvider, MyDragOverlay
 
 
 class FakeMimeData:
@@ -93,7 +94,7 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
             ShowDirsOnly = "show-dirs-only"
 
         class ViewMode:
-            Detail = "detail"
+            List = "list"
 
         def __init__(self, parent):
             self.parent = parent
@@ -114,8 +115,15 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
         def setNameFilter(self, name_filter):
             self.calls.append(("name-filter", name_filter))
 
+        def setIconProvider(self, provider):
+            self.calls.append(("icon-provider", provider))
+
         def setViewMode(self, view_mode):
             self.calls.append(("view-mode", view_mode))
+
+        def findChild(self, widget_type, object_name):
+            self.calls.append(("find-child", widget_type, object_name))
+            return None
 
         def exec(self):
             return True
@@ -158,6 +166,30 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
         call[0] == "name-filter" and "*.jpg" in call[1]
         for call in viewer.dialog.calls
     )
+    assert any(
+        call[0] == "icon-provider"
+        and isinstance(call[1], ImageThumbnailIconProvider)
+        for call in viewer.dialog.calls
+    )
+    assert (
+        "view-mode",
+        FakeFileDialog.ViewMode.List,
+    ) in viewer.dialog.calls
+
+
+def test_thumbnail_provider_returns_image_preview(qapp, tmp_path):
+    path = tmp_path / "preview.png"
+    image = QImage(320, 180, QImage.Format.Format_RGB32)
+    image.fill(0xFF336699)
+    assert image.save(str(path))
+
+    provider = ImageThumbnailIconProvider(QSize(144, 108))
+    icon = provider.icon(QFileInfo(str(path)))
+    pixmap = icon.pixmap(QSize(144, 108))
+
+    assert not pixmap.isNull()
+    assert pixmap.width() == 144
+    assert pixmap.height() == 81
 
 
 def test_load_directory_from_input_rejects_empty_folder(tmp_path):
