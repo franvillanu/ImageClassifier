@@ -1,77 +1,24 @@
 """Reusable PyQt widgets: overlays, combo boxes, sliders, drag overlay."""
 import os
-from collections import OrderedDict
 
 from PyQt6.QtWidgets import (
     QWidget,
     QComboBox,
-    QFileIconProvider,
     QHBoxLayout,
     QListView,
     QStyledItemDelegate,
     QSlider,
     QStyle,
 )
-from PyQt6.QtGui import QBrush, QIcon, QImageReader, QKeyEvent, QMouseEvent, QPixmap
-from PyQt6.QtCore import QFileInfo, Qt, QPoint, QSize, QTimer, QEvent, pyqtSignal
+from PyQt6.QtGui import QBrush, QKeyEvent, QMouseEvent
+from PyQt6.QtCore import Qt, QPoint, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QGuiApplication
-
-from image_classifier.imaging.loader import _read_with_pillow
 
 
 ALLOWED_EXTENSIONS = (
     '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tiff', '.tif',
     '.heic', '.heif',
 )
-
-
-# ------------------------------------------------------------------------
-# Image thumbnails for folder selection
-# ------------------------------------------------------------------------
-class ImageThumbnailIconProvider(QFileIconProvider):
-    def __init__(self, thumbnail_size=QSize(144, 108), cache_limit=256):
-        super().__init__()
-        self.thumbnail_size = thumbnail_size
-        self.cache_limit = cache_limit
-        self._cache = OrderedDict()
-
-    def icon(self, file_info):
-        if not isinstance(file_info, QFileInfo) or not file_info.isFile():
-            return super().icon(file_info)
-
-        path = file_info.absoluteFilePath()
-        if not path.lower().endswith(ALLOWED_EXTENSIONS):
-            return super().icon(file_info)
-
-        cache_key = (
-            os.path.normcase(path),
-            file_info.lastModified().toMSecsSinceEpoch(),
-        )
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            self._cache.move_to_end(cache_key)
-            return cached
-
-        reader = QImageReader(path)
-        reader.setAutoTransform(True)
-        image = reader.read()
-        if image.isNull():
-            try:
-                image = _read_with_pillow(path)
-            except (OSError, ValueError):
-                return super().icon(file_info)
-
-        pixmap = QPixmap.fromImage(image).scaled(
-            self.thumbnail_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        icon = QIcon(pixmap)
-        self._cache[cache_key] = icon
-        self._cache.move_to_end(cache_key)
-        while len(self._cache) > self.cache_limit:
-            self._cache.popitem(last=False)
-        return icon
 
 
 # ------------------------------------------------------------------------

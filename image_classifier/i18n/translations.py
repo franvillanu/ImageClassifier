@@ -10,6 +10,7 @@ translations = {
         
         # 2. Navigation & Folder Operations
         "select_folder": "Select Folder",
+        "select_image_from_folder": "Choose an image from the folder",
         "export_favorites": "Export Favorites",
         "fullscreen": "Fullscreen",
         "filter": "Filter",
@@ -328,6 +329,7 @@ translations = {
         
         # 2. Operaciones de Navegación / Carpetas
         "select_folder": "Seleccionar Carpeta",
+        "select_image_from_folder": "Elija una imagen de la carpeta",
         "export_favorites": "Exportar Favoritas",
         "fullscreen": "Pantalla Completa",
         "filter": "Filtro",

@@ -2,13 +2,12 @@
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import QFileInfo, QSize, QUrl
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import QWidget
 
 import image_classifier.app as app_module
 from image_classifier.app import PhotoViewer
-from image_classifier.ui.widgets import ImageThumbnailIconProvider, MyDragOverlay
+from image_classifier.ui.widgets import MyDragOverlay
 
 
 class FakeMimeData:
@@ -84,52 +83,18 @@ def test_drag_overlay_preserves_dropped_image_selection(qapp, tmp_path):
 
 def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
     loaded = []
+    image = tmp_path / "chosen.jpg"
+    image.write_bytes(b"test")
 
     class FakeFileDialog:
-        class FileMode:
-            Directory = "directory"
+        calls = []
 
-        class Option:
-            DontUseNativeDialog = "non-native"
-            ShowDirsOnly = "show-dirs-only"
-
-        class ViewMode:
-            List = "list"
-
-        def __init__(self, parent):
-            self.parent = parent
-            self.calls = []
-
-        def setOption(self, option, enabled):
-            self.calls.append(("option", option, enabled))
-
-        def setWindowTitle(self, title):
-            self.calls.append(("title", title))
-
-        def setDirectory(self, directory):
-            self.calls.append(("directory", directory))
-
-        def setFileMode(self, mode):
-            self.calls.append(("file-mode", mode))
-
-        def setNameFilter(self, name_filter):
-            self.calls.append(("name-filter", name_filter))
-
-        def setIconProvider(self, provider):
-            self.calls.append(("icon-provider", provider))
-
-        def setViewMode(self, view_mode):
-            self.calls.append(("view-mode", view_mode))
-
-        def findChild(self, widget_type, object_name):
-            self.calls.append(("find-child", widget_type, object_name))
-            return None
-
-        def exec(self):
-            return True
-
-        def selectedFiles(self):
-            return [str(tmp_path)]
+        @staticmethod
+        def getOpenFileName(parent, title, start_directory, name_filter):
+            FakeFileDialog.calls.append(
+                (parent, title, start_directory, name_filter)
+            )
+            return str(image), name_filter
 
     viewer = type(
         "FakeViewer",
@@ -137,8 +102,10 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
         {
             "current_language": "en",
             "current_directory": None,
-            "load_directory_from_input": lambda self, directory: loaded.append(
-                directory
+            "load_directory_from_input": (
+                lambda self, directory, selected_file=None: loaded.append(
+                    (directory, selected_file)
+                )
             ),
         },
     )()
@@ -146,50 +113,9 @@ def test_open_directory_uses_folder_picker(monkeypatch, tmp_path):
 
     PhotoViewer.open_directory(viewer)
 
-    assert loaded == [str(tmp_path)]
-    assert viewer.dialog.calls[0] == (
-        "option",
-        FakeFileDialog.Option.DontUseNativeDialog,
-        True,
-    )
-    assert ("title", "Select Folder") in viewer.dialog.calls
-    assert (
-        "file-mode",
-        FakeFileDialog.FileMode.Directory,
-    ) in viewer.dialog.calls
-    assert (
-        "option",
-        FakeFileDialog.Option.ShowDirsOnly,
-        False,
-    ) in viewer.dialog.calls
-    assert any(
-        call[0] == "name-filter" and "*.jpg" in call[1]
-        for call in viewer.dialog.calls
-    )
-    assert any(
-        call[0] == "icon-provider"
-        and isinstance(call[1], ImageThumbnailIconProvider)
-        for call in viewer.dialog.calls
-    )
-    assert (
-        "view-mode",
-        FakeFileDialog.ViewMode.List,
-    ) in viewer.dialog.calls
-
-
-def test_thumbnail_provider_returns_image_preview(qapp, tmp_path):
-    path = tmp_path / "preview.png"
-    image = QImage(320, 180, QImage.Format.Format_RGB32)
-    image.fill(0xFF336699)
-    assert image.save(str(path))
-
-    provider = ImageThumbnailIconProvider(QSize(144, 108))
-    icon = provider.icon(QFileInfo(str(path)))
-    pixmap = icon.pixmap(QSize(144, 108))
-
-    assert not pixmap.isNull()
-    assert pixmap.width() == 144
-    assert pixmap.height() == 81
+    assert loaded == [(str(tmp_path), str(image))]
+    assert FakeFileDialog.calls[0][1] == "Choose an image from the folder"
+    assert "*.jpg" in FakeFileDialog.calls[0][3]
 
 
 def test_load_directory_from_input_rejects_empty_folder(tmp_path):

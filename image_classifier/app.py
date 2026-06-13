@@ -36,7 +36,6 @@ from image_classifier.ui import (
     OverlayComboBox,
     SmoothRotationSlider,
     MyDragOverlay,
-    ImageThumbnailIconProvider,
     ALLOWED_EXTENSIONS,
     HelpDialog,
     TooltipEventFilter,
@@ -4334,30 +4333,20 @@ class PhotoViewer(QMainWindow):
         else:
             start_directory = os.path.expanduser("~")
 
-        self.dialog = QFileDialog(self)
-        self.dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-        self.dialog.setWindowTitle(t["select_folder"])
-        self.dialog.setDirectory(start_directory)
-        self.dialog.setFileMode(QFileDialog.FileMode.Directory)
-        self.dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)
         image_patterns = " ".join(
             f"*{extension}" for extension in ALLOWED_EXTENSIONS
         )
-        self.dialog.setNameFilter(f"Images ({image_patterns})")
-        thumbnail_size = QSize(144, 108)
-        self.dialog.setIconProvider(ImageThumbnailIconProvider(thumbnail_size))
-        self.dialog.setViewMode(QFileDialog.ViewMode.List)
-        list_view = self.dialog.findChild(QListView, "listView")
-        if list_view:
-            list_view.setIconSize(thumbnail_size)
-            list_view.setGridSize(QSize(180, 145))
-            list_view.setResizeMode(QListView.ResizeMode.Adjust)
-            list_view.setUniformItemSizes(True)
-
-        if self.dialog.exec():
-            selected_paths = self.dialog.selectedFiles()
-            if selected_paths:
-                self.load_directory_from_input(selected_paths[0])
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            t["select_image_from_folder"],
+            start_directory,
+            f"Images ({image_patterns})",
+        )
+        if selected_file:
+            self.load_directory_from_input(
+                os.path.dirname(selected_file),
+                selected_file=selected_file,
+            )
 
     def load_directory_from_input(self, directory, selected_file=None):
         t = translations[self.current_language]
