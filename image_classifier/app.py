@@ -3394,7 +3394,7 @@ class PhotoViewer(QMainWindow):
         center = Qt.AlignmentFlag.AlignCenter
 
         icon_label = QLabel(container)
-        icon_label.setPixmap(self._about_icon_pixmap())
+        icon_label.setPixmap(IconFactory.get_icon("star_outline", 36).pixmap(36, 36))
         layout.addWidget(icon_label, alignment=center)
         layout.addSpacing(10)
 
@@ -3482,19 +3482,6 @@ class PhotoViewer(QMainWindow):
         self.about_overlay.raise_()
         # Explicitly transfer focus to the close button:
         close_btn.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-
-    @staticmethod
-    def _about_icon_pixmap(size=64):
-        """The star used as the window icon, drawn large and crisp for the About card."""
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        font = QFont()
-        font.setPixelSize(int(size * 0.78))
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "⭐")
-        painter.end()
-        return pixmap
 
     def close_about_overlay(self):
         """
