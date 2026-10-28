@@ -58,6 +58,13 @@ if ($pendingRelease.Count -gt 0) {
   Write-Host "Archivos de release incluidos: release: prepare v$releaseVersion ✅"
 }
 
+# ── 1.6. Push the branch: the PR is built from the pushed branch, never from local-only commits ─────
+git push --quiet -u origin $branch
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "No se pudo hacer push de la rama $branch"
+  exit 1
+}
+
 # ── 2. Fetch latest main ─────────────────────────────────────────────────────
 Write-Host "Actualizando origin/main..."
 git fetch origin main --quiet
