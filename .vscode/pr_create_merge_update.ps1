@@ -19,6 +19,24 @@ if ($branch -eq 'main') {
   Write-Host "Rama creada automaticamente: $branch"
 }
 
+# ── 1.2. Release: if release_notes.txt has a version that is not published yet, build it now ─────
+# One task does everything: version bump, build, sign, commit, PR, merge and publish.
+py scripts/auto_bump_version.py --needs-release
+$releaseCheck = $LASTEXITCODE
+if ($releaseCheck -eq 10) {
+  Write-Host ""
+  Write-Host "Release pendiente: construyendo y firmando con Release.bat..." -ForegroundColor Cyan
+  $env:NON_INTERACTIVE = '1'
+  cmd.exe /c ".\Release.bat"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error 'Release.bat fallo. Revisa el error de arriba (nada se ha mergeado ni publicado).'
+    exit 1
+  }
+} elseif ($releaseCheck -ne 0) {
+  Write-Error 'No se pudo comprobar si hay un release pendiente (auto_bump_version.py fallo).'
+  exit 1
+}
+
 # ── 1.5. Commit what Release.bat prepared (version bump, changelog, website) ───
 # Only these release-owned files are staged, so the bump always travels with the PR.
 $releaseFiles = @(

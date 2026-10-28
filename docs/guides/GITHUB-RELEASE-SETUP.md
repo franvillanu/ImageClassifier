@@ -21,9 +21,9 @@ There is no token file, no `GITHUB_TOKEN` and no `requests` dependency any more.
 
 ## Releasing
 
-1. Add the customer-facing line for the next version to `docs/release_notes.txt` (`version|EN|ES`).
-2. Run `Release.bat`. If the current version is already in the releases repo it bumps the patch version first (`scripts/auto_bump_version.py`). It syncs the version into `image_classifier/__init__.py`, `pyproject.toml` and `package.json` (`scripts/sync_version.py`), builds, signs and creates `Output/ImageClassifierSetup_v{VERSION}.exe`.
-3. Run the VS Code task **PR: create + merge (squash) + update main + delete branch**. It commits the release files Release.bat changed, merges, and its last step runs `scripts/create_github_release.py`, which publishes to the releases repo.
+Run the VS Code task **PR: create + merge (squash) + update main + delete branch**. Before it, add the new version's customer-facing line (`version|EN|ES`) at the top of `docs/release_notes.txt`: the newest version there is the one released.
+
+If that version is not in the releases repo yet, the task bumps the version, runs `Release.bat` (changelog, website, build, sign, `Output/ImageClassifierSetup_v{VERSION}.exe`), commits the release files, merges the PR and runs `scripts/create_github_release.py`, which publishes to the releases repo. Nothing needs to be run beforehand.
 
 To publish by hand: `py scripts/create_github_release.py`.
 
