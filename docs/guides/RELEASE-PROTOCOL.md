@@ -4,53 +4,25 @@ This document outlines the complete checklist for releasing a new version of Ima
 
 ## Version Update Checklist
 
-When releasing a new version, you **MUST** update the version number in ALL of the following locations:
+`version.txt` (`filevers=(X, Y, Z, W)` and the `'X.Y.Z.W'` strings) is the single source of truth. Everything else is synced from it:
 
-### 1. Core Version Files
-- ✅ `version.txt` - Update `filevers=(X, Y, Z, W)` and all `'X.Y.Z.W'` strings
-- ✅ `pyproject.toml` - Update `version = "X.Y"`
-- ✅ `package.json` - Update `"version": "X.Y.Z"` (if applicable)
+- `image_classifier/__init__.py`, `pyproject.toml`, `package.json` - synced by `scripts/sync_version.py` (runs in `Release.bat`)
+- `Image_Classifier.iss` - synced by `scripts/update_iss_version.py` (runs in `Release.bat`)
+- About dialog - built from `__version__` (the `app_version_label` translations contain a `{version}` placeholder; do not hard-code a number)
+- `docs/index.html` - updated by `scripts/update_website.py` (runs in `Release.bat`)
+- `docs/changelog.html` - updated via `docs/release_notes.txt` and `scripts/auto_update_changelog.py`
 
-### 2. Application Code
-- ✅ `image_classifier/__init__.py` - Update `__version__ = "X.Y"`
-- ✅ `image_classifier/i18n/translations.py` - Update **BOTH**:
-  - English: `"app_version_label": "Image Classifier - Version X.Y"`
-  - Spanish: `"app_version_label": "Clasificador de Imágenes - Versión X.Y"`
-
-### 3. Installer & Build Files
-- ✅ `Image_Classifier.iss` - Updated automatically by `scripts/update_iss_version.py` (runs during release)
-
-### 4. Website Files
-- ✅ `docs/index.html` - Updated automatically by `scripts/update_website.py` (runs during release)
-- ✅ `docs/changelog.html` - Updated manually or via `scripts/update_changelog.py`
-
-## Quick Version Bump
-
-Use the automated script to bump version in most files:
-
-```bash
-py scripts/bump_version.py [patch|minor|major|X.Y.Z]
-```
-
-**However**, you **MUST manually update**:
-- `image_classifier/i18n/translations.py` - Both English and Spanish `app_version_label` entries
-- `image_classifier/__init__.py` - `__version__` string
+⚠️ The in-app updater compares `image_classifier.__version__` with the latest release in
+`franvillanu/imageclassifier-releases`. If `__version__` lags behind `version.txt`, the app offers the same update forever.
+`scripts/create_github_release.py` refuses to publish when they differ, and `tests/test_version_sync.py` checks it.
 
 ## Release Process
 
-1. **Update version** using `bump_version.py` or manually
-2. **Manually update About dialog versions** in `translations.py` (English + Spanish)
-3. **Update changelog** in `docs/changelog.html`
-4. **Run release script**: `release.bat` or `release.bat patch/minor/major`
-5. **Verify About dialog** shows correct version in the app
-
-## Critical: About Dialog Version
-
-⚠️ **DO NOT FORGET**: The About dialog version is displayed from `translations.py`:
-- English: `"app_version_label": "Image Classifier - Version X.Y"`
-- Spanish: `"app_version_label": "Clasificador de Imágenes - Versión X.Y"`
-
-This is **NOT** automatically updated by `bump_version.py` and must be updated manually for every release.
+1. **Bump the version** in `version.txt` with `py scripts/bump_version.py patch|minor|major` (or edit by hand)
+2. **Add the customer-facing line** to `docs/release_notes.txt` (`version|EN|ES`)
+3. **Run `Release.bat`**: syncs versions, updates changelog and website, builds, signs, creates `Output/ImageClassifierSetup_vX.Y.Z.exe`
+4. **Merge with the PR task**: its last step publishes the release to `franvillanu/imageclassifier-releases` (see [GITHUB-RELEASE-SETUP.md](GITHUB-RELEASE-SETUP.md))
+5. **Verify** the About dialog version and the website download link
 
 ## Testing Checklist
 
@@ -58,5 +30,6 @@ Before releasing, verify:
 - [ ] About dialog shows correct version (English)
 - [ ] About dialog shows correct version (Spanish - switch language)
 - [ ] Version in `version.txt` matches About dialog
+- [ ] An older install offers the update (`IMAGE_CLASSIFIER_FAKE_VERSION=<older>`), downloads with progress, and restarts
 - [ ] Installer shows correct version
 - [ ] Website shows correct version

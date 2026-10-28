@@ -6,19 +6,10 @@
 
 Whenever you update the version number (in `version.txt`, `pyproject.toml`, etc.), you **MUST** also update:
 
-### 1. About Dialog Version (CRITICAL - Often Forgotten!)
+### 1. About Dialog and package version
 
-**File:** `image_classifier/i18n/translations.py`
-
-Update **BOTH** language entries:
-- English: `"app_version_label": "Image Classifier - Version X.Y"`
-- Spanish: `"app_version_label": "Clasificador de Imágenes - Versión X.Y"`
-
-### 2. Package Version
-
-**File:** `image_classifier/__init__.py`
-
-Update: `__version__ = "X.Y"`
+Do **not** hard-code the number in `translations.py`: `app_version_label` has a `{version}` placeholder filled from `__version__`.
+`scripts/sync_version.py` (run by `Release.bat`) copies the `version.txt` version into `image_classifier/__init__.py`, `pyproject.toml` and `package.json`. The in-app updater compares `__version__` with the latest release, so keep them in sync.
 
 ## Complete Checklist
 
@@ -26,4 +17,4 @@ See `docs/guides/RELEASE-PROTOCOL.md` for the complete version update checklist.
 
 ## Rule
 
-**Violation = About dialog showing wrong version. Always check translations.py when updating version.**
+**Violation = About dialog or updater using the wrong version. Run `py scripts/sync_version.py` after changing `version.txt`.**

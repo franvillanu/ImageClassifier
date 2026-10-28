@@ -6,7 +6,7 @@
 #define MyAppName      "Image Classifier"
 ; MyAppVersion: synced from version.txt by scripts/update_iss_version.py before release
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.7"
+  #define MyAppVersion "2.0.8"
 #endif
 #define MyAppPublisher "Francisco Villanueva"
 #define MyAppURL       "https://imageclassifier.neocities.org/"
@@ -81,6 +81,9 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}";   Description: "{cm:LaunchProgram}"; Flags: nowait postinstall skipifsilent
+; In-app update (/SILENT /UPDATE=1): reopen the app. The updater starts Setup already elevated, so
+; Inno has no un-elevated "original user"; going through explorer.exe starts the app un-elevated.
+Filename: "{win}\explorer.exe";      Parameters: """{app}\{#MyAppExeName}"""; Flags: nowait; Check: IsAppUpdate
 Filename: "{app}\{#ReadmeFile}";    Description: "{cm:OpenReadme}";    Flags: shellexec postinstall skipifsilent unchecked
 Filename: "explorer.exe";           Parameters: """{#MyAppURL}""";  Description: "{cm:VisitWebsite}"; Flags: shellexec postinstall skipifsilent unchecked
 
@@ -101,6 +104,14 @@ var
 begin
   Exec('certutil.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := (Code = 0);
+end;
+
+//--------------------------------------------------------------------------
+// True when launched by the in-app updater (/UPDATE=1): never prompt, keep prior choices
+//--------------------------------------------------------------------------
+function IsAppUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
 end;
 
 //--------------------------------------------------------------------------
@@ -260,6 +271,9 @@ var
 begin
   if CurStep <> ssPostInstall then Exit;
 
+  // In-app update: the user's earlier choices (Defender exclusion, icon, certificate) stay as they are
+  if IsAppUpdate() then Exit;
+
   // Apply Defender exclusion if they checked it
   if Assigned(ExclCheck) and ExclCheck.Checked then
     Exec(
@@ -279,7 +293,7 @@ begin
       '', '', '', 0, SW_SHOWNORMAL
     );
   except
-    MsgBox('Warning: failed to create desktop icon.', mbInformation, MB_OK);
+    SuppressibleMsgBox('Warning: failed to create desktop icon.', mbInformation, MB_OK, IDOK);
   end;
 
   // Prompt for certificate install

@@ -34,4 +34,5 @@ DEFAULT_CONFIG = {
     "sort_option": "file_name",
     "sort_ascending": True,
     "theme": "black",
+    "check_updates": True,
 }

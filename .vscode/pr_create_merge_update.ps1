@@ -91,7 +91,8 @@ if ($LASTEXITCODE -ne 0) {
 
 git fetch --prune origin
 
-# ── 7. Ensure release asset exists for the merged version ────────────────────
+# ── 7. Publish the release to the public releases repo ───────────────────────
+# The publish script is idempotent: it creates the release, or edits it and re-uploads the installer.
 $currentVersion = ''
 if (Test-Path 'version.txt') {
   $versionContent = Get-Content 'version.txt' -Raw
@@ -102,40 +103,33 @@ if (Test-Path 'version.txt') {
 
 if ($currentVersion) {
   $tag = "v$currentVersion"
+  $releasesRepo = 'franvillanu/imageclassifier-releases'
   $assetName = "ImageClassifierSetup_v$currentVersion.exe"
-  $releaseJson = $null
-  $releaseMissing = $false
-
-  try {
-    $releaseJson = gh release view $tag --json assets,url 2>$null
-  } catch {
-    $releaseMissing = $true
-  }
+  $installerPath = Join-Path $repoRoot "Output\$assetName"
 
   $assetExists = $false
-  if ($releaseJson) {
-    $release = $releaseJson | ConvertFrom-Json
-    foreach ($asset in $release.assets) {
-      if ($asset.name -eq $assetName) {
-        $assetExists = $true
-        break
-      }
-    }
+  # "release not found" on stderr is expected for a new tag; Windows PowerShell 5.1 would treat it as fatal under 'Stop'
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $releaseJson = gh release view $tag --repo $releasesRepo --json assets 2>$null
+  $viewExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousPreference
+  if ($viewExitCode -eq 0 -and $releaseJson) {
+    $assetExists = [bool](($releaseJson | ConvertFrom-Json).assets | Where-Object { $_.name -eq $assetName })
   }
 
-  if ($releaseMissing -or -not $assetExists) {
+  if ($assetExists) {
+    Write-Host "Release $tag already published in $releasesRepo ✅"
+  } elseif (-not (Test-Path $installerPath)) {
+    Write-Warning "Installer not found at $installerPath. Run Release.bat before using this PR merge task for releases."
+  } else {
     Write-Host ""
-    Write-Host "GitHub Release asset missing for $tag. Creating or updating release..." -ForegroundColor Cyan
-    $installerPath = Join-Path $repoRoot "Output\\$assetName"
-    if (-not (Test-Path $installerPath)) {
-      Write-Warning "Installer not found at $installerPath. Run Release.bat before using this PR merge task for releases."
+    Write-Host "Publishing $tag to $releasesRepo..." -ForegroundColor Cyan
+    py scripts/create_github_release.py
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "GitHub Release ready: $tag" -ForegroundColor Green
     } else {
-      py scripts/create_github_release.py
-      if ($LASTEXITCODE -eq 0) {
-        Write-Host "GitHub Release ready: $tag" -ForegroundColor Green
-      } else {
-        Write-Warning "GitHub Release creation/upload failed for $tag."
-      }
+      Write-Warning "GitHub Release creation/upload failed for $tag."
     }
   }
 }
