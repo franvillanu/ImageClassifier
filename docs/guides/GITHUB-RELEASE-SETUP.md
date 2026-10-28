@@ -13,8 +13,8 @@ The source repo can stay private. The website download button and the in-app upd
    ```
 3. Copy the historical releases (v2.0 to v2.0.7), oldest first. Safe to re-run:
    ```powershell
-   powershell -File scripts/migrate_releases.ps1 -DryRun   # preview
-   powershell -File scripts/migrate_releases.ps1
+   pwsh -File scripts/migrate_releases.ps1 -DryRun   # preview
+   pwsh -File scripts/migrate_releases.ps1
    ```
 
 There is no token file, no `GITHUB_TOKEN` and no `requests` dependency any more. `.github_token` is no longer used.

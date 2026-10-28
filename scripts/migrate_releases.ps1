@@ -19,14 +19,14 @@ $tags = (gh release list --repo $source --limit 100 --json tagName | ConvertFrom
   Sort-Object { ConvertTo-VersionKey $_ }
 if (-not $tags) { throw "No releases found in $source" }
 $newest = $tags[-1]
+$existing = @((gh release list --repo $target --limit 100 --json tagName | ConvertFrom-Json).tagName)
 
 $work = Join-Path ([System.IO.Path]::GetTempPath()) 'ic-release-migration'
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
 New-Item -ItemType Directory -Path $work | Out-Null
 
 foreach ($tag in $tags) {
-  gh release view $tag --repo $target 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { Write-Host "skip   $tag (already in $target)"; continue }
+  if ($existing -contains $tag) { Write-Host "skip   $tag (already in $target)"; continue }
 
   $info = gh release view $tag --repo $source --json name,body | ConvertFrom-Json
   $dir = Join-Path $work $tag
