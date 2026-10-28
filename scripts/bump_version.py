@@ -59,6 +59,10 @@ def update_version_txt(path: Path, old_tuple: tuple[int, int, int, int], new_tup
     text = path.read_text(encoding="utf-8")
     text = text.replace(old_py, new_py)
     text = text.replace(f"'{old_str}'", f"'{new_str}'")
+    # StringStruct values use the 3-part form ('2.0.7'), so update those too
+    old_short = ".".join(map(str, old_tuple[:3]))
+    new_short = ".".join(map(str, new_tuple[:3]))
+    text = text.replace(f"'{old_short}'", f"'{new_short}'")
     path.write_text(text, encoding="utf-8")
 
 

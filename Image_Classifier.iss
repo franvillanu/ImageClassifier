@@ -6,7 +6,7 @@
 #define MyAppName      "Image Classifier"
 ; MyAppVersion: synced from version.txt by scripts/update_iss_version.py before release
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.7"
+  #define MyAppVersion "2.0.8"
 #endif
 #define MyAppPublisher "Francisco Villanueva"
 #define MyAppURL       "https://imageclassifier.neocities.org/"
@@ -81,8 +81,9 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}";   Description: "{cm:LaunchProgram}"; Flags: nowait postinstall skipifsilent
-; In-app update (/SILENT /UPDATE=1): reopen the app as the original (non-elevated) user
-Filename: "{app}\{#MyAppExeName}";   Flags: nowait runasoriginaluser; Check: IsAppUpdate
+; In-app update (/SILENT /UPDATE=1): reopen the app. The updater starts Setup already elevated, so
+; Inno has no un-elevated "original user"; going through explorer.exe starts the app un-elevated.
+Filename: "{win}\explorer.exe";      Parameters: """{app}\{#MyAppExeName}"""; Flags: nowait; Check: IsAppUpdate
 Filename: "{app}\{#ReadmeFile}";    Description: "{cm:OpenReadme}";    Flags: shellexec postinstall skipifsilent unchecked
 Filename: "explorer.exe";           Parameters: """{#MyAppURL}""";  Description: "{cm:VisitWebsite}"; Flags: shellexec postinstall skipifsilent unchecked
 

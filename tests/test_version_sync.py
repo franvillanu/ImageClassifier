@@ -57,3 +57,17 @@ def test_publish_script_targets_releases_repo_and_has_no_fallback_installer(tmp_
     script.OUTPUT_DIR = tmp_path
     (tmp_path / "ImageClassifierSetup_v1.0.0.exe").write_bytes(b"old")
     assert script.find_installer_file("2.0.8") is None
+
+
+def test_bump_updates_embedded_version_strings(tmp_path):
+    script = load_script("bump_version")
+    version_txt = tmp_path / "version.txt"
+    version_txt.write_text(
+        "filevers=(2, 0, 7, 0),\nprodvers=(2, 0, 7, 0),\n"
+        "StringStruct('FileVersion', '2.0.7'),\nStringStruct('ProductVersion', '2.0.7')\n",
+        encoding="utf-8",
+    )
+    script.update_version_txt(version_txt, (2, 0, 7, 0), (2, 0, 8, 0))
+    text = version_txt.read_text(encoding="utf-8")
+    assert "(2, 0, 8, 0)" in text
+    assert text.count("'2.0.8'") == 2 and "2.0.7" not in text
