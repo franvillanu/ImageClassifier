@@ -40,6 +40,10 @@ set "VER_SHORT=%VER_MAJOR%.%VER_MINOR%"
 echo Detected full version: %VER_STR%
 echo Using short version: %VER_SHORT%
 
+REM --- 2.4) Sync version into __init__.py, pyproject.toml and package.json (the updater compares __version__) ---
+py "%~dp0scripts\sync_version.py"
+if errorlevel 1 goto :error
+
 REM --- 2.5) Automatically update changelog from git commits ---
 echo.
 echo [INFO] Updating changelog from git commits...

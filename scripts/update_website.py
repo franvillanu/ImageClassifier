@@ -87,7 +87,7 @@ def update_index_html(version: str, changelog_date: str, changelog_items: list[t
     )
     
     # Update download link to GitHub Releases (3-digit version everywhere)
-    download_url = f"https://github.com/franvillanu/ImageClassifier/releases/download/v{version}/ImageClassifierSetup_v{version}.exe"
+    download_url = f"https://github.com/franvillanu/imageclassifier-releases/releases/download/v{version}/ImageClassifierSetup_v{version}.exe"
     html = re.sub(
         r'(<a[^>]*id="downloadLink"[^>]*href=")[^"]*(")',
         f'\\g<1>{download_url}\\g<2>',

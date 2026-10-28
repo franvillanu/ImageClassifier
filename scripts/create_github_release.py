@@ -1,69 +1,32 @@
 #!/usr/bin/env python3
 """
-Create a GitHub Release and upload the installer as an asset.
+Publish the installer to the public releases-only repo (franvillanu/imageclassifier-releases).
 
 This script:
-1. Reads version from version.txt
-2. Extracts release notes from changelog.html
-3. Creates a GitHub Release with tag v{VERSION}
-4. Uploads the installer .exe file from Output/ as a release asset
+1. Reads the version from version.txt and checks it matches image_classifier.__version__
+2. Builds release notes from docs/changelog.html plus docs/releases/installer.md
+3. Creates the release (or edits it and re-uploads the asset if it already exists)
 
-Requires:
-- GitHub Personal Access Token (PAT) with 'repo' scope
-- Set GITHUB_TOKEN environment variable or create .github_token file (gitignored)
-- Install: pip install requests
+The source repo stays separate: the app and the website only ever see the releases repo.
+Requires the GitHub CLI, logged in once with `gh auth login`. No token files, no `requests`.
 
 Usage:
     py scripts/create_github_release.py
 """
-import os
 import re
-import sys
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
-try:
-    import requests
-except ImportError:
-    print(
-        "[ERROR] requests library not installed.\n"
-        "  Install with: py -m pip install requests",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_TXT = REPO_ROOT / "version.txt"
+INIT_PY = REPO_ROOT / "image_classifier" / "__init__.py"
 CHANGELOG_HTML = REPO_ROOT / "docs" / "changelog.html"
+INSTALLER_DOC = REPO_ROOT / "docs" / "releases" / "installer.md"
 OUTPUT_DIR = REPO_ROOT / "Output"
-GITHUB_TOKEN_FILE = REPO_ROOT / ".github_token"
 
-# GitHub API endpoints
-REPO_OWNER = "franvillanu"
-REPO_NAME = "ImageClassifier"
-GITHUB_API_BASE = "https://api.github.com"
-
-
-def get_github_token() -> Optional[str]:
-    """Get GitHub token from env var or .github_token file."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        return token.strip()
-    try:
-        result = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    if GITHUB_TOKEN_FILE.exists():
-        return GITHUB_TOKEN_FILE.read_text(encoding="utf-8").strip()
-    return None
+RELEASES_REPO = "franvillanu/imageclassifier-releases"
 
 
 def parse_version() -> str:
@@ -76,198 +39,105 @@ def parse_version() -> str:
     return f"{major}.{minor}.{build}"
 
 
+def package_version() -> Optional[str]:
+    """The version baked into the app (what the updater compares against)."""
+    m = re.search(r'__version__\s*=\s*"([^"]+)"', INIT_PY.read_text(encoding="utf-8"))
+    return m.group(1) if m else None
+
+
 def get_release_notes() -> str:
     """Extract release notes from changelog.html for the latest version."""
     if not CHANGELOG_HTML.exists():
         return "See changelog.html for details."
-    
+
     html = CHANGELOG_HTML.read_text(encoding="utf-8")
-    
-    # Find first version block (v2.0 or v2.0.1)
     pattern = r'<div class="version-block">\s*<h2>v(\d+\.\d+(?:\.\d+)?)</h2>\s*<h3>(\d{2}/\d{2}/\d{4})</h3>.*?<ul>(.*?)</ul>'
     match = re.search(pattern, html, re.DOTALL)
     if not match:
         return "See changelog.html for details."
-    
-    version = match.group(1)
-    date_str = match.group(2)
-    items_html = match.group(3)
-    
-    # Extract English text from each <li>
-    items = []
-    for li_match in re.finditer(r'<li[^>]*data-en="([^"]*)"', items_html):
-        en_text = li_match.group(1)
-        items.append(f"- {en_text}")
-    
+
+    version, date_str, items_html = match.groups()
+    items = [f"- {m.group(1)}" for m in re.finditer(r'<li[^>]*data-en="([^"]*)"', items_html)]
     if not items:
         return "See changelog.html for details."
-    
-    notes = f"## Version {version} ({date_str})\n\n" + "\n".join(items)
-    return notes
+    return f"## Version {version} ({date_str})\n\n" + "\n".join(items)
+
+
+def release_body(notes: str, installer_doc: str, version: str) -> str:
+    """Release notes followed by the install steps, with {version} filled in."""
+    doc = installer_doc.replace("{version}", version).strip()
+    return f"{notes}\n\n{doc}\n" if doc else f"{notes}\n"
 
 
 def find_installer_file(version: str) -> Optional[Path]:
-    """Find the installer .exe file in Output/ directory."""
-    expected_name = f"ImageClassifierSetup_v{version}.exe"
-    installer = OUTPUT_DIR / expected_name
-    if installer.exists():
-        return installer
-    
-    # Fallback: find any ImageClassifierSetup_v*.exe (most recent)
-    installers = list(OUTPUT_DIR.glob("ImageClassifierSetup_v*.exe"))
-    if installers:
-        # Return the most recently modified one
-        return max(installers, key=lambda p: p.stat().st_mtime)
-    
-    return None
+    """Exactly this version's installer; never an older build under a newer tag."""
+    installer = OUTPUT_DIR / f"ImageClassifierSetup_v{version}.exe"
+    return installer if installer.exists() else None
 
 
-def create_release(token: str, tag: str, name: str, body: str) -> dict:
-    """Create a GitHub release."""
-    url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/releases"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    data = {
-        "tag_name": tag,
-        "name": name,
-        "body": body,
-        "draft": False,
-        "prerelease": False,
-    }
-    
-    print(f"[INFO] Creating release: {tag}...")
-    response = requests.post(url, json=data, headers=headers)
-    
-    if response.status_code == 201:
-        return response.json()
-    elif response.status_code == 422:
-        # Tag may already exist - fetch existing release and we'll upload/update asset
-        try:
-            j = response.json()
-        except Exception:
-            j = {}
-        get_url = f"{GITHUB_API_BASE}/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag}"
-        get_response = requests.get(get_url, headers=headers)
-        if get_response.status_code == 200:
-            print(f"[INFO] Release {tag} already exists. Using existing release to upload new installer.")
-            return get_response.json()
-        error_msg = j.get("message", "Unknown error")
-        errors = j.get("errors", [])
-        err_detail = f" {errors}" if errors else ""
-        raise SystemExit(f"[ERROR] Failed to create release: {error_msg}{err_detail}")
-    else:
-        raise SystemExit(
-            f"[ERROR] Failed to create release: {response.status_code} - {response.text}"
-        )
+def gh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args, "--repo", RELEASES_REPO], cwd=REPO_ROOT, check=check)
 
 
-def upload_release_asset(token: str, release_id: int, file_path: Path) -> None:
-    """Upload a file as a release asset."""
-    # GitHub API requires the uploads.github.com endpoint for release assets
-    url = f"https://uploads.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/{release_id}/assets"
-    
-    # Query parameter for the filename
-    params = {"name": file_path.name}
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/octet-stream",
-    }
-    
-    file_size = file_path.stat().st_size
-    print(f"[INFO] Uploading {file_path.name} ({file_size / 1024 / 1024:.2f} MB)...")
-    
-    with open(file_path, "rb") as f:
-        response = requests.post(url, headers=headers, params=params, data=f)
-    
-    if response.status_code == 201:
-        print(f"[SUCCESS] Asset uploaded successfully!")
-    elif response.status_code == 422:
-        # Asset might already exist
-        error_msg = response.json().get("message", "Unknown error")
-        if "already exists" in error_msg.lower():
-            print(f"[WARNING] Asset {file_path.name} already exists for this release.")
-        else:
-            raise SystemExit(f"[ERROR] Failed to upload asset: {error_msg}")
-    else:
-        raise SystemExit(
-            f"[ERROR] Failed to upload asset: {response.status_code} - {response.text}"
-        )
-
-
-def ensure_release_asset(
-    token: str,
-    release: dict,
-    file_path: Path,
-) -> None:
-    """Upload installer unless the same named asset already exists."""
-    existing_assets = release.get("assets", [])
-    for asset in existing_assets:
-        if asset.get("name") == file_path.name:
-            print(f"[INFO] Asset already present: {file_path.name}")
-            return
-    upload_release_asset(token, release["id"], file_path)
+def release_exists(tag: str) -> bool:
+    result = subprocess.run(
+        ["gh", "release", "view", tag, "--repo", RELEASES_REPO],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def main() -> int:
-    # Check for GitHub token
-    token = get_github_token()
-    if not token:
+    version = parse_version()
+    tag = f"v{version}"
+
+    baked = package_version()
+    if baked != version:
         print(
-            "[ERROR] GitHub token required.\n"
-            "  Set GITHUB_TOKEN environment variable, or\n"
-            "  Create .github_token file with your GitHub Personal Access Token (gitignored).\n"
-            "  Token needs 'repo' scope.\n"
-            "  Create token at: https://github.com/settings/tokens",
+            f"[ERROR] image_classifier/__init__.py has __version__ = {baked!r} but version.txt is {version}.\n"
+            "  Run: py scripts/sync_version.py (the app would offer this update forever).",
             file=sys.stderr,
         )
         return 1
-    
-    # Parse version (3 digits: major.minor.patch)
-    version = parse_version()
-    tag = f"v{version}"
-    release_name = f"Image Classifier {version}"
-    
-    print(f"Version: {version}")
-    print(f"Tag: {tag}")
-    
-    # Find installer file
+
     installer = find_installer_file(version)
     if not installer:
         print(
-            f"[ERROR] Installer file not found in {OUTPUT_DIR}\n"
-            f"  Expected: ImageClassifierSetup_v{version}.exe",
+            f"[ERROR] Installer not found: {OUTPUT_DIR / f'ImageClassifierSetup_v{version}.exe'}\n"
+            "  Run Release.bat first.",
             file=sys.stderr,
         )
         return 1
-    
-    print(f"Installer: {installer.name}")
-    
-    # Get release notes
-    release_notes = get_release_notes()
-    print(f"\nRelease notes preview:\n{release_notes[:200]}...\n")
-    
-    # Create release
+
+    installer_doc = INSTALLER_DOC.read_text(encoding="utf-8") if INSTALLER_DOC.exists() else ""
+    body = release_body(get_release_notes(), installer_doc, version)
+    notes_file = OUTPUT_DIR / "release_notes.md"
+    notes_file.write_text(body, encoding="utf-8")
+
+    print(f"Version: {version}\nTag: {tag}\nInstaller: {installer.name}\nRepo: {RELEASES_REPO}")
     try:
-        release = create_release(token, tag, release_name, release_notes)
-        release_id = release["id"]
-        print(f"[SUCCESS] Release created: {release['html_url']}")
-    except SystemExit as e:
-        print(str(e), file=sys.stderr)
+        if release_exists(tag):
+            print(f"[INFO] Release {tag} exists: updating notes and re-uploading the installer.")
+            gh("release", "edit", tag, "--notes-file", str(notes_file))
+            gh("release", "upload", tag, str(installer), "--clobber")
+        else:
+            gh(
+                "release", "create", tag, str(installer),
+                "--title", f"Image Classifier {version}",
+                "--notes-file", str(notes_file),
+                "--latest",
+            )
+    except FileNotFoundError:
+        print("[ERROR] GitHub CLI (gh) not found. Install it and run `gh auth login`.", file=sys.stderr)
         return 1
-    
-    # Upload installer
-    try:
-        ensure_release_asset(token, release, installer)
-    except SystemExit as e:
-        print(str(e), file=sys.stderr)
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] gh failed with exit code {e.returncode}.", file=sys.stderr)
         return 1
-    
-    print(f"\n[SUCCESS] Release complete!")
-    print(f"  Release URL: {release['html_url']}")
-    print(f"  Download URL: https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{tag}/{installer.name}")
+
+    print("\n[SUCCESS] Release complete!")
+    print(f"  Release URL: https://github.com/{RELEASES_REPO}/releases/tag/{tag}")
+    print(f"  Download URL: https://github.com/{RELEASES_REPO}/releases/download/{tag}/{installer.name}")
     return 0
 
 

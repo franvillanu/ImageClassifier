@@ -54,7 +54,7 @@ git push
 - **When:** Automatically during `Release.bat`
 
 ### GitHub Release
-- **Created:** Automatically after merge if auth is available (`gh auth` or token)
+- **Created:** Automatically after merge, in the public `franvillanu/imageclassifier-releases` repo (needs `gh auth login`)
 - **Contains:** Installer file, release notes from changelog
 - **When:** Automatically after the PR merge script updates `main`
 
@@ -62,15 +62,8 @@ git push
 
 ### One-Time Setup
 
-1. **GitHub Token** (for auto-creating releases):
-   - Create `.github_token` file in repo root
-   - Put your GitHub Personal Access Token (with `repo` scope) in it
-   - File is gitignored, stays local
-
-2. **Python Package**:
-   ```bash
-   py -m pip install requests
-   ```
+1. **GitHub CLI** (for publishing releases): `gh auth login`. No token file or extra Python package is needed.
+   See [guides/GITHUB-RELEASE-SETUP.md](guides/GITHUB-RELEASE-SETUP.md).
 
 ## Workflow Examples
 
@@ -135,8 +128,8 @@ That's it! Everything else is automated.
 ## Troubleshooting
 
 ### "GitHub Release not created"
-- Check `.github_token` file exists and has valid token
-- Token needs `repo` scope
+- Run `gh auth status`; log in with `gh auth login` if needed
+- Re-run `py scripts/create_github_release.py` (safe to repeat)
 
 ### "Changelog empty"
 - Make sure you have commits since last release

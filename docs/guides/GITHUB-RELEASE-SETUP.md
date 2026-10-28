@@ -1,151 +1,56 @@
-# GitHub Release Automation Setup
+# GitHub Release Setup
 
-This guide explains how to set up automated GitHub Releases for Image Classifier.
+Image Classifier installers are published to a **separate public repo that holds only releases**:
+[`franvillanu/imageclassifier-releases`](https://github.com/franvillanu/imageclassifier-releases).
+The source repo can stay private. The website download button and the in-app updater both read from the releases repo, and neither needs a token.
 
-## Overview
+## One-time setup
 
-After building the installer with `Release.bat`, you can automatically:
-1. Create a GitHub Release with the version tag (e.g., `v2.0`)
-2. Upload the installer `.exe` file as a release asset
-3. Generate release notes from `changelog.html`
+1. Install the GitHub CLI and log in: `gh auth login` (account `franvillanu`, with permission to create releases in the releases repo).
+2. Create the releases repo (done once):
+   ```powershell
+   gh repo create franvillanu/imageclassifier-releases --public --add-readme --description "Image Classifier installers (releases only)"
+   ```
+3. Copy the historical releases (v2.0 to v2.0.7), oldest first. Safe to re-run:
+   ```powershell
+   powershell -File scripts/migrate_releases.ps1 -DryRun   # preview
+   powershell -File scripts/migrate_releases.ps1
+   ```
 
-The download link on your website will automatically point to the GitHub Release.
+There is no token file, no `GITHUB_TOKEN` and no `requests` dependency any more. `.github_token` is no longer used.
 
-## Setup Steps
+## Releasing
 
-### 1. Install Required Python Package
+1. Add the customer-facing line to `docs/release_notes.txt` (`version|EN|ES`).
+2. Run `Release.bat`. It syncs the version into `image_classifier/__init__.py`, `pyproject.toml` and `package.json` (`scripts/sync_version.py`), builds, signs and creates `Output/ImageClassifierSetup_v{VERSION}.exe`.
+3. Merge with the VS Code task **PR: create + merge (squash) + update main + delete branch**. Its last step runs `scripts/create_github_release.py`, which publishes to the releases repo.
 
-The script requires the `requests` library:
+To publish by hand: `py scripts/create_github_release.py`.
 
-```bash
-py -m pip install requests
-```
+## What the publish script does
 
-### 2. Create GitHub Personal Access Token
+1. Reads the version from `version.txt` and stops if `image_classifier.__version__` differs. (The app compares `__version__` with the latest release, so a mismatch would offer the same update forever.)
+2. Requires exactly `Output/ImageClassifierSetup_v{VERSION}.exe`. It never falls back to another installer.
+3. Builds the release body from `docs/changelog.html` plus `docs/releases/installer.md`.
+4. If tag `v{VERSION}` exists in the releases repo, it edits the notes and re-uploads the installer with `--clobber`. Otherwise it creates the release and marks it **Latest**.
 
-1. Go to https://github.com/settings/tokens
-2. Click "Generate new token" → "Generate new token (classic)"
-3. Give it a name like "Image Classifier Release"
-4. Select scope: **`repo`** (full control of private repositories)
-5. Click "Generate token"
-6. **Copy the token immediately** (you won't see it again!)
+## How the app updates itself
 
-### 3. Store the Token
+- On startup (if "Check for updates at startup" is on) and from **About → Check for updates**, the app reads `api.github.com/repos/franvillanu/imageclassifier-releases/releases/latest`. If GitHub rate-limits that, it reads the tag from the `releases/latest` redirect instead.
+- **Update** downloads the installer inside the app with a progress bar and verifies the size and the SHA-256 digest GitHub reports.
+- **Restart to update** runs the installer silently (`/SILENT /UPDATE=1`). Windows shows a UAC prompt because the installer needs admin rights. The app closes, the installer upgrades it, and the app reopens. If UAC is declined, the app stays open.
+- Asset names must stay `ImageClassifierSetup_v{M.m.b}.exe`. The updater only accepts that pattern from the releases repo.
+- Testing: `IMAGE_CLASSIFIER_FAKE_VERSION=2.0.0` pretends to be an older version, `IMAGE_CLASSIFIER_FORCE_UPDATE_CHECK=1` enables the startup check when running from source, and `IMAGE_CLASSIFIER_UPDATES_OFFLINE=1` disables network checks.
 
-You have two options:
+## Website
 
-**Option A: Environment Variable (Recommended for Windows)**
-
-**Windows 10/11 (GUI Method):**
-1. Press `Win + X` and select "System"
-2. Click "Advanced system settings" (or search for it)
-3. Click "Environment Variables"
-4. Under "User variables", click "New"
-5. Variable name: `GITHUB_TOKEN`
-6. Variable value: `your_token_here` (paste your token)
-7. Click OK on all dialogs
-
-**Windows (Command Line Method):**
-```powershell
-# For current session only (temporary)
-$env:GITHUB_TOKEN = "your_token_here"
-
-# For permanent (user-level, persists after restart)
-[System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "your_token_here", "User")
-```
-
-**Option B: Local File (Easier, but less secure)**
-- Create a file named `.github_token` in the repository root (`C:\Users\Fran\Documents\repos\ImageClassifier\.github_token`)
-- Put your token as a single line (no quotes, no spaces)
-- Example content:
-  ```
-  ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  ```
-- This file is gitignored and won't be committed
-
-**Which option to choose?**
-- **Environment Variable**: More secure, works system-wide, persists across terminal sessions
-- **Local File**: Easier to set up, but file could be accidentally deleted or accessed
-
-## Usage
-
-### Automatic (Recommended)
-
-When you run `Release.bat`, it will prompt you:
-
-```
-Create GitHub Release? (y/N):
-```
-
-Type `y` and press Enter. The script will:
-- Create a release with tag `v{VERSION}` (e.g., `v2.0`)
-- Upload the installer file
-- Generate release notes from changelog.html
-
-### Manual
-
-You can also run the script directly:
-
-```bash
-py scripts/create_github_release.py
-```
-
-## How It Works
-
-1. **Reads version** from `version.txt`
-2. **Extracts release notes** from the latest entry in `changelog.html`
-3. **Creates GitHub Release** with tag `v{VERSION_SHORT}` (e.g., `v2.0`)
-4. **Uploads installer** from `Output/ImageClassifierSetup_v{VERSION_FULL}.exe`
+`docs/index.html` links to
+`https://github.com/franvillanu/imageclassifier-releases/releases/download/v{VERSION}/ImageClassifierSetup_v{VERSION}.exe`.
+`scripts/update_website.py` keeps it current during `Release.bat`.
 
 ## Troubleshooting
 
-### "GitHub token required"
-- Make sure you've set `GITHUB_TOKEN` environment variable or created `.github_token` file
-- Verify the token has `repo` scope
-- **After setting environment variable**: Close and reopen your terminal/PowerShell window
-
-### "requests library not installed"
-```bash
-py -m pip install requests
-```
-
-### "Installer file not found"
-- Make sure `Release.bat` completed successfully
-- Check that `Output/ImageClassifierSetup_v*.exe` exists
-
-### "Release already exists"
-- The script will update the existing release if it already exists
-- Or manually delete the release on GitHub and try again
-
-### "Asset already exists"
-- If you run the script twice, the asset upload will be skipped (warning only)
-- The release will still be updated with new notes if changelog changed
-
-### Testing Your Token Setup
-
-To verify your token is set correctly, open a **new** PowerShell window and run:
-
-```powershell
-echo $env:GITHUB_TOKEN
-```
-
-If it shows your token (or at least something), it's working. If it's empty, the environment variable wasn't set correctly.
-
-## Security Notes
-
-- **Never commit** `.github_token` file (it's gitignored)
-- **Never share** your GitHub token
-- Tokens with `repo` scope have full access to your repositories
-- You can revoke tokens at any time from GitHub settings
-- Environment variables are more secure than files
-
-## Integration with Website
-
-The website (`docs/index.html`) automatically uses the GitHub Release download URL:
-```
-https://github.com/franvillanu/ImageClassifier/releases/download/v{VERSION}/ImageClassifierSetup_v{VERSION}.exe
-```
-
-This is updated automatically when you run `scripts/update_website.py` (which runs during release).
-
-**Note:** Cloudflare is only for hosting your website. The GitHub token is set **locally on your Windows machine** where you run `Release.bat`.
+- **`gh` not found / not logged in:** install the GitHub CLI and run `gh auth login`.
+- **"Installer not found":** run `Release.bat` first; check `Output/`.
+- **"__version__ ... but version.txt is ...":** run `py scripts/sync_version.py`.
+- **Release exists but the asset is missing or wrong:** run the publish script again; it re-uploads with `--clobber`.

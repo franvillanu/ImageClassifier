@@ -63,7 +63,7 @@ def update_version_txt(path: Path, old_tuple: tuple[int, int, int, int], new_tup
 
 
 def update_pyproject(path: Path, new_short: str) -> None:
-    """Update version = "x.y" in pyproject.toml."""
+    """Update version = "x.y.z" in pyproject.toml."""
     text = path.read_text(encoding="utf-8")
     text = re.sub(r'version\s*=\s*"[^"]+"', f'version = "{new_short}"', text, count=1)
     path.write_text(text, encoding="utf-8")
@@ -94,7 +94,7 @@ def main() -> None:
         sys.exit(1)
 
     new_str = ".".join(map(str, new_ver))
-    new_short = f"{new_ver[0]}.{new_ver[1]}"
+    new_short = f"{new_ver[0]}.{new_ver[1]}.{new_ver[2]}"
 
     update_version_txt(version_txt, old_ver, new_ver)
     if pyproject.exists():
