@@ -108,8 +108,13 @@ if ($currentVersion) {
   $installerPath = Join-Path $repoRoot "Output\$assetName"
 
   $assetExists = $false
+  # "release not found" on stderr is expected for a new tag; Windows PowerShell 5.1 would treat it as fatal under 'Stop'
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   $releaseJson = gh release view $tag --repo $releasesRepo --json assets 2>$null
-  if ($LASTEXITCODE -eq 0 -and $releaseJson) {
+  $viewExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousPreference
+  if ($viewExitCode -eq 0 -and $releaseJson) {
     $assetExists = [bool](($releaseJson | ConvertFrom-Json).assets | Where-Object { $_.name -eq $assetName })
   }
 
