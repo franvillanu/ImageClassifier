@@ -18,18 +18,23 @@ This document outlines the complete checklist for releasing a new version of Ima
 
 ## Release Process
 
-One task does everything: **run the VS Code task "PR: create + merge (squash) + update main + delete branch"** (Ctrl+Shift+5).
+One task does everything: **run the VS Code task "PR: create + merge (squash) + update main + delete branch"** (Ctrl+Shift+5). Commit your changes first; there is nothing to remember to bump or write.
 
-1. **Add the customer-facing line** for the new version at the top of `docs/release_notes.txt` (`version|EN|ES`). That line is the trigger: the newest version in that file is the version being released. Commit your code changes as usual.
-2. **Run the task.** If that version is not published yet in `franvillanu/imageclassifier-releases`, it automatically:
-   - sets `version.txt` (and syncs `__init__.py`, `pyproject.toml`, `package.json`) to that version (`scripts/auto_bump_version.py`),
-   - runs `Release.bat` to update changelog and website, build and sign the app and installer,
-   - commits the release files (`release: prepare vX.Y.Z`), creates and squash-merges the PR,
-   - publishes the release (installer, notes, hidden bilingual notes for the in-app updater) to the releases repo.
-3. **The task verifies the release itself** (`scripts/verify_release.py`): the version in `main`, the published installer's checksum against the local build, and the in-app notes. It ends with `Release verificado ✅`, or a red `RELEASE NO VERIFICADO ❌` and a failing exit code. Then check the About dialog version and the website download link.
+The task decides by itself whether a release is needed (`scripts/auto_bump_version.py`). A release is pending when:
+- app files changed since the last `release: prepare vX.Y.Z` commit on `main` (`image_classifier/`, `image-classifier.py`, `star.ico`, `requirements.txt`, `Image_Classifier.iss`), or
+- the newest version in `docs/release_notes.txt` is not published yet (use this to choose a bigger version, e.g. add `2.1.0|EN|ES` at the top).
 
-With no unpublished version in `release_notes.txt` (a plain bug-fix PR), the task just creates and merges the PR.
-If the published installer for a version differs from the local one, the task warns instead of skipping silently.
+Docs-, test- and script-only PRs do not trigger a release: the task just creates and merges the PR.
+
+When a release is pending, the task automatically:
+1. bumps the patch version (or uses the notes' version) and syncs `version.txt`, `__init__.py`, `pyproject.toml`, `package.json`,
+2. writes the release-notes line from your `feat:`/`fix:`/`perf:`/`refactor:` commit subjects if the version has none (the Spanish text is a copy of the English one; edit `docs/release_notes.txt` in the next PR to polish it, or add your own line before running to control the wording),
+3. runs `Release.bat` (changelog, website, build, sign),
+4. commits the release files (`release: prepare vX.Y.Z`), pushes, creates and squash-merges the PR,
+5. publishes the release to `franvillanu/imageclassifier-releases`,
+6. **verifies it** (`scripts/verify_release.py`): version, the published installer's checksum against the local build, and the in-app notes. It ends with `Release verificado ✅`, or a red `RELEASE NO VERIFICADO ❌` and a failing exit code.
+
+Then check the About dialog version and the website download link.
 `Release.bat` can still be run alone: if the current version is already published it bumps the patch number.
 
 ## Testing Checklist

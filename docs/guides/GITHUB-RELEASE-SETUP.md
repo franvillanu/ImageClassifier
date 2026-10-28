@@ -21,9 +21,7 @@ There is no token file, no `GITHUB_TOKEN` and no `requests` dependency any more.
 
 ## Releasing
 
-Run the VS Code task **PR: create + merge (squash) + update main + delete branch**. Before it, add the new version's customer-facing line (`version|EN|ES`) at the top of `docs/release_notes.txt`: the newest version there is the one released.
-
-If that version is not in the releases repo yet, the task bumps the version, runs `Release.bat` (changelog, website, build, sign, `Output/ImageClassifierSetup_v{VERSION}.exe`), commits the release files, merges the PR and runs `scripts/create_github_release.py`, which publishes to the releases repo. Nothing needs to be run beforehand.
+Commit your changes and run the VS Code task **PR: create + merge (squash) + update main + delete branch**. It decides by itself whether a release is needed (app files changed since the last release, or a newer version in `docs/release_notes.txt`), then bumps the version, writes the notes if missing, builds, merges, publishes to the releases repo and verifies the result. See [RELEASE-PROTOCOL.md](RELEASE-PROTOCOL.md) for the details.
 
 To publish by hand: `py scripts/create_github_release.py`.
 
