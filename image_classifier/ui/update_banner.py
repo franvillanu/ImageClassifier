@@ -1,18 +1,31 @@
 """Floating update pill anchored to the top-center of the main window."""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QPushButton, QWidget
 
 from image_classifier.i18n.translations import translations
+from image_classifier.ui.icons import IconFactory
 from image_classifier.updates import controller as states
+
+ICON_SIZE = 26
+
+PHASE_ICONS = {
+    states.AVAILABLE: "update_available",
+    states.DOWNLOADING: "update_available",
+    states.READY: "update_ready",
+    states.FAILED: "update_error",
+    states.CURRENT: "update_ok",
+    states.UNREACHABLE: "update_warn",
+}
 
 
 class UpdateBanner(QWidget):
-    def __init__(self, parent, controller, get_lang, on_install):
+    def __init__(self, parent, controller, get_lang, on_install, on_notes):
         super().__init__(parent)
         self._controller = controller
         self._get_lang = get_lang
         self._on_install = on_install
+        self._on_notes = on_notes
         self._got = 0
         self._total = 0
 
@@ -20,43 +33,55 @@ class UpdateBanner(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet("""
             QWidget#UpdateBanner {
-                background-color: rgba(20, 20, 20, 235);
+                background-color: rgba(20, 22, 28, 240);
                 border: 1px solid rgba(255, 255, 255, 50);
-                border-radius: 10px;
+                border-radius: 12px;
             }
             QLabel { background: transparent; color: white; font-size: 15px; }
             QPushButton {
                 background-color: #0078D7; color: white; border: none;
-                border-radius: 6px; padding: 6px 14px; font-size: 14px;
+                border-radius: 8px; padding: 6px 14px; font-size: 14px;
             }
             QPushButton:hover { background-color: #1a8cea; }
-            QPushButton#secondary { background-color: #555555; }
-            QPushButton#secondary:hover { background-color: #777777; }
+            QPushButton#secondary { background-color: #444a55; }
+            QPushButton#secondary:hover { background-color: #5a616e; }
+            QPushButton#link {
+                background: transparent; color: #4aa3ff; padding: 6px 6px;
+                text-decoration: underline;
+            }
+            QPushButton#link:hover { color: #7cc0ff; }
             QProgressBar {
                 background-color: #444; border-radius: 5px; border: none;
-                min-height: 10px; max-height: 10px; min-width: 220px;
+                min-height: 10px; max-height: 10px; min-width: 200px;
             }
             QProgressBar::chunk { background-color: #0078D7; border-radius: 5px; }
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 10, 8)
+        layout.setContentsMargins(12, 8, 10, 8)
         layout.setSpacing(10)
+        self._icon = QLabel(self)
+        self._icon.setFixedSize(QSize(ICON_SIZE, ICON_SIZE))
         self._label = QLabel(self)
         self._bar = QProgressBar(self)
         self._bar.setRange(0, 100)
         self._bar.setTextVisible(False)
+        self._notes = QPushButton(self)
+        self._notes.setObjectName("link")
         self._primary = QPushButton(self)
         self._secondary = QPushButton(self)
         self._secondary.setObjectName("secondary")
-        for button in (self._primary, self._secondary):
+        for button in (self._notes, self._primary, self._secondary):
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout.addWidget(self._icon)
         layout.addWidget(self._label)
         layout.addWidget(self._bar)
+        layout.addWidget(self._notes)
         layout.addWidget(self._primary)
         layout.addWidget(self._secondary)
 
+        self._notes.clicked.connect(self._open_notes)
         self._primary.clicked.connect(self._on_primary)
         self._secondary.clicked.connect(self._on_secondary)
         controller.phase_changed.connect(self._refresh)
@@ -86,6 +111,11 @@ class UpdateBanner(QWidget):
         self.move(max(0, (parent.width() - self.width()) // 2), 16)
         self.raise_()
 
+    def _open_notes(self):
+        text = self._controller.notes_text(self._get_lang())
+        if text:
+            self._on_notes(self._controller.version or "", text)
+
     # -- state -------------------------------------------------------------
     def _on_progress(self, got, total):
         self._got, self._total = got, total
@@ -104,9 +134,16 @@ class UpdateBanner(QWidget):
     def _refresh(self, phase):
         t = self._t()
         version = self._controller.version or ""
+        has_notes = bool(self._controller.notes_text(self._get_lang()))
         self._bar.setVisible(phase == states.DOWNLOADING)
+        self._notes.setVisible(has_notes and phase in (states.AVAILABLE, states.READY))
+        self._notes.setText(t["whats_new_button"])
         self._secondary.setVisible(True)
         self._primary.setVisible(True)
+
+        icon_name = PHASE_ICONS.get(phase)
+        if icon_name:
+            self._icon.setPixmap(IconFactory.get_icon(icon_name, ICON_SIZE).pixmap(ICON_SIZE, ICON_SIZE))
 
         if phase == states.AVAILABLE:
             self._label.setText(t["update_available"].format(version=version))

@@ -26,6 +26,8 @@ class UpdateOffer:
     name: str
     digest: Optional[str] = None
     size: Optional[int] = None
+    notes_en: Optional[str] = None
+    notes_es: Optional[str] = None
 
 
 def parse_version(value) -> Optional[tuple[int, int, int]]:
@@ -48,6 +50,8 @@ def current_version() -> str:
 
 def newer_release(current: str, release: dict) -> Optional[UpdateOffer]:
     """The newer release's installer, or None."""
+    from image_classifier.updates.notes import parse_notes_marker  # notes imports this module
+
     mine = parse_version(current)
     theirs = parse_version((release or {}).get("tag_name"))
     if not mine or not theirs or release.get("draft") or release.get("prerelease"):
@@ -65,12 +69,15 @@ def newer_release(current: str, release: dict) -> Optional[UpdateOffer]:
             continue
         digest = asset.get("digest")
         size = asset.get("size")
+        notes = parse_notes_marker(release.get("body"))
         return UpdateOffer(
             version=".".join(map(str, theirs)),
             url=url,
             name=name,
             digest=digest if isinstance(digest, str) else None,
             size=size if isinstance(size, int) and size > 0 else None,
+            notes_en=notes["en"] if notes else None,
+            notes_es=notes["es"] if notes else None,
         )
     return None
 

@@ -35,4 +35,5 @@ DEFAULT_CONFIG = {
     "sort_ascending": True,
     "theme": "black",
     "check_updates": True,
+    "last_seen_version": None,
 }

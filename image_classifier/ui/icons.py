@@ -201,6 +201,45 @@ class IconFactory:
               <path d="M30 12 L40 24 L30 36" stroke="black" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M30 12 L40 24 L30 36" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
+        """,
+        "update_ok": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="#22c55e"/>
+              <path d="M14 25.5L21 32.5L34 17" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        """,
+        "update_warn": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="#f59e0b"/>
+              <path d="M24 13V27" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="24" cy="34" r="2.6" fill="white"/>
+            </svg>
+        """,
+        "update_error": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="#ef4444"/>
+              <path d="M16 16L32 32M32 16L16 32" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        """,
+        "update_available": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="#0078D7"/>
+              <path d="M24 13V31M16 23.5L24 31.5L32 23.5" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15 37H33" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        """,
+        "update_ready": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="24" cy="24" r="22" fill="#22c55e"/>
+              <path d="M33 25A9 9 0 1 1 29.5 17.6" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M33.5 12V19.5H26" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        """,
+        "refresh": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M38 25A14 14 0 1 1 33.5 14.5" fill="none" stroke="white" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M38.5 7V17.5H28" fill="none" stroke="white" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
         """
     }
     _cache = {}
