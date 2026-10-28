@@ -26,6 +26,9 @@ from image_classifier.shell_win import open_folder_and_select_item
 from image_classifier.imaging import sharpen_cv2, ImageLoaderRunnable, WorkerSignals, save_pixmap
 from image_classifier.config import get_config_file
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
+from image_classifier import __version__
+from image_classifier.updates.controller import UpdateController
+from image_classifier.ui.update_banner import UpdateBanner
 from image_classifier.ui import (
     IconFactory,
     BaseOverlay,
@@ -2230,6 +2233,37 @@ class PhotoViewer(QMainWindow):
         self.updateLanguage()
         self.all_tooltips = []
         self.loading_in_progress = False
+        self.init_updates()
+
+    def init_updates(self):
+        """Create the update controller/banner and schedule the silent startup check."""
+        self.update_controller = UpdateController(self)
+        self.update_banner = UpdateBanner(
+            self, self.update_controller, lambda: self.current_language, self.install_update
+        )
+        if self.check_updates and (
+            getattr(sys, "frozen", False) or os.environ.get("IMAGE_CLASSIFIER_FORCE_UPDATE_CHECK") == "1"
+        ):
+            QTimer.singleShot(3000, lambda: self.update_controller.check(manual=False))
+
+    def check_for_updates_manually(self):
+        self.update_controller.check(manual=True)
+
+    def install_update(self):
+        t = translations[self.current_language]
+        busy = getattr(self, "export_thread", None) or getattr(self, "delete_thread", None)
+        if busy:
+            confirm = self.show_custom_dialog(t["update_busy_confirm"], icon_type="warning", buttons="yesno")
+            if confirm != QDialog.DialogCode.Accepted:
+                return
+        self.save_config()
+        # Only close if Windows actually started the installer (UAC may be declined).
+        if self.update_controller.install(self.current_language):
+            self.close()
+
+    def set_check_updates(self, value: bool):
+        self.check_updates = value
+        self.save_config()
 
     def toggle_fullscreen(self, *, make_cover: bool = True):
         """
@@ -2535,6 +2569,7 @@ class PhotoViewer(QMainWindow):
             (t["load_last_folder"], getattr(self, "load_last_folder", False), lambda st: self.set_load_last_folder(bool(st))),
             (t["loop_navigation"], self.loop_navigation, lambda st: self.set_loop_navigation(bool(st))),
             (t["menu_dock_left"], self.menu_dock_left, lambda st: self.toggle_menu_dock(bool(st))),
+            (t["update_check_startup"], self.check_updates, lambda st: self.set_check_updates(bool(st))),
             #(t["hide_navigation_controls"], self.hide_navigation_controls, lambda st: self.set_hide_navigation_controls(bool(st)))
         ]
         # Sort them by label, so they appear consistently
@@ -3315,9 +3350,17 @@ class PhotoViewer(QMainWindow):
         title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
         layout.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        version_label = QLabel(t["app_version_label"], container)
+        version_label = QLabel(t["app_version_label"].format(version=__version__), container)
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version_label)
+
+        update_btn = QPushButton(t["update_check_button"], container)
+        update_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        def on_check_updates():
+            self.close_about_overlay()
+            self.check_for_updates_manually()
+        update_btn.clicked.connect(on_check_updates)
+        layout.addWidget(update_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         copyright_label = QLabel(t["copyright_label"], container)
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -4030,6 +4073,8 @@ class PhotoViewer(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "update_banner") and self.update_banner.isVisible():
+            self.update_banner.reposition()
         self.update_floating_controls()
         self.update_filename_position()
         if hasattr(self, "settings_overlay") and self.settings_overlay is not None:
@@ -4151,6 +4196,7 @@ class PhotoViewer(QMainWindow):
                 self.sort_option              = config.get('sort_option', 'file_name')
                 self.sort_ascending           = config.get('sort_ascending', True)
                 self.theme                    = config.get('theme', 'black')
+                self.check_updates            = config.get('check_updates', True)
             else:
                 self.load_last_folder         = False
                 self.current_directory        = None
@@ -4165,6 +4211,7 @@ class PhotoViewer(QMainWindow):
                 self.sort_option              = 'file_name'
                 self.sort_ascending           = True
                 self.theme                    = 'black'
+                self.check_updates            = True
         except Exception as e:
             print(f"Error loading config: {e}")
             self.load_last_folder         = False
@@ -4180,6 +4227,7 @@ class PhotoViewer(QMainWindow):
             self.sort_option              = 'file_name'
             self.sort_ascending           = True
             self.theme                    = 'black'
+            self.check_updates            = True
 
     def save_config(self):
         try:
@@ -4197,6 +4245,7 @@ class PhotoViewer(QMainWindow):
                 'sort_option':             self.sort_option,
                 'sort_ascending':          self.sort_ascending,
                 'theme':                   self.theme,
+                'check_updates':           self.check_updates,
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
