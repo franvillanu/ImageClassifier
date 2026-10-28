@@ -1,6 +1,7 @@
 # User-facing release notes (for customers). One sentence per version.
 # Used for changelog page and home "Novedades" — not internal/DevOps changes.
 # Format: version|English sentence|Spanish sentence
+2.0.10|Release automatically when app files changed; Put the star in the About title instead of a separate icon row.|Release automatically when app files changed; Put the star in the About title instead of a separate icon row.
 2.0.9|Cleaner, minimalist About dialog, with release notes you can read inside the app (shown after every update) and clearer icons for update status.|Cuadro Acerca de más limpio y minimalista, con las novedades de cada versión dentro de la app (se muestran tras cada actualización) e iconos más claros para el estado de las actualizaciones.
 2.0.8|Image Classifier can now update itself: use About > Check for updates to download the new version with a progress bar and restart into it.|Image Classifier ahora puede actualizarse sola: usa Acerca de > Buscar actualizaciones para descargar la nueva versión con una barra de progreso y reiniciar con ella.
 2.0.7|Added folder drag-and-drop while keeping the native image picker, with dropped folders opening the first image in the configured sort order.|Añadida la función de arrastrar y soltar carpetas manteniendo el selector nativo de imágenes; las carpetas arrastradas abren la primera imagen según el orden configurado.
