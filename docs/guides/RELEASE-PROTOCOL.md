@@ -26,7 +26,7 @@ One task does everything: **run the VS Code task "PR: create + merge (squash) + 
    - runs `Release.bat` to update changelog and website, build and sign the app and installer,
    - commits the release files (`release: prepare vX.Y.Z`), creates and squash-merges the PR,
    - publishes the release (installer, notes, hidden bilingual notes for the in-app updater) to the releases repo.
-3. **Verify** the About dialog version and the website download link.
+3. **The task verifies the release itself** (`scripts/verify_release.py`): the version in `main`, the published installer's checksum against the local build, and the in-app notes. It ends with `Release verificado ✅`, or a red `RELEASE NO VERIFICADO ❌` and a failing exit code. Then check the About dialog version and the website download link.
 
 With no unpublished version in `release_notes.txt` (a plain bug-fix PR), the task just creates and merges the PR.
 If the published installer for a version differs from the local one, the task warns instead of skipping silently.

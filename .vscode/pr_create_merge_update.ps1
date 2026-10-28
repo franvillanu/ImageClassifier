@@ -23,6 +23,7 @@ if ($branch -eq 'main') {
 # One task does everything: version bump, build, sign, commit, PR, merge and publish.
 py scripts/auto_bump_version.py --needs-release
 $releaseCheck = $LASTEXITCODE
+$releasePending = ($releaseCheck -eq 10)
 if ($releaseCheck -eq 10) {
   Write-Host ""
   Write-Host "Release pendiente: construyendo y firmando con Release.bat..." -ForegroundColor Cyan
@@ -197,3 +198,18 @@ Write-Host "PR: $url"
 Write-Host "Mergeado a main ✅"
 Write-Host "Main actualizado ✅"
 Write-Host "Rama local eliminada: $branch"
+
+# ── 9. Verify the release really happened (never trust that every step printed OK) ──────────────
+# Checks version in main, published installer checksum vs the local build, and the in-app notes.
+if ($releasePending) {
+  Write-Host ""
+  Write-Host "Verificando el release publicado..." -ForegroundColor Cyan
+  py scripts/verify_release.py
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "RELEASE NO VERIFICADO ❌ El PR se mergeo pero el release publicado no coincide con lo construido." -ForegroundColor Red
+    Write-Host "Revisa los problemas de arriba. Para repetir solo la publicacion: py scripts/create_github_release.py" -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "Release verificado ✅" -ForegroundColor Green
+}
