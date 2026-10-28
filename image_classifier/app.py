@@ -3393,12 +3393,7 @@ class PhotoViewer(QMainWindow):
         layout.setSpacing(0)
         center = Qt.AlignmentFlag.AlignCenter
 
-        icon_label = QLabel(container)
-        icon_label.setPixmap(IconFactory.get_icon("star_outline", 36).pixmap(36, 36))
-        layout.addWidget(icon_label, alignment=center)
-        layout.addSpacing(10)
-
-        name_label = QLabel(t["photo_viewer_title"], container)
+        name_label = QLabel("\u2b50 " + t["photo_viewer_title"], container)
         name_label.setObjectName("aboutAppName")
         layout.addWidget(name_label, alignment=center)
         layout.addSpacing(10)
