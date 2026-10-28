@@ -73,7 +73,7 @@ echo [INFO] Running PyInstaller...
   "%MAIN%"
 if errorlevel 1 (
   echo [ERROR] PyInstaller build failed.
-  pause
+  if not "%NON_INTERACTIVE%"=="1" pause
   exit /b 1
 )
 
@@ -93,7 +93,7 @@ echo [INFO] Signing executable...
 py "%~dp0scripts\sign_exe.py" "%APP_EXE%"
 if errorlevel 1 (
   echo [ERROR] Code signing failed.
-  pause
+  if not "%NON_INTERACTIVE%"=="1" pause
   exit /b 1
 )
 
@@ -102,7 +102,7 @@ echo [INFO] Verifying signature...
 "%SIGNTOOL%" verify /pa /v "%APP_EXE%"
 if errorlevel 1 (
   echo [ERROR] Signature verification failed.
-  pause
+  if not "%NON_INTERACTIVE%"=="1" pause
   exit /b 1
 )
 

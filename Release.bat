@@ -159,7 +159,7 @@ goto :eof
 :error
 echo.
 echo Press any key to exit...
-pause
+if not "%NON_INTERACTIVE%"=="1" pause
 exit /b 1
 
 :eof

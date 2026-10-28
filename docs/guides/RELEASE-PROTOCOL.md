@@ -18,10 +18,19 @@ This document outlines the complete checklist for releasing a new version of Ima
 
 ## Release Process
 
-1. **Add the customer-facing line** for the next version to `docs/release_notes.txt` (`version|EN|ES`). The app shows it after the update, and the release carries it for the update pill.
-2. **Run `Release.bat`**: if the current version is already published, it bumps the patch version automatically (`scripts/auto_bump_version.py`; use `py scripts/bump_version.py minor|major` first for a bigger bump). Then it syncs versions, updates changelog and website, builds, signs, creates `Output/ImageClassifierSetup_vX.Y.Z.exe`
-3. **Run the PR task**: it commits the files Release.bat changed (`release: prepare vX.Y.Z`), merges, then publishes the release to `franvillanu/imageclassifier-releases` (see [GITHUB-RELEASE-SETUP.md](GITHUB-RELEASE-SETUP.md)). If the published installer differs from the local one it warns instead of skipping silently.
-5. **Verify** the About dialog version and the website download link
+One task does everything: **run the VS Code task "PR: create + merge (squash) + update main + delete branch"** (Ctrl+Shift+5).
+
+1. **Add the customer-facing line** for the new version at the top of `docs/release_notes.txt` (`version|EN|ES`). That line is the trigger: the newest version in that file is the version being released. Commit your code changes as usual.
+2. **Run the task.** If that version is not published yet in `franvillanu/imageclassifier-releases`, it automatically:
+   - sets `version.txt` (and syncs `__init__.py`, `pyproject.toml`, `package.json`) to that version (`scripts/auto_bump_version.py`),
+   - runs `Release.bat` to update changelog and website, build and sign the app and installer,
+   - commits the release files (`release: prepare vX.Y.Z`), creates and squash-merges the PR,
+   - publishes the release (installer, notes, hidden bilingual notes for the in-app updater) to the releases repo.
+3. **Verify** the About dialog version and the website download link.
+
+With no unpublished version in `release_notes.txt` (a plain bug-fix PR), the task just creates and merges the PR.
+If the published installer for a version differs from the local one, the task warns instead of skipping silently.
+`Release.bat` can still be run alone: if the current version is already published it bumps the patch number.
 
 ## Testing Checklist
 
