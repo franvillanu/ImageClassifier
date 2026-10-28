@@ -240,6 +240,12 @@ class IconFactory:
               <path d="M38 25A14 14 0 1 1 33.5 14.5" fill="none" stroke="white" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M38.5 7V17.5H28" fill="none" stroke="white" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
+        """,
+        "star_outline": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M24 7L28.9 17.9L40.8 19.3L31.9 27.3L34.4 39L24 33L13.6 39L16.1 27.3L7.2 19.3L19.1 17.9L24 7Z"
+                    fill="none" stroke="#e8eaed" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
         """
     }
     _cache = {}

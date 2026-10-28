@@ -18,10 +18,9 @@ This document outlines the complete checklist for releasing a new version of Ima
 
 ## Release Process
 
-1. **Bump the version** in `version.txt` with `py scripts/bump_version.py patch|minor|major` (or edit by hand)
-2. **Add the customer-facing line** to `docs/release_notes.txt` (`version|EN|ES`)
-3. **Run `Release.bat`**: syncs versions, updates changelog and website, builds, signs, creates `Output/ImageClassifierSetup_vX.Y.Z.exe`
-4. **Merge with the PR task**: its last step publishes the release to `franvillanu/imageclassifier-releases` (see [GITHUB-RELEASE-SETUP.md](GITHUB-RELEASE-SETUP.md))
+1. **Add the customer-facing line** for the next version to `docs/release_notes.txt` (`version|EN|ES`). The app shows it after the update, and the release carries it for the update pill.
+2. **Run `Release.bat`**: if the current version is already published, it bumps the patch version automatically (`scripts/auto_bump_version.py`; use `py scripts/bump_version.py minor|major` first for a bigger bump). Then it syncs versions, updates changelog and website, builds, signs, creates `Output/ImageClassifierSetup_vX.Y.Z.exe`
+3. **Run the PR task**: it commits the files Release.bat changed (`release: prepare vX.Y.Z`), merges, then publishes the release to `franvillanu/imageclassifier-releases` (see [GITHUB-RELEASE-SETUP.md](GITHUB-RELEASE-SETUP.md)). If the published installer differs from the local one it warns instead of skipping silently.
 5. **Verify** the About dialog version and the website download link
 
 ## Testing Checklist

@@ -20,6 +20,10 @@ if not defined IMAGE_CLASSIFIER_PFX_PASSWORD (
   goto :error
 )
 
+REM --- 1.5) If this version is already published, bump the patch version automatically ---
+py "%~dp0scripts\auto_bump_version.py"
+if errorlevel 1 goto :error
+
 REM --- 2) Parse filevers=(M, m, b, r) from version.txt ---
 for /f "tokens=2-5 delims=(, " %%A in (
   'findstr /i "filevers" version.txt'

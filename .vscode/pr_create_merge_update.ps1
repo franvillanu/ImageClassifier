@@ -19,6 +19,27 @@ if ($branch -eq 'main') {
   Write-Host "Rama creada automaticamente: $branch"
 }
 
+# ── 1.5. Commit what Release.bat prepared (version bump, changelog, website) ───
+# Only these release-owned files are staged, so the bump always travels with the PR.
+$releaseFiles = @(
+  'version.txt', 'pyproject.toml', 'package.json', 'image_classifier/__init__.py',
+  'Image_Classifier.iss', 'docs/release_notes.txt', 'docs/changelog.html', 'docs/index.html'
+)
+$pendingRelease = @(git status --porcelain -- $releaseFiles)
+if ($pendingRelease.Count -gt 0) {
+  $releaseVersion = ''
+  if ((Get-Content 'version.txt' -Raw) -match 'filevers=\((\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)') {
+    $releaseVersion = "$($matches[1]).$($matches[2]).$($matches[3])"
+  }
+  git add -- $releaseFiles
+  git commit --quiet -m "release: prepare v$releaseVersion"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error 'No se pudo hacer commit de los archivos de release'
+    exit 1
+  }
+  Write-Host "Archivos de release incluidos: release: prepare v$releaseVersion ✅"
+}
+
 # ── 2. Fetch latest main ─────────────────────────────────────────────────────
 Write-Host "Actualizando origin/main..."
 git fetch origin main --quiet
@@ -107,7 +128,7 @@ if ($currentVersion) {
   $assetName = "ImageClassifierSetup_v$currentVersion.exe"
   $installerPath = Join-Path $repoRoot "Output\$assetName"
 
-  $assetExists = $false
+  $publishedAsset = $null
   # "release not found" on stderr is expected for a new tag; Windows PowerShell 5.1 would treat it as fatal under 'Stop'
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
@@ -115,11 +136,18 @@ if ($currentVersion) {
   $viewExitCode = $LASTEXITCODE
   $ErrorActionPreference = $previousPreference
   if ($viewExitCode -eq 0 -and $releaseJson) {
-    $assetExists = [bool](($releaseJson | ConvertFrom-Json).assets | Where-Object { $_.name -eq $assetName })
+    $publishedAsset = ($releaseJson | ConvertFrom-Json).assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
   }
 
-  if ($assetExists) {
-    Write-Host "Release $tag already published in $releasesRepo ✅"
+  if ($publishedAsset) {
+    # Same name is not same file: never skip silently when the local installer is a different build.
+    $localHash = if (Test-Path $installerPath) { 'sha256:' + (Get-FileHash $installerPath -Algorithm SHA256).Hash.ToLower() } else { $null }
+    if ($localHash -and $publishedAsset.digest -and $localHash -ne $publishedAsset.digest) {
+      Write-Warning "$tag is already published but its installer differs from Output\$assetName. Users would not get this build."
+      Write-Warning "Run Release.bat again (it bumps the version automatically), then this task. To overwrite $tag instead: py scripts/create_github_release.py"
+    } else {
+      Write-Host "Release $tag already published in $releasesRepo ✅"
+    }
   } elseif (-not (Test-Path $installerPath)) {
     Write-Warning "Installer not found at $installerPath. Run Release.bat before using this PR merge task for releases."
   } else {
