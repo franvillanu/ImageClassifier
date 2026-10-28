@@ -20,10 +20,14 @@ from pathlib import Path
 from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from image_classifier.updates.notes import load_release_notes, notes_for_version, notes_marker  # noqa: E402
 VERSION_TXT = REPO_ROOT / "version.txt"
 INIT_PY = REPO_ROOT / "image_classifier" / "__init__.py"
 CHANGELOG_HTML = REPO_ROOT / "docs" / "changelog.html"
 INSTALLER_DOC = REPO_ROOT / "docs" / "releases" / "installer.md"
+RELEASE_NOTES_TXT = REPO_ROOT / "docs" / "release_notes.txt"
 OUTPUT_DIR = REPO_ROOT / "Output"
 
 RELEASES_REPO = "franvillanu/imageclassifier-releases"
@@ -63,10 +67,20 @@ def get_release_notes() -> str:
     return f"## Version {version} ({date_str})\n\n" + "\n".join(items)
 
 
-def release_body(notes: str, installer_doc: str, version: str) -> str:
-    """Release notes followed by the install steps, with {version} filled in."""
+def release_body(notes: str, installer_doc: str, version: str, marker: str = "") -> str:
+    """Release notes followed by the install steps, with {version} filled in.
+
+    `marker` is the hidden bilingual notes comment the in-app updater reads (GitHub does not render it).
+    """
     doc = installer_doc.replace("{version}", version).strip()
-    return f"{notes}\n\n{doc}\n" if doc else f"{notes}\n"
+    body = f"{notes}\n\n{doc}\n" if doc else f"{notes}\n"
+    return f"{body}\n{marker}\n" if marker else body
+
+
+def notes_marker_for(version: str) -> str:
+    """Hidden marker built from docs/release_notes.txt (EN|ES), or '' if the version has no entry."""
+    entry = notes_for_version(version, load_release_notes(RELEASE_NOTES_TXT))
+    return notes_marker(entry[1], entry[2]) if entry else ""
 
 
 def find_installer_file(version: str) -> Optional[Path]:
@@ -111,7 +125,7 @@ def main() -> int:
         return 1
 
     installer_doc = INSTALLER_DOC.read_text(encoding="utf-8") if INSTALLER_DOC.exists() else ""
-    body = release_body(get_release_notes(), installer_doc, version)
+    body = release_body(get_release_notes(), installer_doc, version, notes_marker_for(version))
     notes_file = OUTPUT_DIR / "release_notes.md"
     notes_file.write_text(body, encoding="utf-8")
 

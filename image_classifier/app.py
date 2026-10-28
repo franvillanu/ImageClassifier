@@ -29,6 +29,9 @@ from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, Sha
 from image_classifier import __version__
 from image_classifier.updates.controller import UpdateController
 from image_classifier.ui.update_banner import UpdateBanner
+from image_classifier.ui.whats_new import WhatsNewOverlay
+from image_classifier.ui.icons import IconFactory
+from image_classifier.updates.notes import load_release_notes, notes_for_version, pick
 from image_classifier.ui import (
     IconFactory,
     BaseOverlay,
@@ -2239,12 +2242,55 @@ class PhotoViewer(QMainWindow):
         """Create the update controller/banner and schedule the silent startup check."""
         self.update_controller = UpdateController(self)
         self.update_banner = UpdateBanner(
-            self, self.update_controller, lambda: self.current_language, self.install_update
+            self, self.update_controller, lambda: self.current_language, self.install_update,
+            self.open_update_notes,
         )
+        QTimer.singleShot(1500, self.announce_new_version)
         if self.check_updates and (
             getattr(sys, "frozen", False) or os.environ.get("IMAGE_CLASSIFIER_FORCE_UPDATE_CHECK") == "1"
         ):
             QTimer.singleShot(3000, lambda: self.update_controller.check(manual=False))
+
+    def open_whats_new(self, title, entries):
+        """Release-notes overlay; shortcuts and the floating menu are off while it is open."""
+        if getattr(self, "whats_new_overlay", None) is not None:
+            return
+        t = translations[self.current_language]
+        self.disable_all_shortcuts()
+        if hasattr(self, "floating_menu") and self.floating_menu is not None:
+            self.floating_menu.setEnabled(False)
+        self.whats_new_overlay = WhatsNewOverlay(
+            self, title, entries, t["close_label"], t["whats_new_empty"], self._on_whats_new_closed
+        )
+        self.whats_new_overlay.open_overlay()
+
+    def _on_whats_new_closed(self):
+        self.whats_new_overlay = None
+        self.enable_all_shortcuts()
+        if hasattr(self, "floating_menu") and self.floating_menu is not None:
+            self.floating_menu.setEnabled(True)
+
+    def announce_new_version(self):
+        """Once after an update: show what changed in the version that just started."""
+        if self.last_seen_version == __version__:
+            return
+        self.last_seen_version = __version__  # saved with the rest of the config
+        entry = notes_for_version(__version__)
+        if not entry:
+            return
+        t = translations[self.current_language]
+        self.open_whats_new(
+            t["whats_new_in"].format(version=__version__), [("", pick(entry, self.current_language))]
+        )
+
+    def open_update_notes(self, version, text):
+        t = translations[self.current_language]
+        self.open_whats_new(t["whats_new_in"].format(version=version), [("", text)])
+
+    def open_release_history(self):
+        t = translations[self.current_language]
+        entries = [(f"v{e[0]}", pick(e, self.current_language)) for e in load_release_notes()]
+        self.open_whats_new(t["whats_new_history"], entries)
 
     def check_for_updates_manually(self):
         self.update_controller.check(manual=True)
@@ -3312,63 +3358,96 @@ class PhotoViewer(QMainWindow):
         # Container for About info
         container = QWidget(self.about_overlay)
         container.setObjectName("AboutContainer")
+        container.setMinimumWidth(380)
         container.setStyleSheet("""
             QWidget#AboutContainer {
-                background-color: rgba(0, 0, 0, 200);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
+                background-color: #14161c;
+                border-radius: 14px;
+                border: 1px solid rgba(255, 255, 255, 40);
             }
-            QLabel {
-                background-color: transparent;
-                color: white;
-                font-size: 16px;
+            QLabel { background-color: transparent; color: white; font-size: 15px; }
+            QLabel#aboutAppName { font-size: 26px; font-weight: bold; }
+            QLabel#aboutVersion {
+                color: #8cc4ff; font-size: 14px;
+                background-color: rgba(0, 120, 215, 55);
+                border-radius: 11px; padding: 3px 14px;
             }
+            QLabel#aboutCopyright { color: #8a8f98; font-size: 13px; }
+            QFrame#aboutDivider { background-color: rgba(255, 255, 255, 30); border: none; }
             QPushButton {
-                background-color: #555555;
-                color: white;
-                border-radius: 6px;
-                padding: 8px;
-                font-size: 16px;
+                border: none; border-radius: 9px; padding: 10px 18px; font-size: 15px; color: white;
             }
-            QPushButton:hover {
-                background-color: #777777;
-            }
-            QPushButton#closeButton {
-                background-color: #DC3545;
-            }
-            QPushButton#closeButton:hover {
-                background-color: #B22222;
-            }
+            QPushButton#updateButton { background-color: #0078D7; }
+            QPushButton#updateButton:hover { background-color: #1a8cea; }
+            QPushButton#notesButton { background-color: #2b303a; }
+            QPushButton#notesButton:hover { background-color: #3a414e; }
+            QPushButton#closeButton { background-color: #DC3545; padding: 8px 30px; }
+            QPushButton#closeButton:hover { background-color: #B22222; }
         """)
         # Size to content; padding from layout margins
 
+        from PyQt6.QtCore import QSize
+        from PyQt6.QtWidgets import QFrame
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(40, 32, 40, 26)
+        layout.setSpacing(0)
+        center = Qt.AlignmentFlag.AlignCenter
 
-        title_label = QLabel(t["about_button"], container)
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        layout.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        icon_label = QLabel(container)
+        icon_label.setPixmap(self._about_icon_pixmap())
+        layout.addWidget(icon_label, alignment=center)
+        layout.addSpacing(10)
 
-        version_label = QLabel(t["app_version_label"].format(version=__version__), container)
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(version_label)
+        name_label = QLabel(t["photo_viewer_title"], container)
+        name_label.setObjectName("aboutAppName")
+        layout.addWidget(name_label, alignment=center)
+        layout.addSpacing(10)
+
+        version_label = QLabel(t["about_version"].format(version=__version__), container)
+        version_label.setObjectName("aboutVersion")
+        layout.addWidget(version_label, alignment=center)
+        layout.addSpacing(24)
 
         update_btn = QPushButton(t["update_check_button"], container)
+        update_btn.setObjectName("updateButton")
+        update_btn.setIcon(IconFactory.get_icon("refresh", 18))
+        update_btn.setIconSize(QSize(18, 18))
+        update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         update_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         def on_check_updates():
             self.close_about_overlay()
             self.check_for_updates_manually()
         update_btn.clicked.connect(on_check_updates)
-        layout.addWidget(update_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(update_btn)
+        layout.addSpacing(8)
+
+        notes_btn = QPushButton(t["whats_new_button"], container)
+        notes_btn.setObjectName("notesButton")
+        notes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        notes_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        def on_whats_new():
+            self.close_about_overlay()
+            self.open_release_history()
+        notes_btn.clicked.connect(on_whats_new)
+        layout.addWidget(notes_btn)
+        layout.addSpacing(22)
+
+        divider = QFrame(container)
+        divider.setObjectName("aboutDivider")
+        divider.setFixedHeight(1)
+        layout.addWidget(divider)
+        layout.addSpacing(16)
 
         copyright_label = QLabel(t["copyright_label"], container)
-        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setObjectName("aboutCopyright")
+        copyright_label.setAlignment(center)
         layout.addWidget(copyright_label)
+        layout.addSpacing(18)
 
         close_btn = QPushButton(t["close_label"], container)
         close_btn.setObjectName("closeButton")
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout.addWidget(close_btn, alignment=center)
 
         # Ensure space/enter triggers the button:
         close_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -3403,6 +3482,19 @@ class PhotoViewer(QMainWindow):
         self.about_overlay.raise_()
         # Explicitly transfer focus to the close button:
         close_btn.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    @staticmethod
+    def _about_icon_pixmap(size=64):
+        """The star used as the window icon, drawn large and crisp for the About card."""
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        font = QFont()
+        font.setPixelSize(int(size * 0.78))
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "⭐")
+        painter.end()
+        return pixmap
 
     def close_about_overlay(self):
         """
@@ -4197,6 +4289,7 @@ class PhotoViewer(QMainWindow):
                 self.sort_ascending           = config.get('sort_ascending', True)
                 self.theme                    = config.get('theme', 'black')
                 self.check_updates            = config.get('check_updates', True)
+                self.last_seen_version        = config.get('last_seen_version')
             else:
                 self.load_last_folder         = False
                 self.current_directory        = None
@@ -4212,6 +4305,7 @@ class PhotoViewer(QMainWindow):
                 self.sort_ascending           = True
                 self.theme                    = 'black'
                 self.check_updates            = True
+                self.last_seen_version        = __version__  # fresh install: nothing to announce
         except Exception as e:
             print(f"Error loading config: {e}")
             self.load_last_folder         = False
@@ -4228,6 +4322,7 @@ class PhotoViewer(QMainWindow):
             self.sort_ascending           = True
             self.theme                    = 'black'
             self.check_updates            = True
+            self.last_seen_version        = __version__
 
     def save_config(self):
         try:
@@ -4246,6 +4341,7 @@ class PhotoViewer(QMainWindow):
                 'sort_ascending':          self.sort_ascending,
                 'theme':                   self.theme,
                 'check_updates':           self.check_updates,
+                'last_seen_version':       self.last_seen_version,
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)

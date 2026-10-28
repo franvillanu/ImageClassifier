@@ -47,6 +47,12 @@ class UpdateController(QObject):
         if self.phase == phase:
             self._set_phase(IDLE)
 
+    def notes_text(self, lang: str) -> Optional[str]:
+        """Release notes of the offered version in `lang`, if the release carries them."""
+        if self._offer is None:
+            return None
+        return (self._offer.notes_es if lang == "es" else self._offer.notes_en) or self._offer.notes_en
+
     def is_busy(self) -> bool:
         return self.phase in (CHECKING, DOWNLOADING)
 

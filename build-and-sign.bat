@@ -66,6 +66,7 @@ echo [INFO] Running PyInstaller...
   --name "%EXE_NAME%" ^
   --version-file "%VERSION_FILE%" ^
   --collect-all pillow_heif ^
+  --add-data "%~dp0docs\release_notes.txt;docs" ^
   --distpath "%DIST_DIR%" ^
   --workpath "build" ^
   --specpath "build" ^
