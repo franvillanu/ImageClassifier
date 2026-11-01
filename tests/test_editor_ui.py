@@ -72,9 +72,9 @@ def test_ruler_snaps_and_resets():
     r.resize(600, 44)
     got = []
     r.valueChanged.connect(got.append)
-    _drag(r, QPointF(300, 20), QPointF(300 - 10.5 * 6.6, 20))
+    _drag(r, QPointF(300, 20), QPointF(300 - StraightenRuler.PX_PER_DEGREE * 6.6, 20))
     assert abs(r.value() - 6.6) < 0.11
-    _drag(r, QPointF(300, 20), QPointF(300 + 10.5 * 6.5, 20))  # back to ~0.1 -> snaps to 0
+    _drag(r, QPointF(300, 20), QPointF(300 + StraightenRuler.PX_PER_DEGREE * 6.5, 20))  # back to ~0.1 -> snaps to 0
     assert r.value() == 0.0
     assert r.text().endswith("°")
 
@@ -155,3 +155,31 @@ def test_cancel_clean_editor_closes_without_prompt(editor):
     ed.closed.connect(lambda: closed.append(True))
     ed.request_cancel()
     assert closed
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.25, 1.5, 2.0, 3.0])
+def test_icons_render_centred_at_any_display_scaling(scale):
+    """Regression: at 200 % the old SVG icons were drawn 2x and clipped to their top-left quarter."""
+    from image_classifier.editor import icons
+    assert icons.icon_family(), "Windows icon font not found"
+    for name in icons.GLYPHS:
+        img = icons.pixmap(name, 16, "#ffffff", scale).toImage()
+        alpha = np.array([[img.pixelColor(x, y).alpha() for x in range(img.width())]
+                          for y in range(img.height())])
+        ys, xs = np.nonzero(alpha > 40)
+        assert len(xs) > 0, name
+        cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+        size = img.width()
+        assert abs(cx - size / 2) < size * 0.25 and abs(cy - size / 2) < size * 0.25, (name, scale)
+        assert xs.max() - xs.min() > size * 0.3 or ys.max() - ys.min() > size * 0.3, (name, scale)
+
+
+def test_handle_drag_does_not_zoom_or_move_the_view(editor):
+    ed, _, _ = editor
+    canvas = ed.crop_canvas
+    view_before = canvas._view
+    fx, fy, fw, fh = view_before.frame_rect(ed._state.crop)
+    _drag(canvas, QPointF(fx + fw, fy + fh), QPointF(fx + fw * 0.6, fy + fh * 0.6))
+    assert ed._state.crop.w < 0.7 * ed._state.source_size[0]
+    QApplication.processEvents()
+    assert canvas._view == view_before

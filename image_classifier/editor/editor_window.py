@@ -27,7 +27,7 @@ from image_classifier.editor.preview_worker import PreviewWorker
 from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import EditState
-from image_classifier.editor.widgets import STYLE, AdjustSlider, StraightenRuler, tool_button
+from image_classifier.editor.widgets import STYLE, AdjustSlider, StraightenRuler, TabButton, tool_button
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.saver import save_rgba
 
@@ -242,10 +242,9 @@ class PhotoEditor(QWidget):
 
         tabs = QHBoxLayout()
         tabs.setSpacing(18)
-        self.tab_crop = tool_button("crop", self.tr_("editor_tab_crop"), object_name="Tab")
-        self.tab_adjust = tool_button("adjust", self.tr_("editor_tab_adjust"), object_name="Tab")
+        self.tab_crop = TabButton("crop", self.tr_("editor_tab_crop"))
+        self.tab_adjust = TabButton("adjust", self.tr_("editor_tab_adjust"))
         for b in (self.tab_crop, self.tab_adjust):
-            b.setCheckable(True)
             tabs.addWidget(b)
 
         right = QHBoxLayout()
@@ -275,7 +274,7 @@ class PhotoEditor(QWidget):
 
         self.btn_zoom_in.clicked.connect(lambda: self._zoom(1.25))
         self.btn_zoom_out.clicked.connect(lambda: self._zoom(0.8))
-        self.btn_fit.clicked.connect(self.adjust_canvas_fit)
+        self.btn_fit.clicked.connect(self._fit)
         self.btn_reset.clicked.connect(self._reset)
         self.btn_undo.clicked.connect(self._undo)
         self.btn_redo.clicked.connect(self._redo)
@@ -381,7 +380,7 @@ class PhotoEditor(QWidget):
         return panel
 
     # ================================================================== state funnel
-    def _set_state(self, state: EditState, *, commit: bool, source: str = "", animate: bool = False):
+    def _set_state(self, state: EditState, *, commit: bool, source: str = "", view: str = "keep"):
         prev = self._state
         self._state = state
         if commit:
@@ -389,7 +388,7 @@ class PhotoEditor(QWidget):
         if source not in ("ruler", "auto") and state.crop != prev.crop:
             self._straighten_base = None
         if source != "canvas":
-            self.crop_canvas.set_state(state, animate=animate)
+            self.crop_canvas.set_state(state, view=view)
         if source != "ruler":
             self.ruler.setValue(state.crop.angle)
         if source != "slider":
@@ -418,7 +417,7 @@ class PhotoEditor(QWidget):
                 label = act.text()
         if label is None:
             label = f"{ratio:.2f}"
-        self.btn_aspect.setText(label)
+        self.btn_aspect.setText(" " + label)
 
     # ================================================================== previews
     def _request_previews(self):
@@ -478,16 +477,16 @@ class PhotoEditor(QWidget):
         if self._straighten_base is None:
             self._straighten_base = self._state.crop
         crop = g.fit_to_angle(self._straighten_base, angle, self._state.oriented_size)
-        self._set_state(self._state.with_crop(crop), commit=True, source="auto", animate=True)
+        self._set_state(self._state.with_crop(crop), commit=True, source="auto")
 
     def _orient(self, fn):
-        self._set_state(fn(self._state), commit=True, animate=False)
+        self._set_state(fn(self._state), commit=True, view="fit")
 
     def _set_aspect(self, ratio):
         W, H = self._state.oriented_size
         r = W / H if ratio == "original" else ratio
         crop = g.set_aspect(self._state.crop, r, self._state.oriented_size)
-        self._set_state(replace(self._state, aspect=r, crop=crop), commit=True, animate=True)
+        self._set_state(replace(self._state, aspect=r, crop=crop), commit=True, view="fit")
 
     def _slider_changed(self, name: str, value: int):
         self._set_state(self._state.with_adjust(**{name: value}), commit=False, source="slider")
@@ -496,13 +495,13 @@ class PhotoEditor(QWidget):
         self._set_state(self._state, commit=True, source="slider")
 
     def _undo(self):
-        self._set_state(self._history.undo(), commit=False, animate=True)
+        self._set_state(self._history.undo(), commit=False, view="fit")
 
     def _redo(self):
-        self._set_state(self._history.redo(), commit=False, animate=True)
+        self._set_state(self._history.redo(), commit=False, view="fit")
 
     def _reset(self):
-        self._set_state(EditState.initial(self._size), commit=True, animate=True)
+        self._set_state(EditState.initial(self._size), commit=True, view="fit")
 
     def _switch_tab(self, tab: str):
         crop = tab == "crop"
@@ -511,7 +510,6 @@ class PhotoEditor(QWidget):
         self.stack.setCurrentWidget(self.crop_canvas if crop else self.adjust_canvas)
         self.bottom_bar.setVisible(crop)
         self.panel.setVisible(not crop)
-        self.btn_fit.setVisible(not crop)
         (self.crop_canvas if crop else self.adjust_canvas).setFocus()
         if not crop:
             QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
@@ -522,8 +520,11 @@ class PhotoEditor(QWidget):
         else:
             self.adjust_canvas.zoom_by(factor)
 
-    def adjust_canvas_fit(self):
-        self.adjust_canvas.fit()
+    def _fit(self):
+        if self.stack.currentWidget() is self.crop_canvas:
+            self.crop_canvas.fit()
+        else:
+            self.adjust_canvas.fit()
 
     def _on_zoom(self, z: float):
         if self.sender() is self.stack.currentWidget():
@@ -561,7 +562,7 @@ class PhotoEditor(QWidget):
         elif ctrl and (k == Qt.Key.Key_Y or (k == Qt.Key.Key_Z and shift)):
             self._redo()
         elif ctrl and k == Qt.Key.Key_0:
-            self.adjust_canvas.fit()
+            self._fit()
         elif ctrl and k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self._zoom(1.25)
         elif ctrl and k == Qt.Key.Key_Minus:
@@ -664,7 +665,7 @@ class PhotoEditor(QWidget):
 
 def _chevron():
     from image_classifier.editor import icons
-    return icons.icon("chevron_down", 14, "#000000")
+    return icons.icon("chevron_down", 12, "#000000")
 
 
 def _unique_copy(path: str) -> str:

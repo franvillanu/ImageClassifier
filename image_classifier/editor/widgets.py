@@ -1,8 +1,8 @@
-"""Editor widgets: straighten ruler, adjustment slider rows and shared styling."""
+"""Editor widgets and styling, modelled on the Windows 11 Photos editor."""
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from image_classifier.editor import icons
@@ -10,65 +10,76 @@ from image_classifier.editor.state import ANGLE_LIMIT
 
 # Windows 11 dark palette
 BG = "#1c1c1c"
-BAR = "#202020"
-PANEL = "#272727"
+PANEL = "#202020"
 TEXT = "#ffffff"
-TEXT_DIM = "#c5c5c5"
+TEXT_DIM = "#cfcfcf"
+TEXT_OFF = "#777777"
 ACCENT = "#4cc2ff"
+ACCENT_HOVER = "#48b2e9"
 ACCENT_TEXT = "#000000"
-HOVER = "rgba(255,255,255,0.08)"
-PRESSED = "rgba(255,255,255,0.05)"
+FONT = '"Segoe UI Variable Text", "Segoe UI", sans-serif'
 
 STYLE = f"""
-QWidget#PhotoEditor, QWidget#EditorCanvasHost {{ background: {BG}; }}
+QWidget#PhotoEditor {{ background: {BG}; font-family: {FONT}; }}
 QWidget#EditorTopBar, QWidget#EditorBottomBar {{ background: {BG}; }}
-QWidget#EditorPanel {{ background: {BAR}; border-left: 1px solid #2d2d2d; }}
-QLabel {{ color: {TEXT}; font-size: 13px; background: transparent; }}
-QLabel#Dim {{ color: {TEXT_DIM}; }}
-QLabel#GroupTitle {{ font-size: 14px; font-weight: 600; padding-top: 6px; }}
+QWidget#EditorPanel {{ background: {PANEL}; border-left: 1px solid #2b2b2b; }}
+QLabel {{ color: {TEXT}; font-size: 14px; background: transparent; font-family: {FONT}; }}
+QLabel#Dim {{ color: {TEXT_DIM}; font-size: 13px; }}
+QLabel#GroupTitle {{ font-size: 14px; font-weight: 600; }}
 QToolButton {{
     color: {TEXT}; background: transparent; border: none; border-radius: 4px;
-    padding: 6px 10px; font-size: 13px;
+    padding: 0px 10px; min-height: 32px; font-size: 14px; font-family: {FONT};
 }}
-QToolButton:hover {{ background: {HOVER}; }}
-QToolButton:pressed {{ background: {PRESSED}; }}
-QToolButton:disabled {{ color: #6d6d6d; }}
-QToolButton::menu-indicator {{ image: none; width: 0; }}
-QToolButton#Tab {{ padding: 8px 14px; border-radius: 0; border-bottom: 3px solid transparent; }}
-QToolButton#Tab:checked {{ border-bottom: 3px solid {ACCENT}; }}
-QToolButton#Primary {{ background: {ACCENT}; color: {ACCENT_TEXT}; padding: 7px 14px; }}
-QToolButton#Primary:hover {{ background: #47b1e8; }}
-QToolButton#Primary:disabled {{ background: #3a3a3a; color: #8a8a8a; }}
-QToolButton#Secondary {{ background: #2d2d2d; padding: 7px 14px; border: 1px solid #353535; }}
+QToolButton:hover {{ background: rgba(255,255,255,0.07); }}
+QToolButton:pressed {{ background: rgba(255,255,255,0.04); color: {TEXT_DIM}; }}
+QToolButton:disabled {{ color: {TEXT_OFF}; }}
+QToolButton::menu-indicator {{ image: none; width: 0px; }}
+QToolButton#Icon {{ padding: 0px; min-width: 36px; max-width: 36px; min-height: 36px; max-height: 36px; }}
+QToolButton#Tab {{ padding: 0px 12px; min-height: 40px; }}
+QToolButton#Tab:hover {{ background: transparent; }}
+QToolButton#Primary {{ background: {ACCENT}; color: {ACCENT_TEXT}; padding: 0px 12px; }}
+QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
+QToolButton#Primary:pressed {{ background: #42a1d2; color: #1a1a1a; }}
+QToolButton#Primary:disabled {{ background: #3b3b3b; color: #8b8b8b; }}
+QToolButton#Secondary {{ background: #2d2d2d; border: 1px solid #383838; padding: 0px 14px; }}
 QToolButton#Secondary:hover {{ background: #323232; }}
-QMenu {{ background: #2c2c2c; color: {TEXT}; border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px; }}
-QMenu::item {{ padding: 7px 28px 7px 14px; border-radius: 4px; font-size: 13px; }}
-QMenu::item:selected {{ background: {HOVER}; }}
+QMenu {{
+    background: #2c2c2c; color: {TEXT}; border: 1px solid #3a3a3a; border-radius: 8px;
+    padding: 4px; font-size: 14px; font-family: {FONT};
+}}
+QMenu::item {{ padding: 8px 32px 8px 12px; border-radius: 4px; }}
+QMenu::item:selected {{ background: rgba(255,255,255,0.07); }}
 QMenu::item:checked {{ color: {ACCENT}; }}
-QSlider::groove:horizontal {{ height: 4px; background: #9a9a9a; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: #9a9a9a; border-radius: 2px; }}
+QMenu::indicator {{ width: 0px; }}
+QMenu::separator {{ height: 1px; background: #3a3a3a; margin: 4px 6px; }}
+QSlider {{ min-height: 24px; }}
+QSlider::groove:horizontal {{ height: 4px; background: #8a8a8a; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: #8a8a8a; border-radius: 2px; }}
 QSlider::handle:horizontal {{
     background: {ACCENT}; border: 5px solid #454545; width: 10px; height: 10px;
-    margin: -8px 0; border-radius: 10px;
+    margin: -8px 0px; border-radius: 10px;
 }}
-QSlider::handle:horizontal:hover {{ border: 4px solid #454545; width: 12px; height: 12px; margin: -8px 0; }}
+QSlider::handle:horizontal:hover {{ border: 4px solid #454545; width: 12px; height: 12px; }}
+QSlider::handle:horizontal:pressed {{ border: 6px solid #454545; width: 8px; height: 8px; }}
 QScrollArea {{ background: transparent; border: none; }}
-QScrollBar:vertical {{ background: transparent; width: 8px; }}
-QScrollBar::handle:vertical {{ background: #555; border-radius: 4px; min-height: 30px; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: #5a5a5a; border-radius: 3px; min-height: 30px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
 
 
 def tool_button(icon_name: str | None = None, text: str = "", tooltip: str = "", parent=None,
-                object_name: str | None = None, icon_size: int = 20) -> QToolButton:
+                object_name: str | None = None, icon_size: int = 16) -> QToolButton:
     btn = QToolButton(parent)
     if icon_name:
         btn.setIcon(icons.icon(icon_name, icon_size))
         btn.setIconSize(QSize(icon_size, icon_size))
     if text:
-        btn.setText(text)
+        btn.setText(" " + text if icon_name else text)
         if icon_name:
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    elif icon_name and object_name is None:
+        object_name = "Icon"
     if tooltip:
         btn.setToolTip(tooltip)
     if object_name:
@@ -76,6 +87,47 @@ def tool_button(icon_name: str | None = None, text: str = "", tooltip: str = "",
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     return btn
+
+
+class TabButton(QToolButton):
+    """Icon + label tab with the short Windows accent pill under the active one."""
+
+    def __init__(self, icon_name: str, text: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Tab")
+        self.setCheckable(True)
+        self.setText(" " + text)  # en space: Windows-like icon/label gap
+        self.setIcon(icons.icon(icon_name, 16))
+        self.setIconSize(QSize(16, 16))
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self.isChecked():
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(ACCENT))
+            w = 16.0
+            p.drawRoundedRect(QRectF((self.width() - w) / 2, self.height() - 3, w, 3), 1.5, 1.5)
+            p.end()
+
+
+class IconLabel(QWidget):
+    """Paints a QIcon at the widget's real device pixel ratio (crisp at any scaling)."""
+
+    def __init__(self, icon: QIcon, size: int = 16, parent=None):
+        super().__init__(parent)
+        self._icon = icon
+        self._size = size
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        self._icon.paint(p, self.rect())
+        p.end()
 
 
 class StraightenRuler(QWidget):
@@ -89,7 +141,7 @@ class StraightenRuler(QWidget):
     pressed = pyqtSignal()
     released = pyqtSignal()
 
-    PX_PER_DEGREE = 10.5
+    PX_PER_DEGREE = 10.0
     SNAP = 0.3
 
     def __init__(self, parent=None):
@@ -98,7 +150,8 @@ class StraightenRuler(QWidget):
         self._drag_x = None
         self._drag_value = 0.0
         self._decimal = ","
-        self.setMinimumSize(320, 44)
+        self.setFixedHeight(52)
+        self.setMinimumWidth(320)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
@@ -123,15 +176,14 @@ class StraightenRuler(QWidget):
         return f"{v:.1f}".replace(".", self._decimal).replace("-", "−") + " °"
 
     def sizeHint(self):
-        return QSize(600, 44)
+        return QSize(600, 52)
 
-    # ---- painting
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         cx = w / 2.0
-        mid_y = h * 0.62
+        mid_y = h - 16.0
         ppd = self.PX_PER_DEGREE
         first = int(max(-ANGLE_LIMIT, self._value - cx / ppd)) - 1
         last = int(min(ANGLE_LIMIT, self._value + cx / ppd)) + 1
@@ -142,35 +194,30 @@ class StraightenRuler(QWidget):
             if abs(deg) > ANGLE_LIMIT:
                 continue
             x = cx + (deg - self._value) * ppd
-            fade = max(0.0, 1.0 - abs(x - cx) / (cx + 1))
-            alpha = int(60 + 160 * fade)
+            if abs(x - cx) < 6:
+                continue  # keep the area under the indicator clean
+            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
+            alpha = int(40 + 190 * fade)
             if deg == 0:
-                p.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                p.setPen(QColor(255, 255, 255, alpha))
                 p.drawText(QRectF(x - 12, mid_y - 9, 24, 18), Qt.AlignmentFlag.AlignCenter, "0")
-                continue
-            if deg % 5 == 0:
-                p.setPen(QPen(QColor(255, 255, 255, alpha), 2))
-                p.drawLine(QPointF(x, mid_y - 7), QPointF(x, mid_y + 7))
+            elif deg % 5 == 0:
+                p.setPen(QPen(QColor(255, 255, 255, alpha), 1.5))
+                p.drawLine(QPointF(x, mid_y - 6), QPointF(x, mid_y + 6))
             else:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QColor(255, 255, 255, alpha))
-                p.drawEllipse(QPointF(x, mid_y), 1.3, 1.3)
-        # centre indicator
+                p.drawEllipse(QPointF(x, mid_y), 1.2, 1.2)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(255, 255, 255))
-        p.drawRoundedRect(QRectF(cx - 3, mid_y - 11, 6, 22), 3, 3)
-        # value label
+        p.drawRoundedRect(QRectF(cx - 2.5, mid_y - 10, 5, 20), 2.5, 2.5)
         p.setPen(QColor(255, 255, 255))
         font.setPixelSize(13)
         p.setFont(font)
-        p.drawText(QRectF(0, 0, w, mid_y - 12), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, self.text())
-        if self.hasFocus():
-            p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), 4, 4)
+        p.drawText(QRectF(0, 0, w, mid_y - 12), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                   self.text())
         p.end()
 
-    # ---- interaction
     def _snap(self, v: float) -> float:
         return 0.0 if abs(v) < self.SNAP else v
 
@@ -247,13 +294,11 @@ class AdjustSlider(QWidget):
         self.name = name
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(8)
-        ic = QLabel()
-        ic.setPixmap(icons.icon(icon_name, 16).pixmap(16, 16))
+        top.setSpacing(10)
         self.label = QLabel(label)
         self.value_label = QLabel("0")
         self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        top.addWidget(ic)
+        top.addWidget(IconLabel(icons.icon(icon_name, 16)))
         top.addWidget(self.label, 1)
         top.addWidget(self.value_label)
         self.slider = _ResetSlider(Qt.Orientation.Horizontal)
@@ -262,8 +307,8 @@ class AdjustSlider(QWidget):
         self.slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.slider.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 4, 0, 10)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 6, 0, 10)
+        lay.setSpacing(6)
         lay.addLayout(top)
         lay.addWidget(self.slider)
         self.slider.valueChanged.connect(self._on_value)
