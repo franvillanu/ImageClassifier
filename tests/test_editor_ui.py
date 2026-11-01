@@ -329,3 +329,22 @@ def test_save_menu_opens_under_the_button_and_saves_a_copy(editor):
     assert not menu.isVisible()
     assert _wait(lambda: saved, timeout=20)
     assert saved[0][1] is False
+
+
+def test_viewer_brightness_carries_into_the_editor(photo):
+    """The viewer's B-key brightness (gamma) and the editor's Brillo are the same maths."""
+    from image_classifier.editor import adjust
+    x = np.linspace(0, 1, 11)
+    assert np.allclose(adjust.tone_curve(x.copy(), 0.4, 0), x ** 0.8)  # factor 0.8 <-> slider +40
+    path, image = photo
+    host = QWidget()
+    host.resize(1200, 800)
+    host.show()
+    ed = PhotoEditor(host, image, str(path), brightness=40)
+    QApplication.processEvents()
+    assert ed._state.adjust.brightness == 40 and ed.sliders["brightness"].slider.value() == 40
+    assert not ed._history.is_dirty  # nothing new to discard
+    assert ed.btn_save.isEnabled()  # but saving bakes the brightness in
+    assert _wait(lambda: ed.crop_canvas._levels is not ed._orig_levels)  # preview shows it
+    ed._close()
+    host.deleteLater()

@@ -6326,6 +6326,8 @@ class PhotoViewer(QMainWindow):
         self.photo_editor = PhotoEditor(
             self, pixmap.toImage(), orig_path,
             language=self.current_language, rot90=rot90, tab=tab,
+            # the viewer's brightness (B tool, gamma) maps 1:1 onto the editor's Brillo slider
+            brightness=round((1.0 - (self.image_viewer.brightness_factor or 1.0)) * 200),
             copy_path_for=lambda: self.get_unique_copy_filename(folder, name, ext),
             background=getattr(self.image_viewer, "bg_color", "#000000"),
         )
@@ -6333,9 +6335,14 @@ class PhotoViewer(QMainWindow):
         self.photo_editor.closed.connect(self._on_editor_closed)
 
     def _on_editor_saved(self, norm_path, save_path, overwrite):
-        # The editor baked any pending quick-rotation into the saved pixels.
+        # The editor baked any pending quick-rotation and brightness into the saved pixels;
+        # clear them so the viewer never applies them a second time.
         self.image_rotations[norm_path] = 0
         self.image_viewer.rotation_angle = 0
+        self.image_viewer.brightness_factor = 1.0
+        for key in (norm_path, getattr(self, "_current_path", None)):
+            if key is not None:
+                self.image_brightness.pop(key, None)
         self.image_viewer.cached_texture = None
         self._finish_save(norm_path, save_path, overwrite)
         if not overwrite:

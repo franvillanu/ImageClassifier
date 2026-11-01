@@ -33,7 +33,7 @@ from image_classifier.editor.history import EditHistory
 from image_classifier.editor.preview_worker import PreviewWorker
 from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
-from image_classifier.editor.state import EditState
+from image_classifier.editor.state import Adjustments, EditState
 from image_classifier.editor.widgets import (
     STYLE, AdjustSlider, AspectStrip, Card, HaloButton, HaloTextButton, Popover, StraightenRuler, tool_button,
 )
@@ -51,7 +51,7 @@ ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
 
 PROXY_MIN, PROXY_MAX = 2048, 4096
 EDGE = 16  # gap between floating controls and the window edge
-PANEL_W = 300
+PANEL_W = 340
 
 
 class _Task(QThread):
@@ -183,7 +183,8 @@ class PhotoEditor(QWidget):
     closed = pyqtSignal()
 
     def __init__(self, parent: QWidget, source: QImage, source_path: str, *, language: str = "en",
-                 rot90: int = 0, tab: str = "crop", copy_path_for: Callable[[], str] | None = None,
+                 rot90: int = 0, brightness: int = 0, tab: str = "crop",
+                 copy_path_for: Callable[[], str] | None = None,
                  background: str = "#000000"):
         super().__init__(parent)
         self.setObjectName("PhotoEditor")
@@ -200,7 +201,10 @@ class PhotoEditor(QWidget):
         self._proxy_scale = self._proxy.shape[1] / self._size[0]
         self._orig_levels = build_levels(self._proxy, self._size)
         self._orig_qimage = self._orig_levels[0][0]
-        self._history = EditHistory(EditState.initial(self._size, rot90))
+        start = EditState.initial(self._size, rot90)
+        if brightness:  # brightness already applied in the viewer carries over (same maths)
+            start = start.with_adjust(brightness=max(-100, min(100, int(brightness))))
+        self._history = EditHistory(start)
         self._state = self._history.current
         self._straighten_base = None
         self._comparing = False
@@ -219,7 +223,7 @@ class PhotoEditor(QWidget):
 
         self._build_ui()
         self.crop_canvas.set_levels(self._orig_levels)
-        self._shown_adjust = self._state.adjust
+        self._shown_adjust = Adjustments()  # the original levels are unadjusted
         self._set_state(self._state, commit=False)
         self._switch_tab(tab)
         if parent is not None:
@@ -288,13 +292,13 @@ class PhotoEditor(QWidget):
 
     def _build_rail(self):
         """Vertical halo icons on the left, exactly where the viewer keeps its menu."""
-        self.tab_crop = HaloButton("crop", self.tr_("editor_tab_crop"))
-        self.tab_adjust = HaloButton("adjust", self.tr_("editor_tab_adjust"))
+        self.tab_crop = HaloButton("crop", self.tr_("editor_tab_crop"), size=34, box=52)
+        self.tab_adjust = HaloButton("adjust", self.tr_("editor_tab_adjust"), size=34, box=52)
         for b in (self.tab_crop, self.tab_adjust):
             b.setCheckable(True)
-        self.btn_undo = HaloButton("undo", self.tr_("editor_undo") + "  (Ctrl+Z)", size=26)
-        self.btn_redo = HaloButton("redo", self.tr_("editor_redo") + "  (Ctrl+Y)", size=26)
-        self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=26)
+        self.btn_undo = HaloButton("undo", self.tr_("editor_undo") + "  (Ctrl+Z)", size=30, box=50)
+        self.btn_redo = HaloButton("redo", self.tr_("editor_redo") + "  (Ctrl+Y)", size=30, box=50)
+        self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=30, box=50)
         self.rail = _row(self.tab_crop, self.tab_adjust, 22, self.btn_undo, self.btn_redo, self.btn_reset,
                          spacing=8, parent=self, vertical=True)
 
@@ -307,8 +311,8 @@ class PhotoEditor(QWidget):
     def _build_actions(self):
         """Top right: one accent save button with its options, and a close icon."""
         self.btn_save = tool_button(text=self.tr_("editor_save_btn"), object_name="Primary")
-        self.btn_save.setIcon(icons.icon("chevron_down", 14, halo=False))
-        self.btn_save.setIconSize(QSize(14, 14))
+        self.btn_save.setIcon(icons.icon("chevron_down", 16, halo=False))
+        self.btn_save.setIconSize(QSize(16, 16))
         self.btn_save.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # chevron after the label
         self.btn_save.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.save_menu = Popover(self)
@@ -319,7 +323,7 @@ class PhotoEditor(QWidget):
         self.save_menu.add_separator()
         self.save_menu.add_item("clipboard", self.tr_("editor_copy_clipboard"), "", self._copy_to_clipboard)
         self.btn_save.clicked.connect(lambda: self.save_menu.open_under(self.btn_save))
-        self.btn_cancel = HaloButton("close", self.tr_("editor_cancel") + "  (Esc)", size=28)
+        self.btn_cancel = HaloButton("close", self.tr_("editor_cancel") + "  (Esc)", size=30, box=48)
         self.actions = _row(self.btn_save, 6, self.btn_cancel, spacing=4, parent=self)
         self.btn_cancel.clicked.connect(self.request_cancel)
 
@@ -329,27 +333,27 @@ class PhotoEditor(QWidget):
         Compare stays on every tab; the crop tools and Done only on Crop. Ratios open
         in a card above the row.
         """
-        self.btn_rot_left = HaloButton("rotate_left", self.tr_("editor_rotate_left"), size=26, box=40)
-        self.btn_rot_right = HaloButton("rotate_right", self.tr_("editor_rotate_right"), size=26, box=40)
+        self.btn_rot_left = HaloButton("rotate_left", self.tr_("editor_rotate_left"), size=30, box=46)
+        self.btn_rot_right = HaloButton("rotate_right", self.tr_("editor_rotate_right"), size=30, box=46)
         self.ruler = StraightenRuler()
         self.ruler.setFixedWidth(360)
         self.ruler.setToolTip(self.tr_("editor_straighten_hint"))
         self.ruler.set_decimal_separator("," if self._language == "es" else ".")
-        self.btn_flip_h = HaloButton("flip_h", self.tr_("editor_flip_h"), size=26, box=40)
-        self.btn_flip_v = HaloButton("flip_v", self.tr_("editor_flip_v"), size=26, box=40)
+        self.btn_flip_h = HaloButton("flip_h", self.tr_("editor_flip_h"), size=30, box=46)
+        self.btn_flip_v = HaloButton("flip_v", self.tr_("editor_flip_v"), size=30, box=46)
         self.btn_aspect = HaloTextButton(
-            "aspect", self.tr_("editor_aspect_free"), self.tr_("editor_aspect_title"),
+            "aspect", self.tr_("editor_aspect_free"), self.tr_("editor_aspect_title"), size=28, height=46,
             reserve=[self.tr_(k) if k.startswith("editor_") else k for k, _ in ASPECTS])
         self.btn_aspect.setCheckable(True)
-        self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=26, box=40)
+        self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=30, box=46)
         self.crop_group = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
                                self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, 10,
                                spacing=2)
-        self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=26, box=40)
+        self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=30, box=46)
         self.btn_apply = tool_button(text=self.tr_("editor_done"), tooltip=self.tr_("editor_apply_hint"),
                                      object_name="Primary")
-        self.btn_apply.setIcon(icons.icon("check", 16, halo=False))
-        self.btn_apply.setIconSize(QSize(16, 16))
+        self.btn_apply.setIcon(icons.icon("check", 18, halo=False))
+        self.btn_apply.setIconSize(QSize(18, 18))
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
         self.crop_tools = _row(self.crop_group, self.btn_compare, self.apply_group, spacing=0, parent=self)
@@ -384,24 +388,26 @@ class PhotoEditor(QWidget):
         self.btn_flip_v.clicked.connect(lambda: self._orient(lambda s: g.flip(s, False)))
 
     def _build_panel(self):
-        """Adjustment sliders on a translucent card at the right."""
-        self.panel = Card(self, radius=14)
-        self.panel.setFixedWidth(PANEL_W)
+        """Adjustment sliders in a full-height side panel on the right (Save sits at its top)."""
+        self.panel = Card(self, radius=0, fill=QColor(22, 22, 25, 245))
         outer = QVBoxLayout(self.panel)
-        outer.setContentsMargins(6, 8, 6, 8)
+        self._panel_outer = outer
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         scroll.viewport().setAutoFillBackground(False)
+        scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        scroll.viewport().setStyleSheet("background: transparent;")
         content = QWidget()
         content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(10, 8, 10, 8)
-        lay.setSpacing(4)
+        lay.setContentsMargins(14, 4, 14, 16)
+        lay.setSpacing(6)
         self.sliders: dict[str, AdjustSlider] = {}
         for i, (title_key, names) in enumerate((("editor_group_light", LIGHT), ("editor_group_color", COLOR))):
             if i:
-                lay.addSpacing(14)
+                lay.addSpacing(18)
             title = QLabel(self.tr_(title_key).upper())
             title.setObjectName("GroupTitle")
             title.setContentsMargins(8, 0, 0, 4)
@@ -430,14 +436,17 @@ class PhotoEditor(QWidget):
         self.aspect_card.move((w - self.aspect_card.width()) // 2, tools_y - self.aspect_card.height() - 8)
         top = EDGE + self.actions.height() + 8
         bottom = h - tools_y + 4
-        panel_h = min(self._panel_content.sizeHint().height() + 16, h - top - EDGE)
-        self.panel.setFixedHeight(max(120, panel_h))
-        self.panel.move(w - PANEL_W - EDGE, top)
+        # Edge-to-edge side panel; 1 px past the top/right/bottom so only its left border shows.
+        self.panel.setGeometry(w - PANEL_W, -1, PANEL_W + 1, h + 2)
+        self._panel_outer.setContentsMargins(0, top + 8, 1, 1)
         left = EDGE + self.rail.width() + 8
         self.crop_canvas.set_insets(left, top - 8, left, bottom)
-        right = PANEL_W + 2 * EDGE if self._tab == "adjust" else left
+        right = PANEL_W + EDGE if self._tab == "adjust" else left
         self.adjust_canvas.set_insets(left, top - 8, right, bottom)
-        for overlay in (self.rail, self.actions, self.crop_tools, self.aspect_card, self.panel):
+        if self._tab == "adjust":  # centre the bottom row over the photo, not the whole window
+            free = w - PANEL_W
+            self.crop_tools.move((free - self.crop_tools.width()) // 2, tools_y)
+        for overlay in (self.rail, self.panel, self.actions, self.crop_tools, self.aspect_card):
             overlay.raise_()
 
     def resizeEvent(self, e):

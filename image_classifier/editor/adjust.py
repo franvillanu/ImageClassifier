@@ -57,11 +57,18 @@ def _smoothstep(e0: float, e1: float, x: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
+def brightness_gamma(brightness: float) -> float:
+    """The viewer's brightness definition (its B-key tool): slider -1..1 -> gamma 1.5..0.5.
+
+    Shared so a brightness set in the viewer means exactly the same in the editor.
+    """
+    return 1.0 - brightness / 2.0
+
+
 def tone_curve(x: np.ndarray, brightness: float, contrast: float) -> np.ndarray:
-    """Brightness (midtone lift, endpoints fixed) then contrast (S-curve about 0.5)."""
+    """Brightness (gamma on sRGB, endpoints fixed) then contrast (S-curve about 0.5)."""
     if brightness:
-        # y = x + k x (1 - x) is monotonic for |k| <= 1.
-        x = x + brightness * x * (1.0 - x)
+        x = np.power(np.clip(x, 0.0, 1.0), brightness_gamma(brightness))
     if contrast > 0:
         x = x + contrast * (_smoothstep(0.0, 1.0, x) - x)
     elif contrast < 0:
