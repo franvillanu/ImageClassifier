@@ -51,6 +51,7 @@ translations = {
 
         # 3. Dialogs & Error/Confirmation Messages
         "error_loading_image": "Error: Could not load image.",
+        "full_resolution_loading": "Full-resolution image is still loading.",
         "folder_no_images": "This folder contains no images. Please select another folder.",
         "confirm_title": "Confirmation",
         "yes": "Yes",
@@ -391,6 +392,7 @@ translations = {
         
         # 3. Diálogos de Error / Confirmación
         "error_loading_image": "Error: No se pudo cargar la imagen.",
+        "full_resolution_loading": "La imagen a resolución completa todavía se está cargando.",
         "folder_no_images": "Esta carpeta no contiene imágenes. Por favor, seleccione otra carpeta.",
         "confirm_title": "Confirmación",
         "yes": "Sí",

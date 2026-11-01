@@ -36,4 +36,6 @@ DEFAULT_CONFIG = {
     "theme": "black",
     "check_updates": True,
     "last_seen_version": None,
+    "preview_cache_enabled": True,
+    "preview_cache_limit_mb": 1024,
 }

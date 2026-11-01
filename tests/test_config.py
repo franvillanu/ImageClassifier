@@ -16,6 +16,8 @@ def test_default_config_has_expected_keys():
     assert "current_language" in DEFAULT_CONFIG
     assert DEFAULT_CONFIG["theme"] == "black"
     assert DEFAULT_CONFIG["current_language"] == "en"
+    assert DEFAULT_CONFIG["preview_cache_enabled"] is True
+    assert DEFAULT_CONFIG["preview_cache_limit_mb"] == 1024
 
 
 def test_get_config_dir_returns_path():
