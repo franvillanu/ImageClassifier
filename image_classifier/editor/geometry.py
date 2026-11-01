@@ -415,3 +415,13 @@ def fit_view(crop: CropGeometry, viewport: tuple[float, float, float, float], ma
     aw, ah = max(1.0, vw - 2 * margin), max(1.0, vh - 2 * margin)
     z = min(aw / crop.w, ah / crop.h)
     return View((crop.cx, crop.cy), (vx + vw / 2.0, vy + vh / 2.0), z, crop.angle)
+
+
+def fit_image_view(bounds: Size, angle: float, viewport: tuple[float, float, float, float],
+                   margin: float = 24.0) -> View:
+    """View that shows the whole (rotated) image centred in ``viewport``."""
+    vx, vy, vw, vh = viewport
+    aw, ah = max(1.0, vw - 2 * margin), max(1.0, vh - 2 * margin)
+    ex, ey = half_extents(bounds[0], bounds[1], angle)
+    z = min(aw / (2 * ex), ah / (2 * ey))
+    return View((bounds[0] / 2.0, bounds[1] / 2.0), (vx + vw / 2.0, vy + vh / 2.0), z, angle)

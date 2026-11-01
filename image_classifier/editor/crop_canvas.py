@@ -1,14 +1,21 @@
-"""Recortar canvas: the crop frame stays put, the image moves underneath.
+"""Recortar canvas: the crop frame is the tool, the image stays where it is.
 
 Everything is drawn with one QTransform (proxy pixels -> source -> oriented ->
 screen), so straightening, panning and zooming never resample pixels per frame.
 Gestures produce new ``EditState`` values through the closed-form functions in
 ``geometry.py``; the canvas never owns the truth, the editor does.
 
-View policy: the view never jumps on its own. Resizing the frame moves only
-the frame; panning, zooming and straightening keep the frame where it is on
-screen. The view is refitted only on request (``fit``) or when the editor
-replaces the state wholesale (rotate, flip, aspect, undo, reset, resize).
+Interaction:
+  * drag a handle            -> resize the frame
+  * drag inside the frame    -> move the frame over the image
+  * drag outside the frame   -> pan the view (middle button pans anywhere)
+  * wheel / zoom buttons     -> zoom the view about the cursor (crop unchanged)
+  * arrow keys               -> nudge the frame (Shift: 10 px)
+
+View policy: the view never jumps. While the view is "fitted" it keeps the
+whole rotated image visible (straightening zooms out smoothly); once the user
+zooms or pans, the zoom is left alone and straightening rotates the image about
+the frame centre.
 """
 from __future__ import annotations
 
@@ -16,16 +23,19 @@ import math
 
 import cv2
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QTransform
+from PyQt6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 from PyQt6.QtWidgets import QWidget
 
 from image_classifier.editor import geometry as g
 from image_classifier.editor.qtimage import rgba_to_qimage
 from image_classifier.editor.state import CropGeometry, EditState
+from image_classifier.editor.widgets import ui_font
 
 CORNER_HIT = 20
 EDGE_HIT = 12
-MARGIN = 48
+MARGIN = 40
+CANVAS = QColor(28, 28, 28)
+MAX_ZOOM = 8.0  # physical screen px per source px
 
 _CURSORS = {
     "top_left": Qt.CursorShape.SizeFDiagCursor,
@@ -36,6 +46,8 @@ _CURSORS = {
     "right": Qt.CursorShape.SizeHorCursor,
     "top": Qt.CursorShape.SizeVerCursor,
     "bottom": Qt.CursorShape.SizeVerCursor,
+    "move": Qt.CursorShape.SizeAllCursor,
+    "pan": Qt.CursorShape.OpenHandCursor,
 }
 
 
@@ -54,11 +66,9 @@ def build_levels(rgba, source_size: tuple[int, int]) -> list:
     return levels
 
 
-def keep_frame(view: g.View, old: CropGeometry, new: CropGeometry) -> g.View:
-    """View that shows ``new`` in the same on-screen frame rectangle ``old`` had."""
-    fx, fy, fw, fh = view.frame_rect(old)
-    z = min(fw / new.w, fh / new.h)
-    return g.View((new.cx, new.cy), (fx + fw / 2.0, fy + fh / 2.0), z, new.angle)
+def follow_crop(view: g.View, old: CropGeometry, new: CropGeometry) -> g.View:
+    """Same zoom, ``new``'s centre shown where ``old``'s centre was, rotated to ``new.angle``."""
+    return g.View((new.cx, new.cy), view.to_screen((old.cx, old.cy)), view.zoom, new.angle)
 
 
 def _view_transform(v: g.View) -> QTransform:
@@ -82,6 +92,7 @@ class CropCanvas(QWidget):
         self._levels: list[tuple[QImage, float, float]] = []
         self._state: EditState | None = None
         self._view: g.View | None = None
+        self._fitted = True
         self._gesture = None
         self._grid = None  # None | "thirds" | "fine"
         self._commit_timer = QTimer(self)
@@ -100,20 +111,23 @@ class CropCanvas(QWidget):
         return self._state
 
     def set_state(self, state: EditState, *, view: str = "keep"):
-        """Show ``state``. ``view``: "keep" holds the frame on screen, "fit" recentres it."""
+        """Show ``state``. ``view``: "keep" follows the frame without jumping, "fit" shows the whole image."""
         old_state, old_view = self._state, self._view
         self._state = state
         self._gesture = None
-        if view == "keep" and old_view is not None and old_state is not None \
-                and old_state.orientation == state.orientation:
-            self._view = keep_frame(old_view, old_state.crop, state.crop)
+        if view == "fit" or old_view is None or old_state is None \
+                or old_state.orientation != state.orientation:
+            self._fitted = True
+        if self._fitted:
+            self._view = self._fit_view()
         else:
-            self._view = self._fit()
+            self._view = follow_crop(old_view, old_state.crop, state.crop)
         self._emit_zoom()
         self.update()
 
     def fit(self):
-        self._view = self._fit()
+        self._fitted = True
+        self._view = self._fit_view()
         self._emit_zoom()
         self.update()
 
@@ -124,35 +138,45 @@ class CropCanvas(QWidget):
     def _bounds(self):
         return self._state.oriented_size
 
-    def _fit(self) -> g.View | None:
+    def _fit_view(self) -> g.View | None:
         if self._state is None or self.width() < 10 or self.height() < 10:
             return None
-        return g.fit_view(self._state.crop, (0, 0, self.width(), self.height()), MARGIN)
+        return g.fit_image_view(self._bounds(), self._state.crop.angle,
+                                (0, 0, self.width(), self.height()), MARGIN)
 
     def _emit_zoom(self):
         if self._view is not None:
             self.zoomChanged.emit(self._view.zoom * self.devicePixelRatioF())
 
-    def _apply(self, crop: CropGeometry, committed: bool, *, hold_frame: bool = True):
-        """Update the crop from a gesture; optionally keep the frame fixed on screen."""
-        old = self._state
-        new = old.with_crop(crop)
-        if hold_frame and self._view is not None:
-            self._view = keep_frame(self._view, old.crop, crop)
-            self._emit_zoom()
-        self._state = new
-        self.stateEdited.emit(new, committed)
+    def _apply(self, crop: CropGeometry, committed: bool):
+        """Update the crop from a gesture; the view stays exactly where it is."""
+        self._state = self._state.with_crop(crop)
+        self.stateEdited.emit(self._state, committed)
         self.update()
 
     # ------------------------------------------------------------------ zoom API
     def zoom_by(self, factor: float, anchor_screen: QPointF | None = None):
+        """Zoom the view about ``anchor_screen`` (default: the frame centre). The crop is not touched."""
         if self._state is None or self._view is None:
             return
-        anchor = None if anchor_screen is None else self._view.to_image((anchor_screen.x(), anchor_screen.y()))
-        crop = g.zoom(self._state.crop, factor, anchor, self._bounds())
-        if crop != self._state.crop:
-            self._apply(crop, False)
-            self._schedule_commit()
+        v = self._view
+        fit = self._fit_view()
+        lo = fit.zoom * 0.5 if fit else 1e-4
+        hi = max(MAX_ZOOM / self.devicePixelRatioF(), fit.zoom if fit else 0)
+        z = max(lo, min(hi, v.zoom * factor))
+        if fit is not None and factor < 1 and z <= fit.zoom * 1.0001 <= v.zoom * 1.0001:
+            self.fit()  # zooming out snaps back to "whole image"
+            return
+        if anchor_screen is None:
+            fx, fy, fw, fh = v.frame_rect(self._state.crop)
+            anchor = (fx + fw / 2.0, fy + fh / 2.0)
+        else:
+            anchor = (anchor_screen.x(), anchor_screen.y())
+        p = v.to_image(anchor)
+        self._view = g.View(p, anchor, z, v.angle)
+        self._fitted = False
+        self._emit_zoom()
+        self.update()
 
     def _schedule_commit(self):
         self._pending_commit = True
@@ -175,7 +199,7 @@ class CropCanvas(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(28, 28, 28))
+        p.fillRect(self.rect(), CANVAS)
         st, view = self._state, self._view
         if st is None or view is None or not self._levels:
             p.end()
@@ -192,18 +216,21 @@ class CropCanvas(QWidget):
 
         fx, fy, fw, fh = view.frame_rect(st.crop)
         frame = QRectF(fx, fy, fw, fh)
-        path = QPainterPath()
-        path.setFillRule(Qt.FillRule.OddEvenFill)
-        path.addRect(QRectF(self.rect()))
-        path.addRect(frame)
-        p.fillPath(path, QColor(28, 28, 28, 170))
+        # Dim the image outside the frame (not the canvas, which stays the window colour).
+        W, H = st.oriented_size
+        image = QPainterPath()
+        image.addPolygon(QPolygonF([QPointF(*view.to_screen(c)) for c in ((0, 0), (W, 0), (W, H), (0, H))]))
+        image.closeSubpath()
+        frame_path = QPainterPath()
+        frame_path.addRect(frame)
+        p.fillPath(image.subtracted(frame_path), QColor(0, 0, 0, 150))
 
         if self._grid:
             self._paint_grid(p, frame)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        p.setPen(QPen(QColor(255, 255, 255, 220), 1))
+        p.setPen(QPen(QColor(255, 255, 255, 230), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRect(frame)
+        p.drawRect(frame.adjusted(0, 0, -1, -1))
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._paint_handles(p, frame)
         if self._gesture is not None or self._grid:
@@ -214,47 +241,43 @@ class CropCanvas(QWidget):
         n = 9 if self._grid == "fine" else 3
         for i in range(1, n):
             major = self._grid == "thirds" or i % 3 == 0
-            p.setPen(QPen(QColor(255, 255, 255, 110 if major else 45), 1))
+            p.setPen(QPen(QColor(255, 255, 255, 120 if major else 50), 1))
             x = f.left() + f.width() * i / n
             y = f.top() + f.height() * i / n
             p.drawLine(QPointF(x, f.top()), QPointF(x, f.bottom()))
             p.drawLine(QPointF(f.left(), y), QPointF(f.right(), y))
 
     def _paint_handles(self, p: QPainter, f: QRectF):
-        """Windows-style handles: rounded L brackets at the corners, short bars on the edges."""
-        L, T = 22.0, 4.0
-        pen = QPen(QColor(255, 255, 255), T, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
-                   Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        o = T / 2.0  # draw just outside the frame line
-        l, t, r, b = f.left() - o, f.top() - o, f.right() + o, f.bottom() + o
+        """Windows-style handles: square L brackets at the corners, short bars on the edges."""
+        L = min(20.0, f.width() / 3.0, f.height() / 3.0)
+        T = 3.0
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255))
+        l, t, r, b = f.left(), f.top(), f.right(), f.bottom()
         for x, y, dx, dy in ((l, t, 1, 1), (r, t, -1, 1), (l, b, 1, -1), (r, b, -1, -1)):
-            path = QPainterPath(QPointF(x + dx * L, y))
-            path.lineTo(QPointF(x, y))
-            path.lineTo(QPointF(x, y + dy * L))
-            p.drawPath(path)
+            ox = x - (T if dx > 0 else 0)  # bracket sits just outside the frame line
+            oy = y - (T if dy > 0 else 0)
+            p.drawRect(QRectF(ox if dx > 0 else x - L, oy, L + T, T))
+            p.drawRect(QRectF(ox, oy if dy > 0 else y - L, T, L + T))
+        half = 10.0
         cx, cy = f.center().x(), f.center().y()
-        half = L / 2.0
-        if f.width() > 4 * L:
-            p.drawLine(QPointF(cx - half, t), QPointF(cx + half, t))
-            p.drawLine(QPointF(cx - half, b), QPointF(cx + half, b))
-        if f.height() > 4 * L:
-            p.drawLine(QPointF(l, cy - half), QPointF(l, cy + half))
-            p.drawLine(QPointF(r, cy - half), QPointF(r, cy + half))
+        if f.width() > 6 * half:
+            p.drawRect(QRectF(cx - half, t - T, 2 * half, T))
+            p.drawRect(QRectF(cx - half, b, 2 * half, T))
+        if f.height() > 6 * half:
+            p.drawRect(QRectF(l - T, cy - half, T, 2 * half))
+            p.drawRect(QRectF(r, cy - half, T, 2 * half))
 
     def _paint_size(self, p: QPainter, f: QRectF):
         w, h = self._state.output_size
-        text = f"{w} × {h}"
-        font = QFont(self.font())
-        font.setPixelSize(12)
-        p.setFont(font)
-        tw = p.fontMetrics().horizontalAdvance(text) + 18
-        th = 24
+        text = f"{w} x {h}"
+        p.setFont(ui_font(14))
+        tw = p.fontMetrics().horizontalAdvance(text) + 20
+        th = 28
         x = f.center().x() - tw / 2
-        y = f.bottom() - th - 14 if f.height() > th * 3 else f.bottom() + 12
+        y = f.bottom() - th - 10 if f.height() > th * 3 else f.bottom() + 12
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(32, 32, 32, 230))
+        p.setBrush(QColor(45, 45, 45, 235))
         p.drawRoundedRect(QRectF(x, y, tw, th), 4, 4)
         p.setPen(QColor(255, 255, 255))
         p.drawText(QRectF(x, y, tw, th), Qt.AlignmentFlag.AlignCenter, text)
@@ -280,54 +303,75 @@ class CropCanvas(QWidget):
                 return "top"
             if abs(y - b) <= EDGE_HIT:
                 return "bottom"
+        if l < x < r and t < y < b:
+            return "move"
         return "pan"
 
     # ------------------------------------------------------------------ events
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        if self._gesture is None:
+        if self._fitted or self._view is None:
             self.fit()
+        else:
+            old = e.oldSize()
+            if old.width() > 0 and old.height() > 0:
+                v = self._view
+                dx = (self.width() - old.width()) / 2.0
+                dy = (self.height() - old.height()) / 2.0
+                self._view = g.View(v.focus, (v.center[0] + dx, v.center[1] + dy), v.zoom, v.angle)
 
     def mousePressEvent(self, e):
-        if e.button() != Qt.MouseButton.LeftButton or self._state is None or self._view is None:
+        if self._state is None or self._view is None:
+            return
+        if e.button() == Qt.MouseButton.MiddleButton:
+            kind = "pan"
+        elif e.button() == Qt.MouseButton.LeftButton:
+            kind = self._hit(e.position())
+        else:
             return
         self._commit_pending()
-        kind = self._hit(e.position())
-        self._gesture = {"kind": kind, "start": self._state, "pos": e.position(), "view": self._view}
-        self._grid = "thirds"
+        self._gesture = {"kind": kind, "start": self._state, "pos": e.position(), "view": self._view,
+                         "button": e.button()}
         if kind == "pan":
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            self._grid = "thirds"
         self.update()
 
     def mouseMoveEvent(self, e):
         gst = self._gesture
         if gst is None:
-            self.setCursor(_CURSORS.get(self._hit(e.position()), Qt.CursorShape.OpenHandCursor))
+            self.setCursor(_CURSORS[self._hit(e.position())])
             return
         start: EditState = gst["start"]
         view: g.View = gst["view"]
         d = e.position() - gst["pos"]
         bounds = start.oriented_size
-        if gst["kind"] == "pan":
-            crop = g.pan(start.crop, view.delta_to_image((-d.x(), -d.y())), bounds)
-            self._view = keep_frame(view, start.crop, crop)
-            self._apply(crop, False, hold_frame=False)
+        kind = gst["kind"]
+        if kind == "pan":
+            self._view = g.View(view.focus, (view.center[0] + d.x(), view.center[1] + d.y()),
+                                view.zoom, view.angle)
+            self._fitted = False
+            self.update()
+        elif kind == "move":
+            dx, dy = view.delta_to_image((d.x(), d.y()))
+            moved = CropGeometry(start.crop.cx + dx, start.crop.cy + dy, start.crop.w, start.crop.h,
+                                 start.crop.angle)
+            self._apply(g.clamp_center(moved, bounds), False)
         else:
             aspect = start.aspect
             if aspect is None and e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 aspect = start.crop.w / start.crop.h
-            crop = g.resize_handle(start.crop, gst["kind"], (d.x() / view.zoom, d.y() / view.zoom),
-                                   aspect, bounds)
-            self._view = view  # the view stays still; only the frame moves
-            self._apply(crop, False, hold_frame=False)
+            crop = g.resize_handle(start.crop, kind, (d.x() / view.zoom, d.y() / view.zoom), aspect, bounds)
+            self._apply(crop, False)
 
     def mouseReleaseEvent(self, e):
         gst = self._gesture
-        if gst is None or e.button() != Qt.MouseButton.LeftButton:
+        if gst is None or e.button() != gst["button"]:
             return
         self._gesture = None
         self._grid = None
-        self.setCursor(_CURSORS.get(self._hit(e.position()), Qt.CursorShape.OpenHandCursor))
+        self.setCursor(_CURSORS[self._hit(e.position())])
         if self._state != gst["start"]:
             self.stateEdited.emit(self._state, True)
         self.update()
@@ -345,10 +389,10 @@ class CropCanvas(QWidget):
         moves = {Qt.Key.Key_Left: (-step, 0), Qt.Key.Key_Right: (step, 0),
                  Qt.Key.Key_Up: (0, -step), Qt.Key.Key_Down: (0, step)}
         if e.key() in moves:
-            dx, dy = moves[e.key()]
-            # The arrow moves the image, so the crop moves the opposite way.
-            crop = g.pan(self._state.crop, self._view.delta_to_image((-dx, -dy)), self._bounds())
-            if crop != self._state.crop:
+            dx, dy = self._view.delta_to_image(moves[e.key()])
+            c = self._state.crop
+            crop = g.clamp_center(CropGeometry(c.cx + dx, c.cy + dy, c.w, c.h, c.angle), self._bounds())
+            if crop != c:
                 self._apply(crop, False)
                 self._schedule_commit()
             return

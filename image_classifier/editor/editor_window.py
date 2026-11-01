@@ -12,10 +12,10 @@ from typing import Callable
 
 import cv2
 from PyQt6.QtCore import QEventLoop, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QActionGroup, QGuiApplication, QImage
+from PyQt6.QtGui import QColor, QGuiApplication, QImage
 from PyQt6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QScrollArea, QStackedWidget,
-    QToolButton, QVBoxLayout, QWidget,
+    QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QMenu, QScrollArea,
+    QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from image_classifier.editor import geometry as g
@@ -27,7 +27,9 @@ from image_classifier.editor.preview_worker import PreviewWorker
 from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import EditState
-from image_classifier.editor.widgets import STYLE, AdjustSlider, StraightenRuler, TabButton, tool_button
+from image_classifier.editor.widgets import (
+    STYLE, AdjustSlider, AspectStrip, StraightenRuler, TabButton, tool_button,
+)
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.saver import save_rgba
 
@@ -38,8 +40,9 @@ COLOR = [("saturation", "saturation"), ("warmth", "warmth"), ("tint", "tint"), (
 
 # (translation key or literal label, ratio); "original" resolves to the image's own ratio
 ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
-           ("editor_aspect_square", 1.0), ("16:9", 16 / 9), ("9:16", 9 / 16), ("4:3", 4 / 3),
-           ("3:4", 3 / 4), ("3:2", 3 / 2), ("2:3", 2 / 3)]
+           ("editor_aspect_square", 1.0)] + [
+    (f"{a} : {b}", a / b) for a, b in ((9, 16), (16, 9), (4, 5), (5, 4), (3, 4), (4, 3),
+                                       (2, 3), (3, 2), (5, 7), (7, 5), (1, 2), (2, 1))]
 
 PROXY_MIN, PROXY_MAX = 2048, 4096
 
@@ -62,37 +65,61 @@ class _Task(QThread):
 
 
 class _Modal(QFrame):
-    """Inline confirm/busy overlay drawn inside the editor."""
+    """Windows 11 ContentDialog drawn inside the editor: centred card, title, body, button footer.
 
-    def __init__(self, parent, message: str, buttons: list[tuple[str, str, str]] | None = None):
+    Without buttons it is a small busy card (e.g. "Saving…").
+    """
+
+    WIDTH = 448
+
+    def __init__(self, parent, title: str, body: str = "", buttons: list[tuple[str, str, str]] | None = None):
         super().__init__(parent)
-        self.setStyleSheet("QFrame#ModalBack { background: rgba(0,0,0,150); }"
-                           "QFrame#ModalCard { background: #2b2b2b; border: 1px solid #3a3a3a; border-radius: 8px; }")
-        self.setObjectName("ModalBack")
+        self.setObjectName("DialogBack")
         self.setGeometry(parent.rect())
         self.result = None
         self._loop = None
         outer = QVBoxLayout(self)
-        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.setContentsMargins(0, 0, 0, 0)
         card = QFrame(self)
-        card.setObjectName("ModalCard")
-        card.setMinimumWidth(380)
+        card.setObjectName("DialogCard")
+        card.setFixedWidth(self.WIDTH if buttons else 280)
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(48)
+        shadow.setOffset(0, 12)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        card.setGraphicsEffect(shadow)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 22, 24, 20)
-        lay.setSpacing(18)
-        label = QLabel(message)
-        label.setWordWrap(True)
-        label.setStyleSheet("font-size: 14px;")
-        lay.addWidget(label)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        content = QVBoxLayout()
+        content.setContentsMargins(24, 22, 24, 24)
+        content.setSpacing(12)
+        heading = QLabel(title)
+        heading.setObjectName("DialogTitle" if buttons else "")
+        heading.setWordWrap(True)
+        if not buttons:
+            heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content.addWidget(heading)
+        if body:
+            text = QLabel(body)
+            text.setObjectName("DialogBody")
+            text.setWordWrap(True)
+            content.addWidget(text)
+        lay.addLayout(content)
         if buttons:
-            row = QHBoxLayout()
-            row.addStretch(1)
-            for key, text, obj in buttons:
-                b = tool_button(text=text, object_name=obj)
+            footer = QWidget()
+            footer.setObjectName("DialogFooter")
+            footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            row = QHBoxLayout(footer)
+            row.setContentsMargins(24, 24, 24, 24)
+            row.setSpacing(8)
+            for key, label, obj in reversed(buttons):  # primary first, like Windows
+                b = tool_button(text=label, object_name=obj)
+                b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 b.clicked.connect(lambda _=False, k=key: self._finish(k))
-                row.addWidget(b)
-            lay.addLayout(row)
-        outer.addWidget(card)
+                row.addWidget(b, 1)
+            lay.addWidget(footer)
+        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignCenter)
         self.show()
         self.raise_()
 
@@ -286,57 +313,68 @@ class PhotoEditor(QWidget):
         return bar
 
     def _build_bottom_bar(self) -> QWidget:
-        bar = QWidget()
+        """Two pages like Windows Photos: straighten + tools, or the aspect-ratio strip + Done."""
+        bar = QStackedWidget()
         bar.setObjectName("EditorBottomBar")
-        lay = QVBoxLayout(bar)
-        lay.setContentsMargins(12, 4, 12, 12)
-        lay.setSpacing(4)
 
+        # page 0: ruler above the tool row
+        tools_page = QWidget()
+        lay = QVBoxLayout(tools_page)
+        lay.setContentsMargins(12, 4, 12, 14)
+        lay.setSpacing(6)
         ruler_row = QHBoxLayout()
+        ruler_row.setSpacing(8)
         ruler_row.addStretch(1)
         self.ruler = StraightenRuler()
-        self.ruler.setFixedWidth(600)
+        self.ruler.setFixedWidth(560)
         self.ruler.set_decimal_separator("," if self._language == "es" else ".")
-        self.btn_auto = tool_button("auto", tooltip=self.tr_("editor_auto_straighten"))
+        self.btn_auto = tool_button(text=self.tr_("editor_auto"), tooltip=self.tr_("editor_auto_straighten"),
+                                    object_name="Secondary")
+        ruler_spacer = QWidget()
+        ruler_spacer.setFixedWidth(self.btn_auto.sizeHint().width())  # keep the ruler centred
+        ruler_row.addWidget(ruler_spacer)
         ruler_row.addWidget(self.ruler)
-        ruler_row.addWidget(self.btn_auto)
+        ruler_row.addWidget(self.btn_auto, 0, Qt.AlignmentFlag.AlignBottom)
         ruler_row.addStretch(1)
         lay.addLayout(ruler_row)
 
         tools = QHBoxLayout()
+        tools.setSpacing(4)
         tools.addStretch(1)
-        inner = QHBoxLayout()
         self.btn_rot_left = tool_button("rotate_left", tooltip=self.tr_("editor_rotate_left"))
         self.btn_rot_right = tool_button("rotate_right", tooltip=self.tr_("editor_rotate_right"))
-        self.btn_aspect = tool_button("aspect", self.tr_("editor_aspect_free"))
-        self.btn_aspect.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_aspect = tool_button("aspect", self.tr_("editor_aspect_free"),
+                                      tooltip=self.tr_("editor_aspect_title"))
+        self.btn_aspect.setMinimumWidth(150)
         self.btn_flip_h = tool_button("flip_h", tooltip=self.tr_("editor_flip_h"))
         self.btn_flip_v = tool_button("flip_v", tooltip=self.tr_("editor_flip_v"))
-        self._aspect_menu = QMenu(self.btn_aspect)
-        self._aspect_group = QActionGroup(self._aspect_menu)
-        self._aspect_actions = []
-        for key, ratio in ASPECTS:
-            act = self._aspect_menu.addAction(self.tr_(key) if key.startswith("editor_") else key)
-            act.setCheckable(True)
-            self._aspect_group.addAction(act)
-            act.triggered.connect(lambda _=False, r=ratio: self._set_aspect(r))
-            self._aspect_actions.append((act, ratio))
-        self.btn_aspect.setMenu(self._aspect_menu)
-        inner.addWidget(self.btn_rot_left)
-        inner.addWidget(self.btn_rot_right)
-        inner.addStretch(1)
-        inner.addWidget(self.btn_aspect)
-        inner.addStretch(1)
-        inner.addWidget(self.btn_flip_h)
-        inner.addWidget(self.btn_flip_v)
-        holder = QWidget()
-        holder.setFixedWidth(640)
-        holder.setLayout(inner)
-        inner.setContentsMargins(0, 0, 0, 0)
-        tools.addWidget(holder)
+        for w in (self.btn_rot_left, self.btn_rot_right):
+            tools.addWidget(w)
+        tools.addSpacing(40)
+        tools.addWidget(self.btn_aspect)
+        tools.addSpacing(40)
+        for w in (self.btn_flip_h, self.btn_flip_v):
+            tools.addWidget(w)
         tools.addStretch(1)
         lay.addLayout(tools)
+        bar.addWidget(tools_page)
 
+        # page 1: aspect-ratio strip
+        aspect_page = QWidget()
+        alay = QVBoxLayout(aspect_page)
+        alay.setContentsMargins(12, 8, 12, 14)
+        alay.setSpacing(6)
+        self._aspect_labels = [self.tr_(k) if k.startswith("editor_") else k for k, _ in ASPECTS]
+        self.aspect_strip = AspectStrip(list(zip(self._aspect_labels, (r for _, r in ASPECTS))))
+        self.btn_aspect_done = tool_button(text=self.tr_("editor_done"))
+        self.btn_aspect_done.setMinimumWidth(120)
+        alay.addWidget(self.aspect_strip)
+        alay.addWidget(self.btn_aspect_done, 0, Qt.AlignmentFlag.AlignHCenter)
+        bar.addWidget(aspect_page)
+
+        self.btn_aspect.clicked.connect(lambda: self._show_aspect_strip(True))
+        self.btn_aspect_done.clicked.connect(lambda: self._show_aspect_strip(False))
+        self.aspect_strip.picked.connect(lambda i: self._set_aspect(ASPECTS[i][1]))
         self.ruler.pressed.connect(self._ruler_pressed)
         self.ruler.valueChanged.connect(self._ruler_changed)
         self.ruler.released.connect(self._ruler_released)
@@ -407,17 +445,18 @@ class PhotoEditor(QWidget):
     def _sync_aspect_label(self):
         ratio = self._state.aspect
         W, H = self._state.oriented_size
-        label = None
-        for act, r in self._aspect_actions:
+        label = f"{ratio:.2f}" if ratio is not None else ""
+        for i, (_, r) in enumerate(ASPECTS):
             value = W / H if r == "original" else r
-            match = (ratio is None and value is None) or (
-                ratio is not None and value is not None and abs(ratio - value) < 1e-6)
-            if match and label is None:
-                act.setChecked(True)
-                label = act.text()
-        if label is None:
-            label = f"{ratio:.2f}"
+            if (ratio is None and value is None) or (
+                    ratio is not None and value is not None and abs(ratio - value) < 1e-6):
+                self.aspect_strip.set_current(i)
+                label = self._aspect_labels[i]
+                break
         self.btn_aspect.setText(" " + label)
+
+    def _show_aspect_strip(self, show: bool):
+        self.bottom_bar.setCurrentIndex(1 if show else 0)
 
     # ================================================================== previews
     def _request_previews(self):
@@ -486,7 +525,7 @@ class PhotoEditor(QWidget):
         W, H = self._state.oriented_size
         r = W / H if ratio == "original" else ratio
         crop = g.set_aspect(self._state.crop, r, self._state.oriented_size)
-        self._set_state(replace(self._state, aspect=r, crop=crop), commit=True, view="fit")
+        self._set_state(replace(self._state, aspect=r, crop=crop), commit=True)
 
     def _slider_changed(self, name: str, value: int):
         self._set_state(self._state.with_adjust(**{name: value}), commit=False, source="slider")
@@ -495,10 +534,10 @@ class PhotoEditor(QWidget):
         self._set_state(self._state, commit=True, source="slider")
 
     def _undo(self):
-        self._set_state(self._history.undo(), commit=False, view="fit")
+        self._set_state(self._history.undo(), commit=False)
 
     def _redo(self):
-        self._set_state(self._history.redo(), commit=False, view="fit")
+        self._set_state(self._history.redo(), commit=False)
 
     def _reset(self):
         self._set_state(EditState.initial(self._size), commit=True, view="fit")
@@ -555,7 +594,9 @@ class PhotoEditor(QWidget):
         k, mods = e.key(), e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
-        if k == Qt.Key.Key_Escape:
+        if k == Qt.Key.Key_Escape and self.bottom_bar.currentIndex() == 1:
+            self._show_aspect_strip(False)
+        elif k == Qt.Key.Key_Escape:
             self.request_cancel()
         elif ctrl and k == Qt.Key.Key_Z and not shift:
             self._undo()
@@ -599,7 +640,7 @@ class PhotoEditor(QWidget):
         def finish_err(msg):
             busy.deleteLater()
             _Modal(self, self.tr_("editor_save_failed").format(error=msg),
-                   [("ok", "OK", "Primary")]).exec()
+                   buttons=[("ok", "OK", "Primary")]).exec()
 
         self._task.done.connect(finish_ok)
         self._task.error.connect(finish_err)
@@ -610,7 +651,8 @@ class PhotoEditor(QWidget):
             return
         if overwrite:
             name = os.path.basename(self._source_path)
-            choice = _Modal(self, self.tr_("editor_overwrite_message").format(name=name), [
+            choice = _Modal(self, self.tr_("editor_overwrite_title"),
+                            self.tr_("editor_overwrite_message").format(name=name), [
                 ("cancel", self.tr_("editor_cancel"), "Secondary"),
                 ("ok", self.tr_("editor_overwrite_confirm"), "Primary"),
             ]).exec()
@@ -643,7 +685,7 @@ class PhotoEditor(QWidget):
 
     def request_cancel(self):
         if self._history.is_dirty:
-            choice = _Modal(self, self.tr_("editor_discard_message"), [
+            choice = _Modal(self, self.tr_("editor_discard_message"), self.tr_("editor_discard_body"), [
                 ("keep", self.tr_("editor_keep_editing"), "Secondary"),
                 ("discard", self.tr_("editor_discard"), "Primary"),
             ]).exec()

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from image_classifier.editor import icons
@@ -61,11 +61,29 @@ QSlider::handle:horizontal {{
 }}
 QSlider::handle:horizontal:hover {{ border: 4px solid #454545; width: 12px; height: 12px; }}
 QSlider::handle:horizontal:pressed {{ border: 6px solid #454545; width: 8px; height: 8px; }}
+QFrame#DialogBack {{ background: rgba(0,0,0,0.45); }}
+QFrame#DialogCard {{ background: #2b2b2b; border: 1px solid #3d3d3d; border-radius: 8px; }}
+QWidget#DialogFooter {{
+    background: #202020; border-top: 1px solid #353535;
+    border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
+}}
+QLabel#DialogTitle {{ font-size: 20px; font-weight: 600; }}
+QLabel#DialogBody {{ font-size: 14px; color: {TEXT_DIM}; }}
+QToolButton#Primary, QToolButton#Secondary {{ min-height: 32px; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: #5a5a5a; border-radius: 3px; min-height: 30px; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
+
+
+def ui_font(px: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
+    """The Windows 11 UI font for text we paint ourselves (stylesheets don't reach QPainter)."""
+    font = QFont()
+    font.setFamilies(["Segoe UI Variable Text", "Segoe UI"])
+    font.setPixelSize(px)
+    font.setWeight(weight)
+    return font
 
 
 def tool_button(icon_name: str | None = None, text: str = "", tooltip: str = "", parent=None,
@@ -150,7 +168,7 @@ class StraightenRuler(QWidget):
         self._drag_x = None
         self._drag_value = 0.0
         self._decimal = ","
-        self.setFixedHeight(52)
+        self.setFixedHeight(60)
         self.setMinimumWidth(320)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
@@ -173,48 +191,43 @@ class StraightenRuler(QWidget):
 
     def text(self) -> str:
         v = 0.0 if abs(self._value) < 0.05 else self._value
-        return f"{v:.1f}".replace(".", self._decimal).replace("-", "−") + " °"
+        return f"{v:.1f}".replace(".", self._decimal).replace("-", "−") + "°"
 
     def sizeHint(self):
-        return QSize(600, 52)
+        return QSize(600, 60)
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         cx = w / 2.0
-        mid_y = h - 16.0
+        base = h - 18.0  # tick baseline; labels sit below it
         ppd = self.PX_PER_DEGREE
         first = int(max(-ANGLE_LIMIT, self._value - cx / ppd)) - 1
         last = int(min(ANGLE_LIMIT, self._value + cx / ppd)) + 1
-        font = QFont(self.font())
-        font.setPixelSize(12)
-        p.setFont(font)
+        p.setFont(ui_font(11))
         for deg in range(first, last + 1):
             if abs(deg) > ANGLE_LIMIT:
                 continue
             x = cx + (deg - self._value) * ppd
-            if abs(x - cx) < 6:
-                continue  # keep the area under the indicator clean
-            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
-            alpha = int(40 + 190 * fade)
-            if deg == 0:
-                p.setPen(QColor(255, 255, 255, alpha))
-                p.drawText(QRectF(x - 12, mid_y - 9, 24, 18), Qt.AlignmentFlag.AlignCenter, "0")
-            elif deg % 5 == 0:
-                p.setPen(QPen(QColor(255, 255, 255, alpha), 1.5))
-                p.drawLine(QPointF(x, mid_y - 6), QPointF(x, mid_y + 6))
-            else:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(255, 255, 255, alpha))
-                p.drawEllipse(QPointF(x, mid_y), 1.2, 1.2)
+            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 3)
+            if fade <= 0:
+                continue
+            major = deg % 5 == 0
+            length = 10.0 if major else 5.0
+            p.setPen(QPen(QColor(255, 255, 255, int((150 if major else 80) * fade)), 1))
+            p.drawLine(QPointF(round(x) + 0.5, base - length), QPointF(round(x) + 0.5, base))
+            if deg % 15 == 0 and abs(x - cx) > 14:
+                p.setPen(QColor(255, 255, 255, int(130 * fade)))
+                label = str(deg).replace("-", "−")
+                p.drawText(QRectF(x - 20, base + 3, 40, 14), Qt.AlignmentFlag.AlignCenter, label)
+        # indicator: accent needle through the ticks
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(255, 255, 255))
-        p.drawRoundedRect(QRectF(cx - 2.5, mid_y - 10, 5, 20), 2.5, 2.5)
-        p.setPen(QColor(255, 255, 255))
-        font.setPixelSize(13)
-        p.setFont(font)
-        p.drawText(QRectF(0, 0, w, mid_y - 12), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+        p.setBrush(QColor(ACCENT))
+        p.drawRoundedRect(QRectF(cx - 1.5, base - 18, 3, 22), 1.5, 1.5)
+        p.setFont(ui_font(14, QFont.Weight.DemiBold))
+        p.setPen(QColor(TEXT))
+        p.drawText(QRectF(0, 0, w, base - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
                    self.text())
         p.end()
 
@@ -266,6 +279,115 @@ class StraightenRuler(QWidget):
             self._step(-self._value)
         else:
             super().keyPressEvent(e)
+
+
+class AspectStrip(QWidget):
+    """Row of aspect-ratio choices, each drawn at its true proportions (Windows Photos style).
+
+    Items are ``(label, ratio)`` where ratio is ``None`` (free), ``"original"`` or a float.
+    """
+
+    picked = pyqtSignal(int)
+
+    ICON_BOX = 44.0  # hover/selection square
+    SHAPE = 22.0  # longest side of a ratio shape
+
+    def __init__(self, items: list[tuple[str, object]], parent=None):
+        super().__init__(parent)
+        self._items = items
+        self._current = 0
+        self._hover = -1
+        self.setMouseTracking(True)
+        self.setFixedHeight(80)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_current(self, index: int):
+        if index != self._current:
+            self._current = index
+            self.update()
+
+    def _item_width(self) -> float:
+        return max(56.0, min(96.0, self.width() / max(1, len(self._items))))
+
+    def _origin(self) -> float:
+        return (self.width() - self._item_width() * len(self._items)) / 2.0
+
+    def _index_at(self, x: float) -> int:
+        i = int((x - self._origin()) // self._item_width())
+        return i if 0 <= i < len(self._items) else -1
+
+    def sizeHint(self):
+        return QSize(int(76 * len(self._items)), 80)
+
+    def minimumSizeHint(self):
+        return QSize(int(56 * len(self._items)), 80)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        iw = self._item_width()
+        x0 = self._origin()
+        for i, (label, ratio) in enumerate(self._items):
+            cx = x0 + iw * (i + 0.5)
+            box = QRectF(cx - self.ICON_BOX / 2, 4, self.ICON_BOX, self.ICON_BOX)
+            selected = i == self._current
+            if selected or i == self._hover:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(255, 255, 255, 22 if selected else 12))
+                p.drawRoundedRect(box, 6, 6)
+            color = QColor(TEXT if selected or i == self._hover else TEXT_DIM)
+            self._paint_shape(p, box.center(), ratio, color)
+            p.setFont(ui_font(13, QFont.Weight.DemiBold if selected else QFont.Weight.Normal))
+            p.setPen(color)
+            p.drawText(QRectF(cx - iw / 2, box.bottom() + 6, iw, 20), Qt.AlignmentFlag.AlignCenter, label)
+        p.end()
+
+    def _paint_shape(self, p: QPainter, c: QPointF, ratio, color: QColor):
+        pen = QPen(color, 1.5)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        s = self.SHAPE
+        if ratio is None or ratio == "original":
+            # Photo glyph; "free" adds crop corners around it.
+            inner = s * (0.62 if ratio is None else 0.9)
+            r = QRectF(c.x() - inner / 2, c.y() - inner / 2, inner, inner)
+            p.drawRoundedRect(r, 2.5, 2.5)
+            path = QPainterPath(QPointF(r.left() + 1, r.bottom() - 1))
+            path.lineTo(QPointF(r.left() + inner * 0.38, r.top() + inner * 0.52))
+            path.lineTo(QPointF(r.left() + inner * 0.62, r.bottom() - inner * 0.22))
+            path.lineTo(QPointF(r.left() + inner * 0.74, r.top() + inner * 0.62))
+            path.lineTo(QPointF(r.right() - 1, r.bottom() - 1))
+            p.drawPath(path)
+            p.drawEllipse(QPointF(r.right() - inner * 0.27, r.top() + inner * 0.27), inner * 0.08, inner * 0.08)
+            if ratio is None:
+                o, L = s / 2, s * 0.28
+                for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                    x, y = c.x() + dx * o, c.y() + dy * o
+                    corner = QPainterPath(QPointF(x - dx * L, y))
+                    corner.lineTo(QPointF(x, y))
+                    corner.lineTo(QPointF(x, y - dy * L))
+                    p.drawPath(corner)
+            return
+        w, h = (s, s / ratio) if ratio >= 1 else (s * ratio, s)
+        p.drawRoundedRect(QRectF(c.x() - w / 2, c.y() - h / 2, w, h), 2.5, 2.5)
+
+    def mouseMoveEvent(self, e):
+        i = self._index_at(e.position().x())
+        if i != self._hover:
+            self._hover = i
+            self.setToolTip(self._items[i][0] if i >= 0 else "")
+            self.update()
+
+    def leaveEvent(self, _e):
+        self._hover = -1
+        self.update()
+
+    def mouseReleaseEvent(self, e):
+        i = self._index_at(e.position().x())
+        if e.button() == Qt.MouseButton.LeftButton and i >= 0:
+            self.set_current(i)
+            self.picked.emit(i)
 
 
 class _ResetSlider(QSlider):

@@ -174,6 +174,56 @@ def test_icons_render_centred_at_any_display_scaling(scale):
         assert xs.max() - xs.min() > size * 0.3 or ys.max() - ys.min() > size * 0.3, (name, scale)
 
 
+def test_drag_inside_frame_moves_the_frame_not_the_image(editor):
+    ed, _, _ = editor
+    ed._set_aspect(1.0)
+    canvas = ed.crop_canvas
+    view_before = canvas._view
+    before = ed._state.crop
+    fx, fy, fw, fh = view_before.frame_rect(before)
+    _drag(canvas, QPointF(fx + fw / 2, fy + fh / 2), QPointF(fx + fw / 2 + 40, fy + fh / 2))
+    after = ed._state.crop
+    assert canvas._view == view_before  # the image did not move
+    assert after.cx > before.cx and abs(after.cy - before.cy) < 1e-6
+    assert (after.w, after.h) == (before.w, before.h)
+    assert g.is_valid(after, ed._state.oriented_size)
+    assert ed._history.can_undo()
+
+
+def test_wheel_zooms_the_view_without_touching_the_crop(editor):
+    ed, _, _ = editor
+    canvas = ed.crop_canvas
+    before = ed._state.crop
+    z0 = canvas._view.zoom
+    canvas.zoom_by(1.5, QPointF(200, 200))
+    assert canvas._view.zoom > z0 and ed._state.crop == before
+    canvas.zoom_by(0.1)
+    assert canvas._view == canvas._fit_view()  # zooming out snaps back to the whole image
+
+
+def test_aspect_strip_sets_ratio(editor):
+    ed, _, _ = editor
+    ed.btn_aspect.click()
+    assert ed.bottom_bar.currentIndex() == 1
+    index = next(i for i, (label, _) in enumerate(ed.aspect_strip._items) if label == "16 : 9")
+    ed.aspect_strip.picked.emit(index)
+    assert abs(ed._state.crop.w / ed._state.crop.h - 16 / 9) < 1e-3
+    assert "16 : 9" in ed.btn_aspect.text()
+    ed.btn_aspect_done.click()
+    assert ed.bottom_bar.currentIndex() == 0
+
+
+def test_confirm_dialog_is_a_centred_card(editor):
+    from image_classifier.editor.editor_window import _Modal
+    ed, _, _ = editor
+    m = _Modal(ed, "Title", "Body", [("keep", "Keep", "Secondary"), ("ok", "OK", "Primary")])
+    QApplication.processEvents()
+    card = m.findChild(QWidget, "DialogCard")
+    assert card.width() == _Modal.WIDTH < ed.width()
+    assert abs(card.geometry().center().x() - ed.width() / 2) <= 2
+    m.deleteLater()
+
+
 def test_handle_drag_does_not_zoom_or_move_the_view(editor):
     ed, _, _ = editor
     canvas = ed.crop_canvas
