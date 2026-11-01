@@ -6327,6 +6327,7 @@ class PhotoViewer(QMainWindow):
             self, pixmap.toImage(), orig_path,
             language=self.current_language, rot90=rot90, tab=tab,
             copy_path_for=lambda: self.get_unique_copy_filename(folder, name, ext),
+            background=getattr(self.image_viewer, "bg_color", "#000000"),
         )
         self.photo_editor.saved.connect(lambda path, overwrite: self._on_editor_saved(norm_path, path, overwrite))
         self.photo_editor.closed.connect(self._on_editor_closed)

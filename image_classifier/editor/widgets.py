@@ -1,84 +1,73 @@
-"""Editor widgets and styling, modelled on the Windows 11 Photos editor."""
+"""Editor widgets, styled after Image Classifier's own viewer.
+
+The viewer is a black canvas with thin white halo icons floating over the
+photo and translucent black cards where text is needed; the editor follows
+the same rules instead of borrowing another app's chrome.
+"""
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from image_classifier.editor import icons
 from image_classifier.editor.state import ANGLE_LIMIT
 
-# Windows 11 dark palette
-BG = "#1c1c1c"
-PANEL = "#202020"
 TEXT = "#ffffff"
-TEXT_DIM = "#cfcfcf"
-TEXT_OFF = "#777777"
-ACCENT = "#4cc2ff"
-ACCENT_HOVER = "#48b2e9"
-ACCENT_TEXT = "#000000"
+TEXT_DIM = "#b8b8b8"
+TEXT_OFF = "#6a6a6a"
+ACCENT = "#0078D7"  # the app's accent (settings, popups, update button)
+ACCENT_HOVER = "#1a8cea"
+DANGER = "#DC3545"  # the app's close/destructive red
+DANGER_HOVER = "#B22222"
+CARD = QColor(12, 12, 14, 214)
+CARD_LINE = QColor(255, 255, 255, 26)
 FONT = '"Segoe UI Variable Text", "Segoe UI", sans-serif'
 
 STYLE = f"""
-QWidget#PhotoEditor {{ background: {BG}; font-family: {FONT}; }}
-QWidget#EditorTopBar, QWidget#EditorBottomBar {{ background: {BG}; }}
-QWidget#EditorPanel {{ background: {PANEL}; border-left: 1px solid #2b2b2b; }}
+QWidget#PhotoEditor {{ font-family: {FONT}; }}
 QLabel {{ color: {TEXT}; font-size: 14px; background: transparent; font-family: {FONT}; }}
 QLabel#Dim {{ color: {TEXT_DIM}; font-size: 13px; }}
-QLabel#GroupTitle {{ font-size: 14px; font-weight: 600; }}
-QToolButton {{
-    color: {TEXT}; background: transparent; border: none; border-radius: 4px;
-    padding: 0px 10px; min-height: 32px; font-size: 14px; font-family: {FONT};
-}}
-QToolButton:hover {{ background: rgba(255,255,255,0.07); }}
-QToolButton:pressed {{ background: rgba(255,255,255,0.04); color: {TEXT_DIM}; }}
-QToolButton:disabled {{ color: {TEXT_OFF}; }}
-QToolButton::menu-indicator {{ image: none; width: 0px; }}
-QToolButton#Icon {{ padding: 0px; min-width: 36px; max-width: 36px; min-height: 36px; max-height: 36px; }}
-QToolButton#Tab {{ padding: 0px 12px; min-height: 40px; }}
-QToolButton#Tab:hover {{ background: transparent; }}
-QToolButton#Primary {{ background: {ACCENT}; color: {ACCENT_TEXT}; padding: 0px 12px; }}
-QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
-QToolButton#Primary:pressed {{ background: #42a1d2; color: #1a1a1a; }}
-QToolButton#Primary:disabled {{ background: #3b3b3b; color: #8b8b8b; }}
-QToolButton#Secondary {{ background: #2d2d2d; border: 1px solid #383838; padding: 0px 14px; }}
-QToolButton#Secondary:hover {{ background: #323232; }}
-QMenu {{
-    background: #2c2c2c; color: {TEXT}; border: 1px solid #3a3a3a; border-radius: 8px;
-    padding: 4px; font-size: 14px; font-family: {FONT};
-}}
-QMenu::item {{ padding: 8px 32px 8px 12px; border-radius: 4px; }}
-QMenu::item:selected {{ background: rgba(255,255,255,0.07); }}
-QMenu::item:checked {{ color: {ACCENT}; }}
-QMenu::indicator {{ width: 0px; }}
-QMenu::separator {{ height: 1px; background: #3a3a3a; margin: 4px 6px; }}
-QSlider {{ min-height: 24px; }}
-QSlider::groove:horizontal {{ height: 4px; background: #8a8a8a; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: #8a8a8a; border-radius: 2px; }}
-QSlider::handle:horizontal {{
-    background: {ACCENT}; border: 5px solid #454545; width: 10px; height: 10px;
-    margin: -8px 0px; border-radius: 10px;
-}}
-QSlider::handle:horizontal:hover {{ border: 4px solid #454545; width: 12px; height: 12px; }}
-QSlider::handle:horizontal:pressed {{ border: 6px solid #454545; width: 8px; height: 8px; }}
-QFrame#DialogBack {{ background: rgba(0,0,0,0.45); }}
-QFrame#DialogCard {{ background: #2b2b2b; border: 1px solid #3d3d3d; border-radius: 8px; }}
-QWidget#DialogFooter {{
-    background: #202020; border-top: 1px solid #353535;
-    border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
-}}
-QLabel#DialogTitle {{ font-size: 20px; font-weight: 600; }}
+QLabel#Value {{ color: {TEXT_DIM}; font-size: 13px; }}
+QLabel#GroupTitle {{ color: {TEXT_DIM}; font-size: 12px; font-weight: 600; letter-spacing: 1px; }}
+QLabel#DialogTitle {{ font-size: 19px; font-weight: 600; }}
 QLabel#DialogBody {{ font-size: 14px; color: {TEXT_DIM}; }}
-QToolButton#Primary, QToolButton#Secondary {{ min-height: 32px; }}
+QToolButton {{
+    color: {TEXT}; background: rgba(255,255,255,0.08); border: none; border-radius: 6px;
+    padding: 0px 16px; min-height: 34px; font-size: 14px; font-family: {FONT};
+}}
+QToolButton:hover {{ background: rgba(255,255,255,0.16); }}
+QToolButton:disabled {{ color: {TEXT_OFF}; background: rgba(255,255,255,0.04); }}
+QToolButton::menu-indicator {{ image: none; width: 0px; }}
+QToolButton#Primary {{ background: {ACCENT}; }}
+QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
+QToolButton#Primary:disabled {{ background: rgba(0,120,215,0.35); color: rgba(255,255,255,0.5); }}
+QToolButton#Danger {{ background: {DANGER}; }}
+QToolButton#Danger:hover {{ background: {DANGER_HOVER}; }}
+QToolButton#Text {{ background: transparent; }}
+QToolButton#Text:hover {{ background: rgba(255,255,255,0.10); }}
+QMenu {{
+    background: rgba(0,0,0,0.92); color: {TEXT}; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 6px; font-size: 15px; font-family: {FONT};
+}}
+QMenu::item {{ padding: 9px 28px 9px 14px; border-radius: 5px; }}
+QMenu::item:selected {{ background: rgba(255,255,255,0.18); }}
+QMenu::separator {{ height: 1px; background: rgba(255,255,255,0.12); margin: 5px 8px; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: #5a5a5a; border-radius: 3px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: rgba(255,255,255,0.25); border-radius: 3px; min-height: 30px; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
 
 
+def _round_pen(color: QColor, width: float) -> QPen:
+    pen = QPen(color, width)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    return pen
+
+
 def ui_font(px: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
-    """The Windows 11 UI font for text we paint ourselves (stylesheets don't reach QPainter)."""
+    """The UI font for text we paint ourselves (stylesheets don't reach QPainter)."""
     font = QFont()
     font.setFamilies(["Segoe UI Variable Text", "Segoe UI"])
     font.setPixelSize(px)
@@ -86,18 +75,25 @@ def ui_font(px: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     return font
 
 
+def halo_text(p: QPainter, rect: QRectF, flags, text: str, color: QColor = QColor(TEXT)):
+    """Text with a soft black outline so it reads over any photo, like the viewer's labels."""
+    p.setPen(QColor(0, 0, 0, 170))
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        p.drawText(rect.translated(dx, dy), flags, text)
+    p.setPen(color)
+    p.drawText(rect, flags, text)
+
+
 def tool_button(icon_name: str | None = None, text: str = "", tooltip: str = "", parent=None,
                 object_name: str | None = None, icon_size: int = 16) -> QToolButton:
+    """Text button (dialogs, save). Icons in the editor are ``HaloButton``s."""
     btn = QToolButton(parent)
     if icon_name:
-        btn.setIcon(icons.icon(icon_name, icon_size))
+        btn.setIcon(icons.icon(icon_name, icon_size, halo=False))
         btn.setIconSize(QSize(icon_size, icon_size))
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     if text:
-        btn.setText(" " + text if icon_name else text)
-        if icon_name:
-            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-    elif icon_name and object_name is None:
-        object_name = "Icon"
+        btn.setText(text)
     if tooltip:
         btn.setToolTip(tooltip)
     if object_name:
@@ -107,49 +103,82 @@ def tool_button(icon_name: str | None = None, text: str = "", tooltip: str = "",
     return btn
 
 
-class TabButton(QToolButton):
-    """Icon + label tab with the short Windows accent pill under the active one."""
+class HaloButton(QAbstractButton):
+    """A bare halo icon, like the viewer's floating menu: no background, brightens on hover.
 
-    def __init__(self, icon_name: str, text: str, parent=None):
+    Checkable buttons show a small accent bar beside (``indicator="left"``) or
+    under (``"bottom"``) the icon when checked.
+    """
+
+    def __init__(self, icon_name: str, tooltip: str = "", size: int = 30, box: int = 46,
+                 indicator: str = "left", parent=None):
         super().__init__(parent)
-        self.setObjectName("Tab")
-        self.setCheckable(True)
-        self.setText(" " + text)  # en space: Windows-like icon/label gap
-        self.setIcon(icons.icon(icon_name, 16))
-        self.setIconSize(QSize(16, 16))
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._name = icon_name
+        self._size = size
+        self._indicator = indicator
+        self._hover = False
+        self.setFixedSize(box, box)
+        self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-    def paintEvent(self, e):
-        super().paintEvent(e)
-        if self.isChecked():
-            p = QPainter(self)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(ACCENT))
-            w = 16.0
-            p.drawRoundedRect(QRectF((self.width() - w) / 2, self.height() - 3, w, 3), 1.5, 1.5)
-            p.end()
+    def set_icon(self, name: str):
+        self._name = name
+        self.update()
 
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
 
-class IconLabel(QWidget):
-    """Paints a QIcon at the widget's real device pixel ratio (crisp at any scaling)."""
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
 
-    def __init__(self, icon: QIcon, size: int = 16, parent=None):
-        super().__init__(parent)
-        self._icon = icon
-        self._size = size
-        self.setFixedSize(size, size)
+    def sizeHint(self):
+        return self.size()
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        self._icon.paint(p, self.rect())
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if not self.isEnabled():
+            p.setOpacity(0.28)
+        elif self.isDown():
+            p.setOpacity(0.7)
+        elif not (self._hover or self.isChecked()):
+            p.setOpacity(0.8)
+        s = self._size
+        r = QRectF((self.width() - s) / 2.0, (self.height() - s) / 2.0, s, s).toRect()
+        icons.icon(self._name, s).paint(p, r)
+        if self.isCheckable() and self.isChecked():
+            p.setOpacity(1.0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(ACCENT))
+            if self._indicator == "left":
+                p.drawRoundedRect(QRectF(0, self.height() / 2 - 9, 3, 18), 1.5, 1.5)
+            else:
+                p.drawRoundedRect(QRectF(self.width() / 2 - 9, self.height() - 3, 18, 3), 1.5, 1.5)
+        p.end()
+
+
+class Card(QFrame):
+    """Translucent black rounded card, the app's overlay container look."""
+
+    def __init__(self, parent=None, radius: float = 12.0):
+        super().__init__(parent)
+        self._radius = radius
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(QPen(CARD_LINE, 1))
+        p.setBrush(CARD)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), self._radius, self._radius)
         p.end()
 
 
 class StraightenRuler(QWidget):
-    """Horizontal tick ruler for the straighten angle, like Windows Photos.
+    """Slim tick ruler for the straighten angle; floats over the canvas with no background.
 
     Drag to scrub (the ticks follow the pointer), wheel/arrow keys step 0.1 deg
     (Shift: 1 deg), double-click resets to 0. Values snap to 0 when close.
@@ -159,7 +188,7 @@ class StraightenRuler(QWidget):
     pressed = pyqtSignal()
     released = pyqtSignal()
 
-    PX_PER_DEGREE = 10.0
+    PX_PER_DEGREE = 8.0
     SNAP = 0.3
 
     def __init__(self, parent=None):
@@ -168,8 +197,8 @@ class StraightenRuler(QWidget):
         self._drag_x = None
         self._drag_value = 0.0
         self._decimal = ","
-        self.setFixedHeight(60)
-        self.setMinimumWidth(320)
+        self.setFixedHeight(46)
+        self.setMinimumWidth(240)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
@@ -194,41 +223,39 @@ class StraightenRuler(QWidget):
         return f"{v:.1f}".replace(".", self._decimal).replace("-", "−") + "°"
 
     def sizeHint(self):
-        return QSize(600, 60)
+        return QSize(420, 46)
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         cx = w / 2.0
-        base = h - 18.0  # tick baseline; labels sit below it
+        base = h - 6.0
         ppd = self.PX_PER_DEGREE
         first = int(max(-ANGLE_LIMIT, self._value - cx / ppd)) - 1
         last = int(min(ANGLE_LIMIT, self._value + cx / ppd)) + 1
-        p.setFont(ui_font(11))
         for deg in range(first, last + 1):
             if abs(deg) > ANGLE_LIMIT:
                 continue
             x = cx + (deg - self._value) * ppd
-            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 3)
+            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
             if fade <= 0:
                 continue
-            major = deg % 5 == 0
-            length = 10.0 if major else 5.0
-            p.setPen(QPen(QColor(255, 255, 255, int((150 if major else 80) * fade)), 1))
-            p.drawLine(QPointF(round(x) + 0.5, base - length), QPointF(round(x) + 0.5, base))
-            if deg % 15 == 0 and abs(x - cx) > 14:
-                p.setPen(QColor(255, 255, 255, int(130 * fade)))
-                label = str(deg).replace("-", "−")
-                p.drawText(QRectF(x - 20, base + 3, 40, 14), Qt.AlignmentFlag.AlignCenter, label)
-        # indicator: accent needle through the ticks
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(ACCENT))
-        p.drawRoundedRect(QRectF(cx - 1.5, base - 18, 3, 22), 1.5, 1.5)
-        p.setFont(ui_font(14, QFont.Weight.DemiBold))
-        p.setPen(QColor(TEXT))
-        p.drawText(QRectF(0, 0, w, base - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-                   self.text())
+            length = 12.0 if deg == 0 else 8.0 if deg % 5 == 0 else 4.0
+            alpha = (230 if deg == 0 else 150 if deg % 5 == 0 else 80) * fade
+            xr = round(x) + 0.5
+            p.setPen(QPen(QColor(0, 0, 0, int(alpha * 0.6)), 3))
+            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
+            p.setPen(QPen(QColor(255, 255, 255, int(alpha)), 1))
+            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
+        # needle
+        p.setPen(_round_pen(QColor(0, 0, 0, 150), 4))
+        p.drawLine(QPointF(cx, base - 18), QPointF(cx, base + 2))
+        p.setPen(_round_pen(QColor(ACCENT if self._value else TEXT), 2))
+        p.drawLine(QPointF(cx, base - 18), QPointF(cx, base + 2))
+        p.setFont(ui_font(13, QFont.Weight.DemiBold))
+        halo_text(p, QRectF(0, 0, w, base - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                  self.text())
         p.end()
 
     def _snap(self, v: float) -> float:
@@ -282,15 +309,16 @@ class StraightenRuler(QWidget):
 
 
 class AspectStrip(QWidget):
-    """Row of aspect-ratio choices, each drawn at its true proportions (Windows Photos style).
+    """Row of aspect-ratio choices, each drawn at its true proportions.
 
     Items are ``(label, ratio)`` where ratio is ``None`` (free), ``"original"`` or a float.
     """
 
     picked = pyqtSignal(int)
 
-    ICON_BOX = 44.0  # hover/selection square
-    SHAPE = 22.0  # longest side of a ratio shape
+    ICON_BOX = 40.0
+    SHAPE = 20.0
+    ITEM = 64.0
 
     def __init__(self, items: list[tuple[str, object]], parent=None):
         super().__init__(parent)
@@ -298,7 +326,7 @@ class AspectStrip(QWidget):
         self._current = 0
         self._hover = -1
         self.setMouseTracking(True)
-        self.setFixedHeight(80)
+        self.setFixedSize(int(self.ITEM * len(items)), 70)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_current(self, index: int):
@@ -306,68 +334,59 @@ class AspectStrip(QWidget):
             self._current = index
             self.update()
 
-    def _item_width(self) -> float:
-        return max(56.0, min(96.0, self.width() / max(1, len(self._items))))
-
-    def _origin(self) -> float:
-        return (self.width() - self._item_width() * len(self._items)) / 2.0
-
     def _index_at(self, x: float) -> int:
-        i = int((x - self._origin()) // self._item_width())
+        i = int(x // self.ITEM)
         return i if 0 <= i < len(self._items) else -1
-
-    def sizeHint(self):
-        return QSize(int(76 * len(self._items)), 80)
-
-    def minimumSizeHint(self):
-        return QSize(int(56 * len(self._items)), 80)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        iw = self._item_width()
-        x0 = self._origin()
         for i, (label, ratio) in enumerate(self._items):
-            cx = x0 + iw * (i + 0.5)
-            box = QRectF(cx - self.ICON_BOX / 2, 4, self.ICON_BOX, self.ICON_BOX)
+            cx = self.ITEM * (i + 0.5)
+            box = QRectF(cx - self.ICON_BOX / 2, 2, self.ICON_BOX, self.ICON_BOX)
             selected = i == self._current
-            if selected or i == self._hover:
+            if i == self._hover and not selected:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(255, 255, 255, 22 if selected else 12))
-                p.drawRoundedRect(box, 6, 6)
-            color = QColor(TEXT if selected or i == self._hover else TEXT_DIM)
-            self._paint_shape(p, box.center(), ratio, color)
-            p.setFont(ui_font(13, QFont.Weight.DemiBold if selected else QFont.Weight.Normal))
+                p.setBrush(QColor(255, 255, 255, 22))
+                p.drawRoundedRect(box, 8, 8)
+            color = QColor(ACCENT_HOVER if selected else TEXT if i == self._hover else TEXT_DIM)
+            self._paint_shape(p, box.center(), ratio, color, selected)
+            p.setFont(ui_font(12, QFont.Weight.DemiBold if selected else QFont.Weight.Normal))
             p.setPen(color)
-            p.drawText(QRectF(cx - iw / 2, box.bottom() + 6, iw, 20), Qt.AlignmentFlag.AlignCenter, label)
+            p.drawText(QRectF(cx - self.ITEM / 2, box.bottom() + 4, self.ITEM, 20),
+                       Qt.AlignmentFlag.AlignCenter, label)
         p.end()
 
-    def _paint_shape(self, p: QPainter, c: QPointF, ratio, color: QColor):
-        pen = QPen(color, 1.5)
+    def _paint_shape(self, p: QPainter, c: QPointF, ratio, color: QColor, filled: bool):
+        pen = QPen(color, 1.6)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
+        fill = QColor(color)
+        fill.setAlpha(60)
+        p.setBrush(fill if filled else Qt.BrushStyle.NoBrush)
         s = self.SHAPE
-        if ratio is None or ratio == "original":
-            # Photo glyph; "free" adds crop corners around it.
-            inner = s * (0.62 if ratio is None else 0.9)
-            r = QRectF(c.x() - inner / 2, c.y() - inner / 2, inner, inner)
+        if ratio is None:
+            # Free: four open corners
+            o, L = s / 2, s * 0.32
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                x, y = c.x() + dx * o, c.y() + dy * o
+                corner = QPainterPath(QPointF(x - dx * L, y))
+                corner.lineTo(QPointF(x, y))
+                corner.lineTo(QPointF(x, y - dy * L))
+                p.drawPath(corner)
+            return
+        if ratio == "original":
+            r = QRectF(c.x() - s / 2, c.y() - s * 0.38, s, s * 0.76)
             p.drawRoundedRect(r, 2.5, 2.5)
-            path = QPainterPath(QPointF(r.left() + 1, r.bottom() - 1))
-            path.lineTo(QPointF(r.left() + inner * 0.38, r.top() + inner * 0.52))
-            path.lineTo(QPointF(r.left() + inner * 0.62, r.bottom() - inner * 0.22))
-            path.lineTo(QPointF(r.left() + inner * 0.74, r.top() + inner * 0.62))
-            path.lineTo(QPointF(r.right() - 1, r.bottom() - 1))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            path = QPainterPath(QPointF(r.left() + 3, r.bottom() - 3))
+            path.lineTo(QPointF(r.left() + s * 0.38, r.top() + s * 0.36))
+            path.lineTo(QPointF(r.left() + s * 0.6, r.bottom() - s * 0.2))
+            path.lineTo(QPointF(r.left() + s * 0.72, r.top() + s * 0.46))
+            path.lineTo(QPointF(r.right() - 3, r.bottom() - 3))
             p.drawPath(path)
-            p.drawEllipse(QPointF(r.right() - inner * 0.27, r.top() + inner * 0.27), inner * 0.08, inner * 0.08)
-            if ratio is None:
-                o, L = s / 2, s * 0.28
-                for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                    x, y = c.x() + dx * o, c.y() + dy * o
-                    corner = QPainterPath(QPointF(x - dx * L, y))
-                    corner.lineTo(QPointF(x, y))
-                    corner.lineTo(QPointF(x, y - dy * L))
-                    p.drawPath(corner)
             return
         w, h = (s, s / ratio) if ratio >= 1 else (s * ratio, s)
         p.drawRoundedRect(QRectF(c.x() - w / 2, c.y() - h / 2, w, h), 2.5, 2.5)
@@ -376,7 +395,6 @@ class AspectStrip(QWidget):
         i = self._index_at(e.position().x())
         if i != self._hover:
             self._hover = i
-            self.setToolTip(self._items[i][0] if i >= 0 else "")
             self.update()
 
     def leaveEvent(self, _e):
@@ -390,15 +408,80 @@ class AspectStrip(QWidget):
             self.picked.emit(i)
 
 
-class _ResetSlider(QSlider):
+class BipolarSlider(QSlider):
+    """-100..100 slider drawn as a thin line that fills outward from zero.
+
+    Click anywhere to jump, drag to scrub, double-click to reset, wheel only
+    while focused (so scrolling the panel is never hijacked).
+    """
+
     doubleClicked = pyqtSignal()
+    PAD = 8.0
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.setRange(-100, 100)
+        self.setPageStep(10)
+        self.setFixedHeight(22)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hover = False
+
+    def _x(self, v: float) -> float:
+        span = self.width() - 2 * self.PAD
+        return self.PAD + (v - self.minimum()) / (self.maximum() - self.minimum()) * span
+
+    def _value_at(self, x: float) -> int:
+        span = max(1.0, self.width() - 2 * self.PAD)
+        t = min(1.0, max(0.0, (x - self.PAD) / span))
+        return round(self.minimum() + t * (self.maximum() - self.minimum()))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        y = self.height() / 2.0
+        x0, x1, xz, xv = self._x(self.minimum()), self._x(self.maximum()), self._x(0), self._x(self.value())
+        p.setPen(_round_pen(QColor(255, 255, 255, 50), 2))
+        p.drawLine(QPointF(x0, y), QPointF(x1, y))
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1))
+        p.drawLine(QPointF(xz, y - 5), QPointF(xz, y + 5))
+        if self.value():
+            p.setPen(_round_pen(QColor(ACCENT_HOVER), 2))
+            p.drawLine(QPointF(xz, y), QPointF(xv, y))
+        r = 7.0 if (self._hover or self.isSliderDown()) else 6.0
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1))
+        p.setBrush(QColor(TEXT))
+        p.drawEllipse(QPointF(xv, y), r, r)
+        p.end()
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.setFocus()
+            self.setSliderDown(True)
+            self.setValue(self._value_at(e.position().x()))
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self.isSliderDown():
+            self.setValue(self._value_at(e.position().x()))
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self.isSliderDown():
+            self.setSliderDown(False)
 
     def mouseDoubleClickEvent(self, e):
         self.doubleClicked.emit()
         e.accept()
 
     def wheelEvent(self, e):
-        # Don't hijack scrolling of the panel unless the slider has focus.
         if self.hasFocus():
             super().wheelEvent(e)
         else:
@@ -406,48 +489,48 @@ class _ResetSlider(QSlider):
 
 
 class AdjustSlider(QWidget):
-    """One Ajuste row: icon + label + value, slider -100..100 below. Double-click resets."""
+    """One adjustment: label and value on one line, bipolar slider below. Double-click resets."""
 
     valueChanged = pyqtSignal(str, int)  # live
     committed = pyqtSignal(str)  # gesture finished
 
-    def __init__(self, name: str, label: str, icon_name: str, parent=None):
+    def __init__(self, name: str, label: str, parent=None):
         super().__init__(parent)
         self.name = name
         top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(10)
+        top.setContentsMargins(8, 0, 8, 0)
         self.label = QLabel(label)
         self.value_label = QLabel("0")
+        self.value_label.setObjectName("Value")
         self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        top.addWidget(IconLabel(icons.icon(icon_name, 16)))
         top.addWidget(self.label, 1)
         top.addWidget(self.value_label)
-        self.slider = _ResetSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(-100, 100)
-        self.slider.setPageStep(10)
-        self.slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.slider.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.slider = BipolarSlider()
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 6, 0, 10)
-        lay.setSpacing(6)
+        lay.setContentsMargins(0, 4, 0, 6)
+        lay.setSpacing(2)
         lay.addLayout(top)
         lay.addWidget(self.slider)
         self.slider.valueChanged.connect(self._on_value)
         self.slider.sliderReleased.connect(lambda: self.committed.emit(self.name))
         self.slider.doubleClicked.connect(self.reset)
 
+    def _show(self, v: int):
+        self.value_label.setText(f"+{v}" if v > 0 else str(v).replace("-", "−"))
+        self.value_label.setStyleSheet(f"color: {TEXT if v else TEXT_DIM};")
+
     def _on_value(self, v: int):
-        self.value_label.setText(str(v))
+        self._show(v)
         self.valueChanged.emit(self.name, v)
         if not self.slider.isSliderDown():
-            self.committed.emit(self.name)  # keyboard / click-on-track: one step = one undo entry
+            self.committed.emit(self.name)  # keyboard / reset: one step = one undo entry
 
     def set_value(self, v: int):
         self.slider.blockSignals(True)
         self.slider.setValue(int(v))
         self.slider.blockSignals(False)
-        self.value_label.setText(str(int(v)))
+        self.slider.update()
+        self._show(int(v))
 
     def reset(self):
         if self.slider.value() != 0:

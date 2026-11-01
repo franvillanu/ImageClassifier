@@ -159,11 +159,12 @@ def test_cancel_clean_editor_closes_without_prompt(editor):
 
 @pytest.mark.parametrize("scale", [1.0, 1.25, 1.5, 2.0, 3.0])
 def test_icons_render_centred_at_any_display_scaling(scale):
-    """Regression: at 200 % the old SVG icons were drawn 2x and clipped to their top-left quarter."""
+    """Regression: at 200 % icons were once drawn 2x and clipped to their top-left quarter."""
     from image_classifier.editor import icons
-    assert icons.icon_family(), "Windows icon font not found"
     for name in icons.GLYPHS:
-        img = icons.pixmap(name, 16, "#ffffff", scale).toImage()
+        pm = icons.pixmap(name, 24, scale)
+        assert pm.devicePixelRatio() == scale
+        img = pm.toImage()
         alpha = np.array([[img.pixelColor(x, y).alpha() for x in range(img.width())]
                           for y in range(img.height())])
         ys, xs = np.nonzero(alpha > 40)
@@ -172,6 +173,21 @@ def test_icons_render_centred_at_any_display_scaling(scale):
         size = img.width()
         assert abs(cx - size / 2) < size * 0.25 and abs(cy - size / 2) < size * 0.25, (name, scale)
         assert xs.max() - xs.min() > size * 0.3 or ys.max() - ys.min() > size * 0.3, (name, scale)
+
+
+def test_drag_just_outside_frame_straightens(editor):
+    ed, _, _ = editor
+    canvas = ed.crop_canvas
+    fx, fy, fw, fh = canvas._view.frame_rect(ed._state.crop)
+    cx, cy = fx + fw / 2, fy + fh / 2
+    start = QPointF(fx + fw + 20, cy)  # right of the frame, inside the rotate band
+    assert canvas._hit(start) == "rotate"
+    _drag(canvas, start, QPointF(fx + fw + 20, cy + 80))  # clockwise around the centre
+    st = ed._state
+    assert st.crop.angle > 1.0
+    assert ed.ruler.value() == st.crop.angle
+    assert g.is_valid(st.crop, st.oriented_size)
+    assert ed._history.can_undo()
 
 
 def test_drag_inside_frame_moves_the_frame_not_the_image(editor):
@@ -204,13 +220,12 @@ def test_wheel_zooms_the_view_without_touching_the_crop(editor):
 def test_aspect_strip_sets_ratio(editor):
     ed, _, _ = editor
     ed.btn_aspect.click()
-    assert ed.bottom_bar.currentIndex() == 1
+    assert ed.aspect_card.isVisible()
     index = next(i for i, (label, _) in enumerate(ed.aspect_strip._items) if label == "16 : 9")
     ed.aspect_strip.picked.emit(index)
     assert abs(ed._state.crop.w / ed._state.crop.h - 16 / 9) < 1e-3
     assert "16 : 9" in ed.btn_aspect.text()
-    ed.btn_aspect_done.click()
-    assert ed.bottom_bar.currentIndex() == 0
+    assert _wait(lambda: not ed.aspect_card.isVisible(), timeout=2)
 
 
 def test_confirm_dialog_is_a_centred_card(editor):

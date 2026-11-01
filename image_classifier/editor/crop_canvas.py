@@ -8,7 +8,8 @@ Gestures produce new ``EditState`` values through the closed-form functions in
 Interaction:
   * drag a handle            -> resize the frame
   * drag inside the frame    -> move the frame over the image
-  * drag outside the frame   -> pan the view (middle button pans anywhere)
+  * drag just outside it     -> straighten (rotate the image about the frame)
+  * drag further out         -> pan the view (middle button pans anywhere)
   * wheel / zoom buttons     -> zoom the view about the cursor (crop unchanged)
   * arrow keys               -> nudge the frame (Shift: 10 px)
 
@@ -33,9 +34,40 @@ from image_classifier.editor.widgets import ui_font
 
 CORNER_HIT = 20
 EDGE_HIT = 12
-MARGIN = 40
-CANVAS = QColor(28, 28, 28)
+ROTATE_BAND = 56  # px outside the frame where dragging straightens
+MARGIN = 24
 MAX_ZOOM = 8.0  # physical screen px per source px
+_rotate_cursor = None
+
+
+def rotate_cursor():
+    """Curved double arrow in the app's halo style."""
+    global _rotate_cursor
+    if _rotate_cursor is None:
+        from PyQt6.QtGui import QCursor, QPixmap
+        scale = 2
+        pm = QPixmap(32 * scale, 32 * scale)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.scale(scale, scale)
+        path = QPainterPath()
+        path.arcMoveTo(QRectF(6, 6, 20, 20), 200)
+        path.arcTo(QRectF(6, 6, 20, 20), 200, -220)
+        start, end = path.pointAtPercent(0), path.pointAtPercent(1)
+        for color, width in ((QColor(0, 0, 0), 4.5), (QColor(255, 255, 255), 2.0)):
+            pen = QPen(color, width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+            p.drawPolyline([start + QPointF(-1, -5), start, start + QPointF(5, -1)])
+            p.drawPolyline([end + QPointF(-5, -1), end, end + QPointF(1, -5)])
+        p.end()
+        pm.setDevicePixelRatio(scale)
+        _rotate_cursor = QCursor(pm, 16, 16)
+    return _rotate_cursor
 
 _CURSORS = {
     "top_left": Qt.CursorShape.SizeFDiagCursor,
@@ -83,6 +115,11 @@ def _view_transform(v: g.View) -> QTransform:
 class CropCanvas(QWidget):
     stateEdited = pyqtSignal(object, bool)  # EditState, committed
     zoomChanged = pyqtSignal(float)  # physical screen pixels per source pixel
+    userZoomed = pyqtSignal()  # the user zoomed (wheel); the editor flashes the zoom level
+    # straighten by dragging outside the frame; the editor treats it like the ruler
+    rotateStarted = pyqtSignal()
+    rotateChanged = pyqtSignal(float)
+    rotateFinished = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -90,6 +127,8 @@ class CropCanvas(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self._levels: list[tuple[QImage, float, float]] = []
+        self._bg = QColor(0, 0, 0)
+        self._insets = (0, 0, 0, 0)  # left, top, right, bottom kept free for floating controls
         self._state: EditState | None = None
         self._view: g.View | None = None
         self._fitted = True
@@ -114,7 +153,8 @@ class CropCanvas(QWidget):
         """Show ``state``. ``view``: "keep" follows the frame without jumping, "fit" shows the whole image."""
         old_state, old_view = self._state, self._view
         self._state = state
-        self._gesture = None
+        if not (self._gesture and self._gesture["kind"] == "rotate"):  # rotating drives this very call
+            self._gesture = None
         if view == "fit" or old_view is None or old_state is None \
                 or old_state.orientation != state.orientation:
             self._fitted = True
@@ -131,6 +171,16 @@ class CropCanvas(QWidget):
         self._emit_zoom()
         self.update()
 
+    def set_background(self, color: QColor):
+        self._bg = QColor(color)
+        self.update()
+
+    def set_insets(self, left: int, top: int, right: int, bottom: int):
+        if (left, top, right, bottom) != self._insets:
+            self._insets = (left, top, right, bottom)
+            if self._fitted:
+                self.fit()
+
     def set_grid(self, grid: str | None):
         self._grid = grid
         self.update()
@@ -141,8 +191,9 @@ class CropCanvas(QWidget):
     def _fit_view(self) -> g.View | None:
         if self._state is None or self.width() < 10 or self.height() < 10:
             return None
-        return g.fit_image_view(self._bounds(), self._state.crop.angle,
-                                (0, 0, self.width(), self.height()), MARGIN)
+        l, t, r, b = self._insets
+        viewport = (l, t, max(10, self.width() - l - r), max(10, self.height() - t - b))
+        return g.fit_image_view(self._bounds(), self._state.crop.angle, viewport, MARGIN)
 
     def _emit_zoom(self):
         if self._view is not None:
@@ -199,7 +250,7 @@ class CropCanvas(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        p.fillRect(self.rect(), CANVAS)
+        p.fillRect(self.rect(), self._bg)
         st, view = self._state, self._view
         if st is None or view is None or not self._levels:
             p.end()
@@ -208,8 +259,9 @@ class CropCanvas(QWidget):
         m = g.orientation_matrix(st.orientation, st.source_size)
         t_scale = QTransform(sx, 0, 0, sy, 0, 0)
         t_orient = QTransform(m[0][0], m[1][0], m[0][1], m[1][1], m[0][2], m[1][2])
+        # Smooth sampling but no Antialiasing hint: AA on a transformed image doubles the
+        # cost for a 1-physical-pixel edge nobody can see. Same for the dim path below.
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setTransform(t_scale * t_orient * _view_transform(view))
         p.drawImage(0, 0, img)
         p.resetTransform()
@@ -227,7 +279,6 @@ class CropCanvas(QWidget):
 
         if self._grid:
             self._paint_grid(p, frame)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         p.setPen(QPen(QColor(255, 255, 255, 230), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRect(frame.adjusted(0, 0, -1, -1))
@@ -305,6 +356,8 @@ class CropCanvas(QWidget):
                 return "bottom"
         if l < x < r and t < y < b:
             return "move"
+        if l - ROTATE_BAND <= x <= r + ROTATE_BAND and t - ROTATE_BAND <= y <= b + ROTATE_BAND:
+            return "rotate"
         return "pan"
 
     # ------------------------------------------------------------------ events
@@ -334,6 +387,10 @@ class CropCanvas(QWidget):
                          "button": e.button()}
         if kind == "pan":
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif kind == "rotate":
+            fx, fy, fw, fh = self._view.frame_rect(self._state.crop)
+            self._gesture["pivot"] = QPointF(fx + fw / 2.0, fy + fh / 2.0)
+            self.rotateStarted.emit()
         else:
             self._grid = "thirds"
         self.update()
@@ -341,7 +398,7 @@ class CropCanvas(QWidget):
     def mouseMoveEvent(self, e):
         gst = self._gesture
         if gst is None:
-            self.setCursor(_CURSORS[self._hit(e.position())])
+            self._set_hover_cursor(e.position())
             return
         start: EditState = gst["start"]
         view: g.View = gst["view"]
@@ -353,6 +410,14 @@ class CropCanvas(QWidget):
                                 view.zoom, view.angle)
             self._fitted = False
             self.update()
+        elif kind == "rotate":
+            pivot = gst["pivot"]
+            a0 = math.atan2(gst["pos"].y() - pivot.y(), gst["pos"].x() - pivot.x())
+            a1 = math.atan2(e.position().y() - pivot.y(), e.position().x() - pivot.x())
+            delta = math.degrees(math.atan2(math.sin(a1 - a0), math.cos(a1 - a0)))
+            angle = max(-45.0, min(45.0, start.crop.angle + delta))
+            angle = 0.0 if abs(angle) < 0.3 else round(angle, 1)
+            self.rotateChanged.emit(angle)
         elif kind == "move":
             dx, dy = view.delta_to_image((d.x(), d.y()))
             moved = CropGeometry(start.crop.cx + dx, start.crop.cy + dy, start.crop.w, start.crop.h,
@@ -370,16 +435,24 @@ class CropCanvas(QWidget):
         if gst is None or e.button() != gst["button"]:
             return
         self._gesture = None
+        self._set_hover_cursor(e.position())
+        if gst["kind"] == "rotate":
+            self.rotateFinished.emit()
+            return
         self._grid = None
-        self.setCursor(_CURSORS[self._hit(e.position())])
         if self._state != gst["start"]:
             self.stateEdited.emit(self._state, True)
         self.update()
+
+    def _set_hover_cursor(self, pos: QPointF):
+        kind = self._hit(pos)
+        self.setCursor(rotate_cursor() if kind == "rotate" else _CURSORS[kind])
 
     def wheelEvent(self, e):
         steps = e.angleDelta().y() / 120.0
         if steps:
             self.zoom_by(1.15 ** steps, e.position())
+            self.userZoomed.emit()
         e.accept()
 
     def keyPressEvent(self, e):

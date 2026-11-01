@@ -85,14 +85,20 @@ def adjust_rgba(rgba: np.ndarray, adj, *, vignette: bool = True, strip_rows: int
     """Apply adjustments to an RGBA uint8 array, keeping alpha. Returns a new array unless identity."""
     if adj.is_identity:
         return rgba
-    out = rgba.copy()
-    rgb = np.ascontiguousarray(rgba[..., :3])
+    # cv2 channel conversions are contiguous passes; numpy strided [..., :3] copies were
+    # most of the cost of a live preview.
+    rgb = cv2.cvtColor(rgba, cv2.COLOR_RGBA2RGB)
     plan = adjust.prepare(rgb, adj, vignette=vignette)
+    done = np.empty_like(rgb)
     for y0 in range(0, rgb.shape[0], strip_rows):
         y1 = min(rgb.shape[0], y0 + strip_rows)
-        out[y0:y1, :, :3] = adjust.apply_rows(plan, rgb[y0:y1], y0)
+        done[y0:y1] = adjust.apply_rows(plan, rgb[y0:y1], y0)
     if plan.adj.sharpness:
-        out[..., :3] = adjust.finish(plan, np.ascontiguousarray(out[..., :3]))
+        done = adjust.finish(plan, done)
+    out = cv2.cvtColor(done, cv2.COLOR_RGB2RGBA)
+    alpha = rgba[..., 3]
+    if alpha.min() < 255:
+        out[..., 3] = alpha
     return out
 
 
