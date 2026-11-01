@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 
 from image_classifier.editor import geometry as g
 from image_classifier.editor.editor_window import PhotoEditor
-from image_classifier.editor.widgets import StraightenRuler
+from image_classifier.editor.widgets import StraightenRuler, ValueDial
 
 
 def _wait(pred, timeout=10.0):
@@ -102,7 +102,7 @@ def test_undo_redo_roundtrip(editor):
     ed, _, _ = editor
     s0 = ed._state
     ed._orient(lambda s: g.rotate90(s, True))
-    ed.sliders["contrast"].slider.setValue(30)
+    ed._apply_adjust("contrast", 30)
     assert ed._state.adjust.contrast == 30
     ed._undo()
     assert ed._state.adjust.contrast == 0
@@ -124,7 +124,7 @@ def test_resize_keeps_crop(editor):
 def test_adjust_tab_renders_preview(editor):
     ed, _, _ = editor
     ed._switch_tab("adjust")
-    ed.sliders["exposure"].slider.setValue(40)
+    ed._apply_adjust("exposure", 40)
     assert _wait(lambda: ed.adjust_canvas._image is not None)
     assert ed.adjust_canvas._size == ed._state.output_size
 
@@ -134,7 +134,7 @@ def test_save_copy_writes_cropped_image_with_metadata(editor, tmp_path):
     ed._ruler_pressed()
     ed._ruler_changed(8.0)
     ed._ruler_released()
-    ed.sliders["vignette"].slider.setValue(-40)
+    ed._apply_adjust("vignette", -40)
     saved = []
     ed.saved.connect(lambda p, o: saved.append((p, o)))
     ed._save(overwrite=False)
@@ -246,7 +246,7 @@ def test_done_applies_crop_and_shows_result(editor):
     ed.btn_apply.click()
     assert ed._tab == "result"
     assert ed.stack.currentWidget() is ed.adjust_canvas
-    assert not ed.panel.isVisible() and not ed.btn_apply.isVisible()
+    assert not ed.dial.isVisible() and not ed.btn_apply.isVisible()
     assert ed.btn_compare.isVisible()  # compare stays in the toolbar on every tab
     assert _wait(lambda: ed.adjust_canvas._image is not None)
     assert ed.adjust_canvas._size == ed._state.output_size
@@ -342,9 +342,31 @@ def test_viewer_brightness_carries_into_the_editor(photo):
     host.show()
     ed = PhotoEditor(host, image, str(path), brightness=40)
     QApplication.processEvents()
-    assert ed._state.adjust.brightness == 40 and ed.sliders["brightness"].slider.value() == 40
+    assert ed._state.adjust.brightness == 40 and ed.dial.value() == 40
+    assert ed.adjust_buttons["brightness"]._value == 40
     assert not ed._history.is_dirty  # nothing new to discard
     assert ed.btn_save.isEnabled()  # but saving bakes the brightness in
     assert _wait(lambda: ed.crop_canvas._levels is not ed._orig_levels)  # preview shows it
     ed._close()
     host.deleteLater()
+
+
+def test_adjust_dock_and_dial(editor):
+    ed, _, _ = editor
+    ed._switch_tab("adjust")
+    assert ed.dial.isVisible() and ed.adjust_group.isVisible() and not ed.crop_group.isVisible()
+    assert ed.btn_compare.isVisible()
+    ed.adjust_buttons["warmth"].click()
+    assert ed.adjust_buttons["warmth"].isChecked() and not ed.adjust_buttons["brightness"].isChecked()
+    before = ed._history.index
+    # drag the dial left: the tape follows the pointer, so the value goes up
+    _drag(ed.dial, QPointF(280, 30), QPointF(280 - ValueDial.PX_PER_UNIT * 30, 30))
+    assert ed._state.adjust.warmth == 30
+    assert ed.adjust_buttons["warmth"]._value == 30  # ring shows it
+    assert ed._history.index == before + 1  # one drag = one undo step
+    ed.adjust_buttons["warmth"].doubleClicked.emit()  # double-click the icon resets it
+    assert ed._state.adjust.warmth == 0
+    ed._undo()
+    assert ed._state.adjust.warmth == 30 and ed.dial.value() == 30
+    ed._switch_tab("crop")
+    assert not ed.dial.isVisible() and not ed.adjust_group.isVisible()

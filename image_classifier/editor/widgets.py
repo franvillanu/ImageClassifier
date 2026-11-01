@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QAbstractButton, QFrame, QToolButton, QVBoxLayout, QWidget
 
 from image_classifier.editor import icons
 from image_classifier.editor.state import ANGLE_LIMIT
@@ -574,51 +574,33 @@ class AspectStrip(QWidget):
             self.picked.emit(i)
 
 
-class BipolarSlider(QSlider):
-    """-100..100 slider drawn as a thin line that fills outward from zero.
+class AdjustDockButton(QAbstractButton):
+    """One adjustment in the bottom dock: halo icon inside a ring that shows its value.
 
-    Click anywhere to jump, drag to scrub, double-click to reset, wheel only
-    while focused (so scrolling the panel is never hijacked).
+    The ring fills clockwise for positive values and anticlockwise for negative
+    ones, so every adjustment's state is readable at a glance. The selected one
+    gets the accent bar underneath. Double-click resets it.
     """
 
     doubleClicked = pyqtSignal()
-    PAD = 8.0
+    BOX = 54
+    RING = 21.0  # radius
 
-    def __init__(self, parent=None):
-        super().__init__(Qt.Orientation.Horizontal, parent)
-        self.setRange(-100, 100)
-        self.setPageStep(10)
-        self.setFixedHeight(22)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+    def __init__(self, name: str, tooltip: str, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self._value = 0
         self._hover = False
+        self.setCheckable(True)
+        self.setFixedSize(self.BOX, self.BOX + 6)
+        self.setToolTip(tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-    def _x(self, v: float) -> float:
-        span = self.width() - 2 * self.PAD
-        return self.PAD + (v - self.minimum()) / (self.maximum() - self.minimum()) * span
-
-    def _value_at(self, x: float) -> int:
-        span = max(1.0, self.width() - 2 * self.PAD)
-        t = min(1.0, max(0.0, (x - self.PAD) / span))
-        return round(self.minimum() + t * (self.maximum() - self.minimum()))
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        y = self.height() / 2.0
-        x0, x1, xz, xv = self._x(self.minimum()), self._x(self.maximum()), self._x(0), self._x(self.value())
-        p.setPen(_round_pen(QColor(255, 255, 255, 50), 2))
-        p.drawLine(QPointF(x0, y), QPointF(x1, y))
-        p.setPen(QPen(QColor(255, 255, 255, 110), 1))
-        p.drawLine(QPointF(xz, y - 5), QPointF(xz, y + 5))
-        if self.value():
-            p.setPen(_round_pen(QColor(ACCENT_HOVER), 2))
-            p.drawLine(QPointF(xz, y), QPointF(xv, y))
-        r = 7.0 if (self._hover or self.isSliderDown()) else 6.0
-        p.setPen(QPen(QColor(0, 0, 0, 120), 1))
-        p.setBrush(QColor(TEXT))
-        p.drawEllipse(QPointF(xv, y), r, r)
-        p.end()
+    def set_value(self, v: int):
+        if v != self._value:
+            self._value = v
+            self.update()
 
     def enterEvent(self, e):
         self._hover = True
@@ -628,76 +610,169 @@ class BipolarSlider(QSlider):
         self._hover = False
         self.update()
 
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.setFocus()
-            self.setSliderDown(True)
-            self.setValue(self._value_at(e.position().x()))
-            e.accept()
-
-    def mouseMoveEvent(self, e):
-        if self.isSliderDown():
-            self.setValue(self._value_at(e.position().x()))
-
-    def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self.isSliderDown():
-            self.setSliderDown(False)
-
     def mouseDoubleClickEvent(self, e):
         self.doubleClicked.emit()
         e.accept()
 
-    def wheelEvent(self, e):
-        if self.hasFocus():
-            super().wheelEvent(e)
-        else:
-            e.ignore()
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        c = QPointF(self.width() / 2.0, self.BOX / 2.0)
+        r = self.RING
+        ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
+        active = self.isChecked() or self._hover
+        p.setPen(QPen(QColor(255, 255, 255, 46 if active else 28), 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(ring)
+        if self._value:
+            pen = _round_pen(QColor(ACCENT_HOVER), 2.6)
+            p.setPen(pen)
+            p.drawArc(ring, 90 * 16, int(-self._value / 100 * 360 * 16))  # negative span = clockwise
+        if not (active or self._value):
+            p.setOpacity(0.78)
+        s = 24
+        icons.icon(self.name, s).paint(p, QRectF(c.x() - s / 2, c.y() - s / 2, s, s).toRect())
+        if self.isChecked():
+            p.setOpacity(1.0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(ACCENT))
+            p.drawRoundedRect(QRectF(c.x() - 9, self.height() - 3, 18, 3), 1.5, 1.5)
+        p.end()
 
 
-class AdjustSlider(QWidget):
-    """One adjustment: label and value on one line, bipolar slider below. Double-click resets."""
+class ValueDial(QWidget):
+    """Tick dial for one adjustment (-100..100), styled like the straighten ruler.
 
-    valueChanged = pyqtSignal(str, int)  # live
-    committed = pyqtSignal(str)  # gesture finished
+    Drag to scrub (ticks follow the pointer), wheel steps 1 (Shift: 10),
+    double-click resets to 0. Snaps to 0 when passing close to it.
+    """
 
-    def __init__(self, name: str, label: str, parent=None):
+    valueChanged = pyqtSignal(int)
+    pressed = pyqtSignal()
+    released = pyqtSignal()
+
+    PX_PER_UNIT = 2.6
+    SNAP = 2
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.name = name
-        top = QHBoxLayout()
-        top.setContentsMargins(8, 0, 8, 0)
-        self.label = QLabel(label)
-        self.value_label = QLabel("0")
-        self.value_label.setObjectName("Value")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        top.addWidget(self.label, 1)
-        top.addWidget(self.value_label)
-        self.slider = BipolarSlider()
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 4, 0, 6)
-        lay.setSpacing(2)
-        lay.addLayout(top)
-        lay.addWidget(self.slider)
-        self.slider.valueChanged.connect(self._on_value)
-        self.slider.sliderReleased.connect(lambda: self.committed.emit(self.name))
-        self.slider.doubleClicked.connect(self.reset)
+        self._value = 0
+        self._label = ""
+        self._drag_x = None
+        self._drag_value = 0
+        self.setFixedHeight(56)
+        self.setMinimumWidth(320)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
 
-    def _show(self, v: int):
-        self.value_label.setText(f"+{v}" if v > 0 else str(v).replace("-", "−"))
-        self.value_label.setStyleSheet(f"color: {TEXT if v else TEXT_DIM};")
+    def set_label(self, label: str):
+        self._label = label
+        self.update()
 
-    def _on_value(self, v: int):
-        self._show(v)
-        self.valueChanged.emit(self.name, v)
-        if not self.slider.isSliderDown():
-            self.committed.emit(self.name)  # keyboard / reset: one step = one undo entry
+    def value(self) -> int:
+        return self._value
 
-    def set_value(self, v: int):
-        self.slider.blockSignals(True)
-        self.slider.setValue(int(v))
-        self.slider.blockSignals(False)
-        self.slider.update()
-        self._show(int(v))
+    def setValue(self, v: int, emit: bool = False):
+        v = int(max(-100, min(100, round(v))))
+        if v == self._value:
+            return
+        self._value = v
+        self.update()
+        if emit:
+            self.valueChanged.emit(v)
 
-    def reset(self):
-        if self.slider.value() != 0:
-            self.slider.setValue(0)
+    def sizeHint(self):
+        return QSize(560, 56)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        cx = w / 2.0
+        base = h - 6.0
+        ppu = self.PX_PER_UNIT
+        for unit in range(-100, 101, 5):
+            x = cx + (unit - self._value) * ppu
+            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
+            if fade <= 0:
+                continue
+            major = unit % 25 == 0
+            length = 12.0 if unit == 0 else 8.0 if major else 4.0
+            alpha = (230 if unit == 0 else 150 if major else 80) * fade
+            xr = round(x) + 0.5
+            p.setPen(QPen(QColor(0, 0, 0, int(alpha * 0.6)), 3))
+            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
+            p.setPen(QPen(QColor(255, 255, 255, int(alpha)), 1))
+            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
+        # filled stretch between zero and the value
+        if self._value:
+            p.setPen(_round_pen(QColor(ACCENT_HOVER), 2))
+            p.drawLine(QPointF(cx - self._value * ppu, base + 1), QPointF(cx, base + 1))
+        p.setPen(_round_pen(QColor(0, 0, 0, 150), 4))
+        p.drawLine(QPointF(cx, base - 20), QPointF(cx, base + 2))
+        p.setPen(_round_pen(QColor(ACCENT if self._value else TEXT), 2))
+        p.drawLine(QPointF(cx, base - 20), QPointF(cx, base + 2))
+        v = self._value
+        number = (f"+{v}" if v > 0 else str(v).replace("-", "−"))
+        p.setFont(ui_font(14))
+        fm = p.fontMetrics()
+        label_w = fm.horizontalAdvance(self._label + "  ")
+        p.setFont(ui_font(14, QFont.Weight.DemiBold))
+        num_w = p.fontMetrics().horizontalAdvance(number)
+        x0 = cx - (label_w + num_w) / 2
+        top = QRectF(0, 0, w, base - 22)
+        p.setFont(ui_font(14))
+        halo_text(p, QRectF(x0, top.y(), label_w, top.height()),
+                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, self._label, QColor(TEXT_DIM))
+        p.setFont(ui_font(14, QFont.Weight.DemiBold))
+        halo_text(p, QRectF(x0 + label_w, top.y(), num_w + 4, top.height()),
+                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, number)
+        p.end()
+
+    def _snap(self, v: float) -> float:
+        return 0 if abs(v) < self.SNAP else v
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_x = e.position().x()
+            self._drag_value = self._value
+            self.pressed.emit()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_x is None:
+            return
+        v = self._drag_value - (e.position().x() - self._drag_x) / self.PX_PER_UNIT
+        self.setValue(self._snap(v), emit=True)
+
+    def mouseReleaseEvent(self, e):
+        if self._drag_x is not None and e.button() == Qt.MouseButton.LeftButton:
+            self._drag_x = None
+            self.released.emit()
+
+    def mouseDoubleClickEvent(self, e):
+        self.pressed.emit()
+        self.setValue(0, emit=True)
+        self.released.emit()
+
+    def _step(self, delta: int):
+        self.pressed.emit()
+        self.setValue(self._value + delta, emit=True)
+        self.released.emit()
+
+    def wheelEvent(self, e):
+        steps = e.angleDelta().y() / 120.0 or e.angleDelta().x() / 120.0
+        if steps:
+            big = e.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            self._step(int(round(steps * (10 if big else 1))))
+        e.accept()
+
+    def keyPressEvent(self, e):
+        step = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+        if e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Down):
+            self._step(-step)
+        elif e.key() in (Qt.Key.Key_Right, Qt.Key.Key_Up):
+            self._step(step)
+        elif e.key() == Qt.Key.Key_0:
+            self._step(-self._value)
+        else:
+            super().keyPressEvent(e)

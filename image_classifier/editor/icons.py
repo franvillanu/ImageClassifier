@@ -14,9 +14,27 @@ from PyQt6.QtSvg import QSvgRenderer
 # Path data in a 48x48 box. Each entry is drawn twice: black halo, then white line.
 _PATHS = {
     "crop": ['<path d="M36 42V16C36 14 34 12 32 12H6"/>', '<path d="M14 4V30C14 32 16 34 18 34H44"/>'],
-    "adjust": ['<circle cx="24" cy="24" r="9"/>',
-               '<path d="M24 5V9M24 39V43M5 24H9M39 24H43M10.6 10.6L13.4 13.4M34.6 34.6L37.4 37.4'
-               'M10.6 37.4L13.4 34.6M34.6 13.4L37.4 10.6"/>'],
+    # Ajuste tab: vertical tuning sliders
+    "adjust": ['<path d="M12 7V17M12 25V41M24 7V27M24 35V41M36 7V11M36 19V41"/>',
+               '<circle cx="12" cy="21" r="4"/>', '<circle cx="24" cy="31" r="4"/>', '<circle cx="36" cy="15" r="4"/>'],
+    # --- one icon per adjustment
+    "adj_brightness": ['<circle cx="24" cy="24" r="8"/>',
+                       '<path d="M24 5V10M24 38V43M5 24H10M38 24H43M10.6 10.6L14.1 14.1M33.9 33.9L37.4 37.4'
+                       'M10.6 37.4L14.1 33.9M33.9 14.1L37.4 10.6"/>'],
+    "adj_exposure": ['<rect x="7" y="7" width="34" height="34" rx="7"/>', '<path d="M39 9L9 39"/>',
+                     '<path d="M13 17H21M17 13V21M27 31H35"/>'],
+    "adj_contrast": ['<circle cx="24" cy="24" r="16"/>', '<path d="M24 8A16 16 0 0 1 24 40Z" fill="white"/>'],
+    "adj_highlights": ['<path d="M13 32A11 11 0 0 1 35 32"/>', '<path d="M6 32H42M12 39H36"/>',
+                       '<path d="M24 9V15M10.5 16.5L14.5 20.5M37.5 16.5L33.5 20.5"/>'],
+    "adj_shadows": ['<path d="M30 8A16 16 0 1 0 40 30A13 13 0 0 1 30 8Z" fill="white"/>'],
+    "adj_vignette": ['<rect x="6" y="9" width="36" height="30" rx="6"/>', '<ellipse cx="24" cy="24" rx="11" ry="8"/>'],
+    "adj_saturation": ['<circle cx="24" cy="17" r="9"/>', '<circle cx="17" cy="29" r="9"/>',
+                       '<circle cx="31" cy="29" r="9"/>'],
+    "adj_warmth": ['<path d="M20 28V10A4 4 0 0 1 28 10V28A8 8 0 1 1 20 28Z"/>', '<circle cx="24" cy="34" r="3" fill="white"/>',
+                   '<path d="M24 31V18M33 12H38M33 18H37M33 24H38"/>'],
+    "adj_tint": ['<path d="M24 6C24 6 11 21 11 29A13 13 0 0 0 37 29C37 21 24 6 24 6Z"/>',
+                 '<path d="M17 30A7 7 0 0 0 23 36"/>'],
+    "adj_sharpness": ['<path d="M8 40H22V8Z"/>', '<path d="M40 40H26V8Z" fill="white"/>'],
     "undo": ['<path d="M17 11L9 19L17 27"/>', '<path d="M9 19H29A10 10 0 0 1 29 39H20"/>'],
     "redo": ['<path d="M31 11L39 19L31 27"/>', '<path d="M39 19H19A10 10 0 0 0 19 39H28"/>'],
     # photo with a small "restore" badge: reads as "back to the original", not as undo

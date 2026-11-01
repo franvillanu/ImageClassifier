@@ -3,7 +3,8 @@
 Layout follows the viewer itself: one full-bleed canvas in the theme colour
 with controls floating over it (halo icons on the left like the main menu,
 a single tool row at the bottom, save/close at the top right, and a
-translucent card for the adjustment sliders). The canvases are told which
+dock of adjustment icons with one dial for the selected adjustment). The
+canvases are told which
 margins the controls occupy, so a fitted photo is never covered.
 
 All edits flow through ``_set_state``. Widgets only display state and report
@@ -20,7 +21,7 @@ import cv2
 from PyQt6.QtCore import QEasingCurve, QEventLoop, QPropertyAnimation, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QImage
 from PyQt6.QtWidgets import (
-    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -35,13 +36,16 @@ from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import Adjustments, EditState
 from image_classifier.editor.widgets import (
-    STYLE, AdjustSlider, AspectStrip, Card, HaloButton, HaloTextButton, Popover, StraightenRuler, tool_button,
+    STYLE, AdjustDockButton, AspectStrip, Card, HaloButton, HaloTextButton, Popover, StraightenRuler, ValueDial,
+    tool_button,
 )
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.saver import save_rgba
 
+# The Ajuste dock, in order: light, then colour.
 LIGHT = ["brightness", "exposure", "contrast", "highlights", "shadows", "vignette"]
 COLOR = ["saturation", "warmth", "tint", "sharpness"]
+ADJUSTMENTS = LIGHT + COLOR
 
 # (translation key or literal label, ratio); "original" resolves to the image's own ratio
 ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
@@ -51,7 +55,6 @@ ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
 
 PROXY_MIN, PROXY_MAX = 2048, 4096
 EDGE = 16  # gap between floating controls and the window edge
-PANEL_W = 340
 
 
 class _Task(QThread):
@@ -272,7 +275,6 @@ class PhotoEditor(QWidget):
         self._build_rail()
         self._build_actions()
         self._build_crop_tools()
-        self._build_panel()
 
         self.zoom_label = QLabel(self)
         self.zoom_label.setStyleSheet("background: rgba(0,0,0,0.75); border-radius: 6px; padding: 5px 10px;"
@@ -356,7 +358,9 @@ class PhotoEditor(QWidget):
         self.btn_apply.setIconSize(QSize(18, 18))
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
-        self.crop_tools = _row(self.crop_group, self.btn_compare, self.apply_group, spacing=0, parent=self)
+        self._build_adjust_dock()
+        self.crop_tools = _row(self.crop_group, self.adjust_group, self.btn_compare, self.apply_group,
+                               spacing=0, parent=self)
         self.btn_compare.pressed.connect(lambda: self._set_compare(True))
         self.btn_compare.released.connect(lambda: self._set_compare(False))
         self.btn_apply.clicked.connect(self._apply_crop)
@@ -387,41 +391,38 @@ class PhotoEditor(QWidget):
         self.btn_flip_h.clicked.connect(lambda: self._orient(lambda s: g.flip(s, True)))
         self.btn_flip_v.clicked.connect(lambda: self._orient(lambda s: g.flip(s, False)))
 
-    def _build_panel(self):
-        """Adjustment sliders in a full-height side panel on the right (Save sits at its top)."""
-        self.panel = Card(self, radius=0, fill=QColor(22, 22, 25, 245))
-        outer = QVBoxLayout(self.panel)
-        self._panel_outer = outer
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        scroll.viewport().setAutoFillBackground(False)
-        scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        scroll.viewport().setStyleSheet("background: transparent;")
-        content = QWidget()
-        content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        lay = QVBoxLayout(content)
-        lay.setContentsMargins(14, 4, 14, 16)
-        lay.setSpacing(6)
-        self.sliders: dict[str, AdjustSlider] = {}
-        for i, (title_key, names) in enumerate((("editor_group_light", LIGHT), ("editor_group_color", COLOR))):
-            if i:
-                lay.addSpacing(18)
-            title = QLabel(self.tr_(title_key).upper())
-            title.setObjectName("GroupTitle")
-            title.setContentsMargins(8, 0, 0, 4)
-            lay.addWidget(title)
-            for name in names:
-                s = AdjustSlider(name, self.tr_(f"editor_adj_{name}"))
-                s.valueChanged.connect(self._slider_changed)
-                s.committed.connect(self._slider_committed)
-                self.sliders[name] = s
-                lay.addWidget(s)
-        lay.addStretch(1)
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
-        self._panel_content = content
+    def _build_adjust_dock(self):
+        """Ajuste: one icon per adjustment (ring = its value) and a single dial for the selected one."""
+        self.adjust_buttons: dict[str, AdjustDockButton] = {}
+        widgets = []
+        for name in ADJUSTMENTS:
+            if name == COLOR[0]:
+                widgets.append(16)  # small gap between the light and colour groups
+            b = AdjustDockButton(f"adj_{name}", self.tr_(f"editor_adj_{name}"))
+            b.clicked.connect(lambda _=False, n=name: self._select_adjust(n))
+            b.doubleClicked.connect(lambda n=name: self._apply_adjust(n, 0))
+            self.adjust_buttons[name] = b
+            widgets.append(b)
+        widgets.append(14)
+        self.adjust_group = _row(*widgets, spacing=2)
+        self.dial = ValueDial(self)
+        self.dial.setFixedWidth(560)
+        self.dial.valueChanged.connect(lambda v: self._apply_adjust(self._adjust_name, v, commit=False))
+        self.dial.released.connect(lambda: self._set_state(self._state, commit=True, source="dial"))
+        self._adjust_name = ADJUSTMENTS[0]
+        self._select_adjust(self._adjust_name)
+
+    def _select_adjust(self, name: str):
+        self._adjust_name = name
+        for n, b in self.adjust_buttons.items():
+            b.setChecked(n == name)
+        self.dial.set_label(self.tr_(f"editor_adj_{name}"))
+        self.dial.setValue(getattr(self._state.adjust, name))
+        self.dial.setFocus()
+
+    def _apply_adjust(self, name: str, value: int, commit: bool = True):
+        """Set one adjustment (dial drag: commit=False until release; reset/keys: one undo step each)."""
+        self._set_state(self._state.with_adjust(**{name: int(value)}), commit=commit, source="dial")
 
     def _layout_overlays(self):
         w, h = self.width(), self.height()
@@ -435,18 +436,13 @@ class PhotoEditor(QWidget):
         self.aspect_card.adjustSize()
         self.aspect_card.move((w - self.aspect_card.width()) // 2, tools_y - self.aspect_card.height() - 8)
         top = EDGE + self.actions.height() + 8
-        bottom = h - tools_y + 4
-        # Edge-to-edge side panel; 1 px past the top/right/bottom so only its left border shows.
-        self.panel.setGeometry(w - PANEL_W, -1, PANEL_W + 1, h + 2)
-        self._panel_outer.setContentsMargins(0, top + 8, 1, 1)
+        dial_y = tools_y - self.dial.height() - 2
+        self.dial.move((w - self.dial.width()) // 2, dial_y)
+        bottom = h - (dial_y if self._tab == "adjust" else tools_y) + 4
         left = EDGE + self.rail.width() + 8
-        self.crop_canvas.set_insets(left, top - 8, left, bottom)
-        right = PANEL_W + EDGE if self._tab == "adjust" else left
-        self.adjust_canvas.set_insets(left, top - 8, right, bottom)
-        if self._tab == "adjust":  # centre the bottom row over the photo, not the whole window
-            free = w - PANEL_W
-            self.crop_tools.move((free - self.crop_tools.width()) // 2, tools_y)
-        for overlay in (self.rail, self.panel, self.actions, self.crop_tools, self.aspect_card):
+        self.crop_canvas.set_insets(left, top - 8, left, h - tools_y + 4)
+        self.adjust_canvas.set_insets(left, top - 8, left, bottom)
+        for overlay in (self.rail, self.actions, self.crop_tools, self.dial, self.aspect_card):
             overlay.raise_()
 
     def resizeEvent(self, e):
@@ -465,9 +461,10 @@ class PhotoEditor(QWidget):
             self.crop_canvas.set_state(state, view=view)
         if source != "ruler" or self.ruler.value() != state.crop.angle:
             self.ruler.setValue(state.crop.angle)
-        if source != "slider":
-            for name, s in self.sliders.items():
-                s.set_value(getattr(state.adjust, name))
+        for name, b in self.adjust_buttons.items():
+            b.set_value(getattr(state.adjust, name))
+        if source != "dial":
+            self.dial.setValue(getattr(state.adjust, self._adjust_name))
         self._sync_aspect_label()
         self._update_actions()
         self._request_previews()
@@ -583,12 +580,6 @@ class PhotoEditor(QWidget):
         crop = g.set_aspect(self._state.crop, r, self._state.oriented_size)
         self._set_state(replace(self._state, aspect=r, crop=crop), commit=True)
 
-    def _slider_changed(self, name: str, value: int):
-        self._set_state(self._state.with_adjust(**{name: value}), commit=False, source="slider")
-
-    def _slider_committed(self, _name: str):
-        self._set_state(self._state, commit=True, source="slider")
-
     def _undo(self):
         self._set_state(self._history.undo(), commit=False)
 
@@ -609,13 +600,14 @@ class PhotoEditor(QWidget):
         self.stack.setCurrentWidget(self.crop_canvas if crop else self.adjust_canvas)
         self.crop_group.setVisible(crop)
         self.apply_group.setVisible(crop)
+        self.adjust_group.setVisible(tab == "adjust")
+        self.dial.setVisible(tab == "adjust")
         if not crop:
             self._show_aspect_strip(False)
-        self.panel.setVisible(tab == "adjust")
         self._layout_overlays()
         if not crop:
             self.adjust_canvas.fit()
-        (self.crop_canvas if crop else self.adjust_canvas).setFocus()
+        (self.crop_canvas if crop else self.dial if tab == "adjust" else self.adjust_canvas).setFocus()
         QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
 
     def _apply_crop(self):
