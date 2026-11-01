@@ -220,18 +220,20 @@ class Card(QFrame):
 class _MenuRow(QAbstractButton):
     """One popover option: icon, label and an optional dim hint line."""
 
-    def __init__(self, icon_name: str, title: str, hint: str = "", parent=None):
+    def __init__(self, icon_name: str, title: str, hint: str = "", shortcut: str = "", parent=None):
         super().__init__(parent)
         self._icon = icon_name
         self._title = title
         self._hint = hint
+        self._shortcut = shortcut
         self._hover = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedHeight(56 if hint else 42)
         from PyQt6.QtGui import QFontMetricsF
         w = max(QFontMetricsF(ui_font(15)).horizontalAdvance(title), QFontMetricsF(ui_font(12)).horizontalAdvance(hint))
-        self.setMinimumWidth(int(14 + 22 + 14 + w + 22))
+        sw = QFontMetricsF(ui_font(12)).horizontalAdvance(shortcut) + 24 if shortcut else 0
+        self.setMinimumWidth(int(14 + 22 + 14 + w + 22 + sw))
 
     def enterEvent(self, e):
         self._hover = True
@@ -249,6 +251,11 @@ class _MenuRow(QAbstractButton):
             p.setBrush(QColor(255, 255, 255, 34 if self.isDown() else 24))
             p.drawRoundedRect(QRectF(self.rect()), 8, 8)
         icons.icon(self._icon, 22, halo=False).paint(p, QRectF(14, (self.height() - 22) / 2, 22, 22).toRect())
+        if self._shortcut:
+            p.setFont(ui_font(12))
+            p.setPen(QColor(TEXT_OFF if not self._hover else TEXT_DIM))
+            p.drawText(QRectF(0, 0, self.width() - 14, self.height()),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._shortcut)
         x = 14 + 22 + 14
         if self._hint:
             p.setFont(ui_font(15))
@@ -294,8 +301,8 @@ class Popover(QWidget):
         self._fade.finished.connect(lambda: self._fx.setEnabled(False))
         self.hide()
 
-    def add_item(self, icon_name: str, title: str, hint: str, callback):
-        row = _MenuRow(icon_name, title, hint)
+    def add_item(self, icon_name: str, title: str, hint: str, callback, shortcut: str = ""):
+        row = _MenuRow(icon_name, title, hint, shortcut)
         row.clicked.connect(lambda: (self.close_menu(), callback()))
         self._lay.addWidget(row)
         return row

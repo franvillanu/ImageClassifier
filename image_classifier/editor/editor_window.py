@@ -319,11 +319,11 @@ class PhotoEditor(QWidget):
         self.btn_save.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.save_menu = Popover(self)
         self.save_menu.add_item("copy", self.tr_("editor_save_copy"), self.tr_("editor_save_copy_hint"),
-                                lambda: self._save(overwrite=False))
+                                lambda: self._save(overwrite=False), "Ctrl+Shift+S")
         self.save_menu.add_item("replace", self.tr_("editor_save_replace"), self.tr_("editor_save_replace_hint"),
-                                lambda: self._save(overwrite=True))
+                                lambda: self._save(overwrite=True), "Ctrl+S")
         self.save_menu.add_separator()
-        self.save_menu.add_item("clipboard", self.tr_("editor_copy_clipboard"), "", self._copy_to_clipboard)
+        self.save_menu.add_item("clipboard", self.tr_("editor_copy_clipboard"), "", self._copy_to_clipboard, "Ctrl+C")
         self.btn_save.clicked.connect(lambda: self.save_menu.open_under(self.btn_save))
         self.btn_cancel = HaloButton("close", self.tr_("editor_cancel") + "  (Esc)", size=30, box=48)
         self.actions = _row(self.btn_save, 6, self.btn_cancel, spacing=4, parent=self)
@@ -677,6 +677,10 @@ class PhotoEditor(QWidget):
             self._show_aspect_strip(False)
         elif k == Qt.Key.Key_Escape:
             self.request_cancel()
+        elif ctrl and k == Qt.Key.Key_S:
+            self._save_shortcut(overwrite=not shift)  # Ctrl+S replace, Ctrl+Shift+S copy
+        elif ctrl and k == Qt.Key.Key_C and not shift:
+            self._save_shortcut(clipboard=True)
         elif ctrl and k == Qt.Key.Key_Z and not shift:
             self._undo()
         elif ctrl and (k == Qt.Key.Key_Y or (k == Qt.Key.Key_Z and shift)):
@@ -758,6 +762,15 @@ class PhotoEditor(QWidget):
             self._close()
 
         self._run_final(write, done)
+
+    def _save_shortcut(self, overwrite: bool = False, clipboard: bool = False):
+        self.save_menu.close_menu()
+        if not self.btn_save.isEnabled():
+            self._show_toast(self.tr_("editor_nothing_to_save"))
+        elif clipboard:
+            self._copy_to_clipboard()
+        else:
+            self._save(overwrite=overwrite)
 
     def _copy_to_clipboard(self):
         if self._task is not None and self._task.isRunning():

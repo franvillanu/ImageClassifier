@@ -370,3 +370,23 @@ def test_adjust_dock_and_dial(editor):
     assert ed._state.adjust.warmth == 30 and ed.dial.value() == 30
     ed._switch_tab("crop")
     assert not ed.dial.isVisible() and not ed.adjust_group.isVisible()
+
+
+def test_ctrl_s_shortcuts_in_editor(editor, monkeypatch):
+    from PyQt6.QtGui import QKeyEvent
+    ed, _, _ = editor
+    calls = []
+    monkeypatch.setattr(ed, "_save", lambda overwrite: calls.append(("save", overwrite)))
+    monkeypatch.setattr(ed, "_copy_to_clipboard", lambda: calls.append(("clipboard",)))
+
+    def press(key, mods):
+        QApplication.sendEvent(ed, QKeyEvent(QEvent.Type.KeyPress, key, mods))
+
+    ctrl, shift = Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.ShiftModifier
+    press(Qt.Key.Key_S, ctrl)
+    assert calls == []  # nothing changed yet: nothing to save (a toast says so)
+    ed._orient(lambda s: g.rotate90(s, True))
+    press(Qt.Key.Key_S, ctrl)
+    press(Qt.Key.Key_S, ctrl | shift)
+    press(Qt.Key.Key_C, ctrl)
+    assert calls == [("save", True), ("save", False), ("clipboard",)]

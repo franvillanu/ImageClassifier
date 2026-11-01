@@ -28,10 +28,11 @@ from image_classifier.imaging import (
     ImageLoaderRunnable,
     WorkerSignals,
     sharpen_cv2,
-    save_pixmap,
 )
 from image_classifier.config import get_config_file
 from image_classifier.editor.editor_window import PhotoEditor
+from image_classifier.editor.qtimage import qimage_to_rgba
+from image_classifier.imaging.saver import save_rgba
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
 from image_classifier import __version__
 from image_classifier.updates.controller import UpdateController
@@ -6106,10 +6107,12 @@ class PhotoViewer(QMainWindow):
             name, ext = os.path.splitext(orig_filename)
             save_path = self.get_unique_copy_filename(folder, name, ext)
 
-        # 3) Attempt to write the pixmap to disk
-        if not save_pixmap(modified, save_path):
-            # If saving fails, alert the user and bail out
-            self.show_custom_dialog("Failed to save image", icon_type="error", buttons="ok")
+        # 3) Write it with the editor's saver: keeps EXIF/ICC (orientation reset, since the
+        #    rotation is baked in), JPEG quality 95, and an atomic replace of the original.
+        try:
+            save_rgba(save_path, qimage_to_rgba(modified.toImage()), source_path=orig_path)
+        except OSError as exc:
+            self.show_custom_dialog(t["editor_save_failed"].format(error=exc), icon_type="error", buttons="ok")
             return
 
         self._finish_save(norm_path, save_path, overwrite)
