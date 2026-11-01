@@ -67,16 +67,18 @@ def editor(photo):
     QApplication.processEvents()
 
 
-def test_ruler_snaps_and_resets():
+def test_ruler_plus_is_right_snaps_and_resets():
     r = StraightenRuler()
-    r.resize(600, 44)
-    got = []
-    r.valueChanged.connect(got.append)
-    _drag(r, QPointF(300, 20), QPointF(300 - StraightenRuler.PX_PER_DEGREE * 6.6, 20))
+    r.resize(600, 60)
+    ppd = r.px_per_unit()
+    _drag(r, QPointF(300, 30), QPointF(300 + ppd * 6.6, 30))  # drag right = positive
     assert abs(r.value() - 6.6) < 0.11
-    _drag(r, QPointF(300, 20), QPointF(300 + StraightenRuler.PX_PER_DEGREE * 6.5, 20))  # back to ~0.1 -> snaps to 0
+    assert r._x(r.value()) > r._x(0)  # the needle sits right of zero
+    _drag(r, QPointF(300, 30), QPointF(300 - ppd * 6.5, 30))  # back to ~0.1 -> snaps to 0
     assert r.value() == 0.0
     assert r.text().endswith("°")
+    _drag(r, QPointF(300, 30), QPointF(300 - ppd * 20, 30))
+    assert r.value() < 0 and r._x(r.value()) < r._x(0)  # minus on the left
 
 
 def test_straighten_and_drag_keep_crop_inside(editor):
@@ -359,8 +361,8 @@ def test_adjust_dock_and_dial(editor):
     ed.adjust_buttons["warmth"].click()
     assert ed.adjust_buttons["warmth"].isChecked() and not ed.adjust_buttons["brightness"].isChecked()
     before = ed._history.index
-    # drag the dial left: the tape follows the pointer, so the value goes up
-    _drag(ed.dial, QPointF(280, 30), QPointF(280 - ValueDial.PX_PER_UNIT * 30, 30))
+    # drag the dial right: plus is on the right
+    _drag(ed.dial, QPointF(280, 30), QPointF(280 + ed.dial.px_per_unit() * 30, 30))
     assert ed._state.adjust.warmth == 30
     assert ed.adjust_buttons["warmth"]._value == 30  # ring shows it
     assert ed._history.index == before + 1  # one drag = one undo step
@@ -390,3 +392,32 @@ def test_ctrl_s_shortcuts_in_editor(editor, monkeypatch):
     press(Qt.Key.Key_S, ctrl | shift)
     press(Qt.Key.Key_C, ctrl)
     assert calls == [("save", True), ("save", False), ("clipboard",)]
+
+
+def test_auto_enhance_brightens_a_dark_photo_in_one_undo_step(tmp_path):
+    ramp = np.tile(np.linspace(0, 60, 600, dtype=np.float32), (400, 1))  # a dim scene
+    dark = np.dstack([ramp, ramp * 0.9, ramp * 0.8]).astype(np.uint8)
+    path = tmp_path / "dark.jpg"
+    Image.fromarray(dark).save(path, quality=95)
+    host = QWidget()
+    host.resize(1200, 800)
+    host.show()
+    ed = PhotoEditor(host, QImage(str(path)), str(path), tab="adjust")
+    QApplication.processEvents()
+    ed.btn_enhance.click()
+    assert ed._state.adjust.exposure > 0
+    assert ed.adjust_buttons["exposure"]._value == ed._state.adjust.exposure  # ring shows it
+    assert ed._history.index == 1
+    ed._undo()
+    assert ed._state.adjust.is_identity
+    ed._close()
+    host.deleteLater()
+
+
+def test_resetting_the_selected_adjustment_from_its_icon_updates_the_dial(editor):
+    ed, _, _ = editor
+    ed._switch_tab("adjust")
+    ed.adjust_buttons["contrast"].click()
+    ed._apply_adjust("contrast", 40)
+    ed.adjust_buttons["contrast"].doubleClicked.emit()
+    assert ed._state.adjust.contrast == 0 and ed.dial.value() == 0

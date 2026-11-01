@@ -17,6 +17,10 @@ _PATHS = {
     # Ajuste tab: vertical tuning sliders
     "adjust": ['<path d="M12 7V17M12 25V41M24 7V27M24 35V41M36 7V11M36 19V41"/>',
                '<circle cx="12" cy="21" r="4"/>', '<circle cx="24" cy="31" r="4"/>', '<circle cx="36" cy="15" r="4"/>'],
+    # automatic enhancement: sparkles
+    "enhance": ['<path d="M20 6Q22 18 34 20Q22 22 20 34Q18 22 6 20Q18 18 20 6Z"/>',
+                '<path d="M36 28Q36.8 33.2 42 34Q36.8 34.8 36 40Q35.2 34.8 30 34Q35.2 33.2 36 28Z" fill="white"/>',
+                '<path d="M37 5Q37.5 8.5 41 9Q37.5 9.5 37 13Q36.5 9.5 33 9Q36.5 8.5 37 5Z" fill="white"/>'],
     # --- one icon per adjustment
     "adj_brightness": ['<circle cx="24" cy="24" r="8"/>',
                        '<path d="M24 5V10M24 38V43M5 24H10M38 24H43M10.6 10.6L14.1 14.1M33.9 33.9L37.4 37.4'

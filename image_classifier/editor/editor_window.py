@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 from image_classifier.editor import geometry as g
 from image_classifier.editor import icons
 from image_classifier.editor.adjust_canvas import AdjustCanvas
+from image_classifier.editor.auto_enhance import estimate as estimate_enhancement
 from image_classifier.editor.auto_straighten import estimate_angle
 from image_classifier.editor.crop_canvas import CropCanvas, build_levels
 from image_classifier.editor.history import EditHistory
@@ -394,7 +395,10 @@ class PhotoEditor(QWidget):
     def _build_adjust_dock(self):
         """Ajuste: one icon per adjustment (ring = its value) and a single dial for the selected one."""
         self.adjust_buttons: dict[str, AdjustDockButton] = {}
-        widgets = []
+        self.btn_enhance = HaloTextButton("enhance", self.tr_("editor_auto_enhance"),
+                                          self.tr_("editor_auto_enhance_tip"), size=26, height=54)
+        self.btn_enhance.clicked.connect(self._auto_enhance)
+        widgets = [self.btn_enhance, 14]
         for name in ADJUSTMENTS:
             if name == COLOR[0]:
                 widgets.append(16)  # small gap between the light and colour groups
@@ -419,6 +423,18 @@ class PhotoEditor(QWidget):
         self.dial.set_label(self.tr_(f"editor_adj_{name}"))
         self.dial.setValue(getattr(self._state.adjust, name))
         self.dial.setFocus()
+
+    def _auto_enhance(self):
+        """One click: let the photo itself pick exposure, contrast, light and colour (one undo step)."""
+        base = replace(self._state, adjust=Adjustments())  # judge the cropped photo, unadjusted
+        scale = min(self._proxy_scale, 512 / max(base.crop.w, base.crop.h))
+        values = estimate_enhancement(render(self._proxy, base, scale=scale, interpolation=cv2.INTER_AREA))
+        enhanced = self._state.with_adjust(**values)
+        if enhanced == self._state:
+            self._show_toast(self.tr_("editor_already_balanced"))
+            return
+        self._set_state(enhanced, commit=True, source="auto_enhance")
+        self._show_toast(self.tr_("editor_auto_enhanced"), ms=2600)
 
     def _apply_adjust(self, name: str, value: int, commit: bool = True):
         """Set one adjustment (dial drag: commit=False until release; reset/keys: one undo step each)."""
@@ -463,8 +479,9 @@ class PhotoEditor(QWidget):
             self.ruler.setValue(state.crop.angle)
         for name, b in self.adjust_buttons.items():
             b.set_value(getattr(state.adjust, name))
-        if source != "dial":
-            self.dial.setValue(getattr(state.adjust, self._adjust_name))
+        shown = getattr(state.adjust, self._adjust_name)
+        if source != "dial" or self.dial.value() != shown:  # e.g. resetting from its icon
+            self.dial.setValue(shown)
         self._sync_aspect_label()
         self._update_actions()
         self._request_previews()
