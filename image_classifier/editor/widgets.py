@@ -44,6 +44,8 @@ QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
 QToolButton#Primary:disabled {{ background: rgba(0,120,215,0.35); color: rgba(255,255,255,0.5); }}
 QToolButton#Danger {{ background: {DANGER}; }}
 QToolButton#Danger:hover {{ background: {DANGER_HOVER}; }}
+QToolButton#Accept {{ background: #f2f2f2; color: #000000; font-weight: 600; padding: 0px 18px 0px 14px; }}
+QToolButton#Accept:hover {{ background: #ffffff; }}
 QToolButton#Text {{ background: transparent; }}
 QToolButton#Text:hover {{ background: rgba(255,255,255,0.10); }}
 QMenu {{

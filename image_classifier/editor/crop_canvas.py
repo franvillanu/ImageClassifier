@@ -116,6 +116,7 @@ class CropCanvas(QWidget):
     stateEdited = pyqtSignal(object, bool)  # EditState, committed
     zoomChanged = pyqtSignal(float)  # physical screen pixels per source pixel
     userZoomed = pyqtSignal()  # the user zoomed (wheel); the editor flashes the zoom level
+    acceptRequested = pyqtSignal()  # double-click inside the frame = Done
     # straighten by dragging outside the frame; the editor treats it like the ruler
     rotateStarted = pyqtSignal()
     rotateChanged = pyqtSignal(float)
@@ -447,6 +448,10 @@ class CropCanvas(QWidget):
     def _set_hover_cursor(self, pos: QPointF):
         kind = self._hit(pos)
         self.setCursor(rotate_cursor() if kind == "rotate" else _CURSORS[kind])
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self._hit(e.position()) == "move":
+            self.acceptRequested.emit()
 
     def wheelEvent(self, e):
         steps = e.angleDelta().y() / 120.0

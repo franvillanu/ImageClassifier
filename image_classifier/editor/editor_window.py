@@ -17,7 +17,7 @@ from dataclasses import replace
 from typing import Callable
 
 import cv2
-from PyQt6.QtCore import QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEventLoop, QPropertyAnimation, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QImage
 from PyQt6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QScrollArea, QSizePolicy,
@@ -267,17 +267,14 @@ class PhotoEditor(QWidget):
         self.btn_undo = HaloButton("undo", self.tr_("editor_undo") + "  (Ctrl+Z)", size=26)
         self.btn_redo = HaloButton("redo", self.tr_("editor_redo") + "  (Ctrl+Y)", size=26)
         self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=26)
-        self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=26)
         self.rail = _row(self.tab_crop, self.tab_adjust, 22, self.btn_undo, self.btn_redo, self.btn_reset,
-                         22, self.btn_compare, spacing=8, parent=self, vertical=True)
+                         spacing=8, parent=self, vertical=True)
 
         self.tab_crop.clicked.connect(lambda: self._switch_tab("crop"))
         self.tab_adjust.clicked.connect(lambda: self._switch_tab("adjust"))
         self.btn_undo.clicked.connect(self._undo)
         self.btn_redo.clicked.connect(self._redo)
         self.btn_reset.clicked.connect(self._reset)
-        self.btn_compare.pressed.connect(lambda: self._set_compare(True))
-        self.btn_compare.released.connect(lambda: self._set_compare(False))
 
     def _build_actions(self):
         """Top right: one accent save button with its options, and a close icon."""
@@ -297,7 +294,11 @@ class PhotoEditor(QWidget):
         self.btn_cancel.clicked.connect(self.request_cancel)
 
     def _build_crop_tools(self):
-        """Bottom row: rotate, straighten ruler, flip, ratio, auto. Ratios open in a card above."""
+        """Bottom row: crop tools (rotate, ruler, flip, ratio, auto), compare, and Done.
+
+        Compare stays on every tab; the crop tools and Done only on Crop. Ratios open
+        in a card above the row.
+        """
         self.btn_rot_left = HaloButton("rotate_left", self.tr_("editor_rotate_left"), size=26, box=40)
         self.btn_rot_right = HaloButton("rotate_right", self.tr_("editor_rotate_right"), size=26, box=40)
         self.ruler = StraightenRuler()
@@ -311,9 +312,21 @@ class PhotoEditor(QWidget):
         self.btn_aspect.setCheckable(True)
         self.btn_aspect.setMinimumWidth(104)
         self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=26, box=40)
-        self.crop_tools = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
-                               self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto,
-                               spacing=2, parent=self)
+        self.crop_group = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
+                               self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, 10,
+                               spacing=2)
+        self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=26, box=40)
+        self.btn_apply = tool_button(text=self.tr_("editor_done"), tooltip=self.tr_("editor_apply_hint"),
+                                     object_name="Accept")
+        self.btn_apply.setIcon(icons.icon("check", 16, halo=False, color="black"))
+        self.btn_apply.setIconSize(QSize(16, 16))
+        self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.apply_group = _row(14, self.btn_apply, spacing=0)
+        self.crop_tools = _row(self.crop_group, self.btn_compare, self.apply_group, spacing=0, parent=self)
+        self.btn_compare.pressed.connect(lambda: self._set_compare(True))
+        self.btn_compare.released.connect(lambda: self._set_compare(False))
+        self.btn_apply.clicked.connect(self._apply_crop)
+        self.crop_canvas.acceptRequested.connect(self._apply_crop)
 
         self._aspect_labels = [self.tr_(k) if k.startswith("editor_") else k for k, _ in ASPECTS]
         self.aspect_card = Card(self, radius=14)
@@ -386,12 +399,14 @@ class PhotoEditor(QWidget):
         self.aspect_card.adjustSize()
         self.aspect_card.move((w - self.aspect_card.width()) // 2, tools_y - self.aspect_card.height() - 8)
         top = EDGE + self.actions.height() + 8
+        bottom = h - tools_y + 4
         panel_h = min(self._panel_content.sizeHint().height() + 16, h - top - EDGE)
         self.panel.setFixedHeight(max(120, panel_h))
         self.panel.move(w - PANEL_W - EDGE, top)
         left = EDGE + self.rail.width() + 8
-        self.crop_canvas.set_insets(left, top - 8, left, h - tools_y + 4)
-        self.adjust_canvas.set_insets(left, top - 8, PANEL_W + 2 * EDGE, EDGE)
+        self.crop_canvas.set_insets(left, top - 8, left, bottom)
+        right = PANEL_W + 2 * EDGE if self._tab == "adjust" else left
+        self.adjust_canvas.set_insets(left, top - 8, right, bottom)
         for overlay in (self.rail, self.actions, self.crop_tools, self.aspect_card, self.panel):
             overlay.raise_()
 
@@ -541,17 +556,27 @@ class PhotoEditor(QWidget):
         self._set_state(EditState.initial(self._size), commit=True, view="fit")
 
     def _switch_tab(self, tab: str):
+        """``crop``, ``adjust``, or ``result`` (the finished photo after Done, no tool selected)."""
         crop = tab == "crop"
         self._tab = tab
         self.tab_crop.setChecked(crop)
-        self.tab_adjust.setChecked(not crop)
+        self.tab_adjust.setChecked(tab == "adjust")
         self.stack.setCurrentWidget(self.crop_canvas if crop else self.adjust_canvas)
-        self.crop_tools.setVisible(crop)
+        self.crop_group.setVisible(crop)
+        self.apply_group.setVisible(crop)
         if not crop:
             self._show_aspect_strip(False)
-        self.panel.setVisible(not crop)
+        self.panel.setVisible(tab == "adjust")
+        self._layout_overlays()
+        if not crop:
+            self.adjust_canvas.fit()
         (self.crop_canvas if crop else self.adjust_canvas).setFocus()
         QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
+
+    def _apply_crop(self):
+        """Done: accept the crop and show the finished photo."""
+        if self._tab == "crop":
+            self._switch_tab("result")
 
     def _zoom(self, factor: float):
         if self.stack.currentWidget() is self.crop_canvas:
@@ -620,6 +645,8 @@ class PhotoEditor(QWidget):
             self._zoom(0.8)
         elif k == Qt.Key.Key_Backslash and not e.isAutoRepeat():
             self._set_compare(True)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._tab == "crop":
+            self._apply_crop()
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.btn_save.isEnabled():
             self.btn_save.showMenu()
         else:

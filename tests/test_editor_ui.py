@@ -239,6 +239,34 @@ def test_confirm_dialog_is_a_centred_card(editor):
     m.deleteLater()
 
 
+def test_done_applies_crop_and_shows_result(editor):
+    ed, _, _ = editor
+    ed._set_aspect(1.0)
+    assert ed.btn_apply.isVisible() and ed.crop_tools.isAncestorOf(ed.btn_compare)
+    ed.btn_apply.click()
+    assert ed._tab == "result"
+    assert ed.stack.currentWidget() is ed.adjust_canvas
+    assert not ed.panel.isVisible() and not ed.btn_apply.isVisible()
+    assert ed.btn_compare.isVisible()  # compare stays in the toolbar on every tab
+    assert _wait(lambda: ed.adjust_canvas._image is not None)
+    assert ed.adjust_canvas._size == ed._state.output_size
+    ed._switch_tab("crop")  # back to cropping, the crop is still there
+    assert abs(ed._state.crop.w - ed._state.crop.h) < 1e-6
+
+
+def test_enter_and_double_click_apply_crop(editor):
+    from PyQt6.QtGui import QKeyEvent
+    ed, _, _ = editor
+    QApplication.sendEvent(ed, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
+    assert ed._tab == "result"
+    ed._switch_tab("crop")
+    c = ed.crop_canvas
+    fx, fy, fw, fh = c._view.frame_rect(ed._state.crop)
+    centre = QPointF(fx + fw / 2, fy + fh / 2)
+    _mouse(c, QEvent.Type.MouseButtonDblClick, centre)
+    assert ed._tab == "result"
+
+
 def test_handle_drag_does_not_zoom_or_move_the_view(editor):
     ed, _, _ = editor
     canvas = ed.crop_canvas

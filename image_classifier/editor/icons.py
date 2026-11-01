@@ -36,6 +36,7 @@ _PATHS = {
              '<path d="M35 6V12M32 9H38M41 18V22M39 20H43M17 7V11M15 9H19"/>'],
     "close": ['<path d="M13 13L35 35M35 13L13 35"/>'],
     "chevron_down": ['<path d="M14 19L24 29L34 19"/>'],
+    "check": ['<path d="M10 25L20 35L38 14"/>'],
     "zoom_in": ['<circle cx="21" cy="21" r="12"/>', '<path d="M30 30L41 41M21 15V27M15 21H27"/>'],
     "zoom_out": ['<circle cx="21" cy="21" r="12"/>', '<path d="M30 30L41 41M15 21H27"/>'],
     "fit": ['<path d="M14 6H6V14M34 6H42V14M14 42H6V34M34 42H42V34"/>'],
@@ -46,35 +47,35 @@ _SCALES = (1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)
 _cache: dict = {}
 
 
-def _svg(name: str, halo: bool) -> bytes:
+def _svg(name: str, halo: bool, color: str = "white") -> bytes:
     body = "".join(_PATHS[name])
     common = 'fill="none" stroke-linecap="round" stroke-linejoin="round"'
     layers = []
     if halo:
         layers.append(f'<g stroke="black" stroke-width="4.5" {common}>{body.replace("white", "black")}</g>')
-    layers.append(f'<g stroke="white" stroke-width="2" {common}>{body}</g>')
+    layers.append(f'<g stroke="{color}" stroke-width="2" {common}>{body.replace("white", color)}</g>')
     return ('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">'
             + "".join(layers) + "</svg>").encode()
 
 
-def pixmap(name: str, size: int, scale: float = 1.0, halo: bool = True) -> QPixmap:
+def pixmap(name: str, size: int, scale: float = 1.0, halo: bool = True, color: str = "white") -> QPixmap:
     """``size`` logical px at device ``scale``."""
     px = max(1, round(size * scale))
     pm = QPixmap(px, px)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    QSvgRenderer(QByteArray(_svg(name, halo))).render(p, QRectF(0, 0, px, px))
+    QSvgRenderer(QByteArray(_svg(name, halo, color))).render(p, QRectF(0, 0, px, px))
     p.end()
     pm.setDevicePixelRatio(scale)
     return pm
 
 
-def icon(name: str, size: int = 32, halo: bool = True) -> QIcon:
-    key = (name, size, halo)
+def icon(name: str, size: int = 32, halo: bool = True, color: str = "white") -> QIcon:
+    key = (name, size, halo, color)
     if key not in _cache:
         result = QIcon()
         for scale in _SCALES:
-            result.addPixmap(pixmap(name, size, scale, halo))
+            result.addPixmap(pixmap(name, size, scale, halo, color))
         _cache[key] = result
     return _cache[key]
