@@ -40,6 +40,11 @@ def get_today_date() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
+def split_points(text: str) -> list[str]:
+    """A note may list several points separated by ' • ' (same rule as the app)."""
+    return [part.strip() for part in text.split("•") if part.strip()]
+
+
 def get_user_release_notes(version: str) -> list[tuple[str, str]]:
     """
     Get user-facing release note (EN, ES) for this version from docs/release_notes.txt.
@@ -54,6 +59,9 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
             continue
         parts = line.split("|", 2)
         if len(parts) >= 3 and parts[0].strip() == version:
+            en, es = split_points(parts[1]), split_points(parts[2])
+            if len(en) == len(es) and en:
+                return list(zip(en, es))  # one list item per point
             return [(parts[1].strip(), parts[2].strip())]
     raise SystemExit(
         f"[ERROR] Missing customer-facing release notes for v{version} in "

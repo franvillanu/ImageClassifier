@@ -40,6 +40,14 @@ def load_release_notes(path: Optional[Path] = None) -> list[tuple[str, str, str]
     return entries
 
 
+POINT_SEPARATOR = "•"
+
+
+def split_points(text: str) -> list[str]:
+    """A note may list several points separated by ' • '; returns them in order."""
+    return [part.strip() for part in text.split(POINT_SEPARATOR) if part.strip()]
+
+
 def pick(entry: tuple[str, str, str], lang: str) -> str:
     return entry[2] if lang == "es" else entry[1]
 

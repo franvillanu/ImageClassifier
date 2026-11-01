@@ -5,7 +5,7 @@ Decide automatically whether a release is needed, and which version it is.
 A release is pending when either:
   * the newest version in docs/release_notes.txt is not published yet, or
   * app files changed since the last release commit on main (see APP_PATHS): the patch version is
-    bumped and, if the version has no line in release_notes.txt, one is written from the commit subjects.
+    bumped. That version needs a hand-written line in release_notes.txt, or the release stops.
 
 Used in two ways:
 
@@ -37,7 +37,6 @@ RELEASE_PENDING = 10
 APP_PATHS = ("image_classifier/", "image-classifier.py", "star.ico", "requirements.txt", "Image_Classifier.iss")
 RELEASE_COMMIT_PATTERN = "^release: prepare v"
 NOTE_SUBJECT_RE = re.compile(r"^(feat|fix|perf|refactor)(\([^)]*\))?!?:\s*(.+?)(\s*\(#\d+\))?$", re.IGNORECASE)
-FALLBACK_NOTE = "Improvements and fixes."
 
 
 # -- release state ------------------------------------------------------------
@@ -98,18 +97,6 @@ def commit_subjects_since_release() -> list[str]:
     return git("log", f"{base}..HEAD", "--format=%s").splitlines() if base else []
 
 
-def note_from_subjects(subjects: list[str]) -> str:
-    """One customer-facing sentence from conventional-commit subjects (feat/fix/perf/refactor only)."""
-    parts = []
-    for subject in subjects:
-        match = NOTE_SUBJECT_RE.match(subject.strip())
-        if match:
-            text = match.group(3).strip().rstrip(".")
-            if text and text[0].upper() + text[1:] not in parts:
-                parts.append(text[0].upper() + text[1:])
-    return "; ".join(parts) + "." if parts else FALLBACK_NOTE
-
-
 def insert_notes_line(text: str, version: str, en: str, es: str) -> str:
     """Add `version|en|es` right after the header comments of release_notes.txt."""
     lines = text.split("\n")
@@ -120,19 +107,34 @@ def insert_notes_line(text: str, version: str, en: str, es: str) -> str:
     return "\n".join(lines)
 
 
+def missing_notes_message(version: str, subjects: list[str]) -> str:
+    """What to tell the person releasing when a version has no customer-facing notes."""
+    lines = [
+        f"[ERROR] v{version} has no release notes, and they are shown to customers in the app.",
+        "Add a line at the top of docs/release_notes.txt (after the # comments), for example:",
+        f"  {version}|What changed, written for customers|Lo que cambió, escrito para los clientes",
+        "Separate several points with ' • '. Nothing has been built, merged or published.",
+    ]
+    picked = [m.group(3).strip() for m in map(NOTE_SUBJECT_RE.match, subjects) if m]
+    if picked:
+        lines.append("Commits since the last release, for reference only:")
+        lines += [f"  - {text}" for text in dict.fromkeys(picked)]
+    return "\n".join(lines)
+
+
 def ensure_notes(version: str, dry_run: bool = False) -> None:
-    """Every release needs its notes line; write a placeholder from the commits if it is missing."""
+    """Every release needs a hand-written notes line; stop (never invent one) if it is missing.
+
+    Notes generated from commit subjects read like a git log (see v2.0.11), so they are not
+    written automatically any more.
+    """
     if notes_for_version(version) is not None:
         return
-    note = note_from_subjects(commit_subjects_since_release())
-    print(f"[INFO] No release note for {version}: writing one from the commits: {note}")
+    message = missing_notes_message(version, commit_subjects_since_release())
     if dry_run:
+        print(message.replace("[ERROR]", "[WARN]", 1))
         return
-    path = notes_path()
-    raw = path.read_bytes().decode("utf-8")
-    newline = "\r\n" if "\r\n" in raw else "\n"
-    updated = insert_notes_line(raw.replace("\r\n", "\n"), version, note, note)
-    path.write_bytes(updated.replace("\n", newline).encode("utf-8"))
+    raise SystemExit(message)
 
 
 # -- actions ----------------------------------------------------------------------

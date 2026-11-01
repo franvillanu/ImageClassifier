@@ -2,7 +2,9 @@
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+
+from image_classifier.updates.notes import split_points
 
 
 class WhatsNewOverlay(QWidget):
@@ -31,6 +33,7 @@ class WhatsNewOverlay(QWidget):
             QLabel#title { font-size: 21px; font-weight: bold; }
             QLabel#heading { color: #4aa3ff; font-size: 14px; font-weight: bold; }
             QLabel#empty { color: #8a8f98; }
+            QLabel#dot { color: #4aa3ff; font-size: 15px; font-weight: bold; }
             QFrame#divider { background-color: rgba(255, 255, 255, 30); border: none; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
             QScrollBar:vertical { background: transparent; width: 8px; }
@@ -69,10 +72,22 @@ class WhatsNewOverlay(QWidget):
                 head = QLabel(heading, body)
                 head.setObjectName("heading")
                 body_layout.addWidget(head)
-            item = QLabel(text, body)
-            item.setWordWrap(True)
-            item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            body_layout.addWidget(item)
+            points = split_points(text) or [text]
+            for number, point in enumerate(points):
+                if number:
+                    body_layout.addSpacing(6)
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(10)
+                if len(points) > 1:  # several points: a list, not a paragraph
+                    dot = QLabel("•", body)
+                    dot.setObjectName("dot")
+                    row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+                item = QLabel(point, body)
+                item.setWordWrap(True)
+                item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                row.addWidget(item, 1)
+                body_layout.addLayout(row)
             if index < len(entries) - 1:
                 body_layout.addSpacing(12)
         body_layout.addStretch(1)
@@ -94,7 +109,7 @@ class WhatsNewOverlay(QWidget):
         self._body = body
 
     def _place_card(self):
-        width = min(560, max(320, self.width() - 80))
+        width = min(620, max(320, self.width() - 80))
         self.card.setFixedWidth(width)
         self._body.setFixedWidth(width - 26 * 2 - 8)
         content = self._body.layout().totalHeightForWidth(self._body.width())
