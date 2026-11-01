@@ -31,6 +31,7 @@ from image_classifier.imaging import (
     save_pixmap,
 )
 from image_classifier.config import get_config_file
+from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
 from image_classifier import __version__
 from image_classifier.updates.controller import UpdateController
@@ -2454,7 +2455,7 @@ class PhotoViewer(QMainWindow):
         self.update_favorite_count()
         self.setup_shortcuts()
         self.floating_menu.settings_button.clicked.connect(self.open_settings_overlay)
-        self.floating_menu.brightness_button.clicked.connect(self.open_brightness_overlay)
+        self.floating_menu.brightness_button.clicked.connect(lambda: self.open_editor("adjust"))
         self.show()
         QTimer.singleShot(0, self.initialize_viewer)
         self.updateLanguage()
@@ -4663,7 +4664,8 @@ class PhotoViewer(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_F11), self, self.toggle_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.exit_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, self.backspace_toggle_fit)
-        QShortcut(QKeySequence("B"), self, self.toggle_brightness_overlay)
+        QShortcut(QKeySequence("B"), self, lambda: self.open_editor("adjust"))
+        QShortcut(QKeySequence("Ctrl+E"), self, lambda: self.open_editor("crop"))
         QShortcut(QKeySequence("C"), self, self.toggle_compare)
         QShortcut(QKeySequence("Shift+C"), self, self.toggle_compare_filter_shortcut)
         QShortcut(QKeySequence("Ctrl+Shift+C"), self, self.clear_compare)
@@ -6110,7 +6112,11 @@ class PhotoViewer(QMainWindow):
             self.show_custom_dialog("Failed to save image", icon_type="error", buttons="ok")
             return
 
-        self._invalidate_directory_cache(folder)
+        self._finish_save(norm_path, save_path, overwrite)
+
+    def _finish_save(self, norm_path, save_path, overwrite):
+        """Refresh lists, caches and the view after ``save_path`` was written."""
+        self._invalidate_directory_cache(os.path.dirname(save_path))
 
         # 4) Post‐save logic: two separate branches
         if not overwrite:
@@ -6292,6 +6298,54 @@ class PhotoViewer(QMainWindow):
         self.delete_worker.errorOccurred.connect(on_error)
         self.delete_thread.started.connect(self.delete_worker.run)
         self.delete_thread.start()
+
+    # ------------------------------------------------------------------ photo editor
+    def open_editor(self, tab="crop"):
+        """Open the non-destructive photo editor (Recortar / Ajuste) on the current image."""
+        if getattr(self, "photo_editor", None) is not None:
+            return
+        if not self.image_files or self.current_index < 0:
+            return
+        t = translations.get(self.current_language, translations["en"])
+        if not self.image_viewer.full_resolution_ready:
+            self.show_ephemeral_message(t.get("full_resolution_loading", "Full-resolution image is still loading."))
+            return
+        pixmap = self.image_viewer.original_pixmap
+        if pixmap is None or pixmap.isNull():
+            return
+        norm_path = self.image_files[self.current_index]
+        orig_path = self.norm_to_original.get(norm_path, norm_path)
+        folder, filename = os.path.split(orig_path)
+        name, ext = os.path.splitext(filename)
+        angle = int(self.image_viewer.rotation_angle or 0)
+        rot90 = (angle // 90) % 4 if angle % 90 == 0 else 0
+
+        self.disable_all_shortcuts()
+        if getattr(self, "floating_menu", None) is not None:
+            self.floating_menu.setEnabled(False)
+        self.photo_editor = PhotoEditor(
+            self, pixmap.toImage(), orig_path,
+            language=self.current_language, rot90=rot90, tab=tab,
+            copy_path_for=lambda: self.get_unique_copy_filename(folder, name, ext),
+        )
+        self.photo_editor.saved.connect(lambda path, overwrite: self._on_editor_saved(norm_path, path, overwrite))
+        self.photo_editor.closed.connect(self._on_editor_closed)
+
+    def _on_editor_saved(self, norm_path, save_path, overwrite):
+        # The editor baked any pending quick-rotation into the saved pixels.
+        self.image_rotations[norm_path] = 0
+        self.image_viewer.rotation_angle = 0
+        self.image_viewer.cached_texture = None
+        self._finish_save(norm_path, save_path, overwrite)
+        if not overwrite:
+            self.show_ephemeral_message(os.path.basename(save_path))
+
+    def _on_editor_closed(self):
+        self.photo_editor = None
+        self.enable_all_shortcuts()
+        if getattr(self, "floating_menu", None) is not None:
+            self.floating_menu.setEnabled(True)
+        self.setFocus()
 
     def open_crop_overlay(self):
         if not self.image_viewer.full_resolution_ready:

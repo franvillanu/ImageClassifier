@@ -82,7 +82,7 @@ class FloatingMenu(QWidget):
         self.sharpness_button.setIcon(IconFactory.get_icon("sharpness", 36))
         self.sharpness_button.setIconSize(QSize(36, 36))
         self.sharpness_button.setFixedSize(50, 50)
-        self.sharpness_button.clicked.connect(lambda: self.parent().open_sharpness_overlay())
+        self.sharpness_button.clicked.connect(lambda: self.parent().open_editor("adjust"))
 
         self.fullscreen_button = QPushButton()
         self._set_tooltip(self.fullscreen_button, t, "fullscreen")
@@ -106,7 +106,7 @@ class FloatingMenu(QWidget):
         self.crop_button.setFixedSize(50, 50)
         self.crop_button.setIcon(IconFactory.get_icon("crop", 36))
         self.crop_button.setIconSize(QSize(36, 36))
-        self.crop_button.clicked.connect(lambda: self.parent().open_crop_overlay())
+        self.crop_button.clicked.connect(lambda: self.parent().open_editor("crop"))
 
         for btn in [
             self.open_button,

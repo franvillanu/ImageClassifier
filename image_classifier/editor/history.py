@@ -50,4 +50,5 @@ class EditHistory:
 
     @property
     def is_dirty(self) -> bool:
-        return not self.current.is_identity
+        """Changed since the editor opened (drives the discard prompt)."""
+        return self.current != self.initial
