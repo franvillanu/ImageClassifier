@@ -257,14 +257,47 @@ def test_done_applies_crop_and_shows_result(editor):
 def test_enter_and_double_click_apply_crop(editor):
     from PyQt6.QtGui import QKeyEvent
     ed, _, _ = editor
+    ed._set_aspect(1.0)
     QApplication.sendEvent(ed, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
     assert ed._tab == "result"
     ed._switch_tab("crop")
+    ed._set_aspect(16 / 9)
     c = ed.crop_canvas
     fx, fy, fw, fh = c._view.frame_rect(ed._state.crop)
     centre = QPointF(fx + fw / 2, fy + fh / 2)
     _mouse(c, QEvent.Type.MouseButtonDblClick, centre)
     assert ed._tab == "result"
+
+
+def test_done_is_disabled_until_the_crop_changes(editor):
+    ed, _, _ = editor
+    assert not ed.btn_apply.isEnabled()
+    ed._apply_crop()  # Enter / double-click do nothing either
+    assert ed._tab == "crop"
+    ed._set_aspect(1.0)
+    assert ed.btn_apply.isEnabled()
+    ed._undo()
+    assert not ed.btn_apply.isEnabled()
+
+
+def test_one_undo_after_done_reverts_the_whole_crop(editor):
+    """Regression: a resize that arrived as two gestures needed two undos after Done."""
+    ed, _, _ = editor
+    initial = ed._state
+    canvas = ed.crop_canvas
+    fx, fy, fw, fh = canvas._view.frame_rect(ed._state.crop)
+    _drag(canvas, QPointF(fx + fw, fy + fh), QPointF(fx + fw * 0.8, fy + fh * 0.8))
+    fx, fy, fw, fh = canvas._view.frame_rect(ed._state.crop)
+    _drag(canvas, QPointF(fx + fw, fy + fh), QPointF(fx + fw * 0.7, fy + fh * 0.7))
+    _drag(canvas, QPointF(fx + fw * 0.35, fy + fh * 0.35), QPointF(fx + fw * 0.45, fy + fh * 0.4))
+    cropped = ed._state
+    ed.btn_apply.click()
+    assert ed._state == cropped
+    ed._undo()
+    assert ed._state == initial
+    assert not ed._history.can_undo()
+    ed._redo()
+    assert ed._state == cropped
 
 
 def test_handle_drag_does_not_zoom_or_move_the_view(editor):
@@ -276,3 +309,23 @@ def test_handle_drag_does_not_zoom_or_move_the_view(editor):
     assert ed._state.crop.w < 0.7 * ed._state.source_size[0]
     QApplication.processEvents()
     assert canvas._view == view_before
+
+
+def test_save_menu_opens_under_the_button_and_saves_a_copy(editor):
+    ed, _, _ = editor
+    ed._set_aspect(1.0)
+    saved = []
+    ed.saved.connect(lambda p, o: saved.append((p, o)))
+    ed.btn_save.click()
+    QApplication.processEvents()
+    menu = ed.save_menu
+    assert menu.isVisible()
+    save_rect = ed.btn_save.geometry().translated(ed.actions.pos())
+    assert _wait(lambda: menu.card.y() > save_rect.bottom(), timeout=2)  # after the slide-in
+    assert abs(menu.card.geometry().right() - save_rect.right()) <= 2
+    rows = [w for w in menu.card.children() if w.__class__.__name__ == "_MenuRow"]
+    assert len(rows) == 3
+    rows[0].click()  # "Save as copy"
+    assert not menu.isVisible()
+    assert _wait(lambda: saved, timeout=20)
+    assert saved[0][1] is False

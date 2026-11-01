@@ -32,6 +32,26 @@ class EditHistory:
         self._index = len(self._states) - 1
         return True
 
+    @property
+    def index(self) -> int:
+        return self._index
+
+    def state_at(self, index: int) -> EditState:
+        return self._states[max(0, min(index, len(self._states) - 1))]
+
+    def squash_since(self, index: int) -> None:
+        """Collapse every step after ``index`` into one: the current state.
+
+        Used when a tool session is confirmed ("Done"), so a single undo reverts
+        the whole session. Redo states are dropped.
+        """
+        index = max(0, min(index, len(self._states) - 1))
+        current = self.current
+        del self._states[index + 1:]
+        if current != self._states[index]:
+            self._states.append(current)
+        self._index = len(self._states) - 1
+
     def can_undo(self) -> bool:
         return self._index > 0
 

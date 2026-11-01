@@ -20,8 +20,8 @@ import cv2
 from PyQt6.QtCore import QEasingCurve, QEventLoop, QPropertyAnimation, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QImage
 from PyQt6.QtWidgets import (
-    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QScrollArea, QSizePolicy,
-    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from image_classifier.editor import geometry as g
@@ -35,7 +35,7 @@ from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import EditState
 from image_classifier.editor.widgets import (
-    STYLE, AdjustSlider, AspectStrip, Card, HaloButton, HaloTextButton, StraightenRuler, tool_button,
+    STYLE, AdjustSlider, AspectStrip, Card, HaloButton, HaloTextButton, Popover, StraightenRuler, tool_button,
 )
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.saver import save_rgba
@@ -209,9 +209,13 @@ class PhotoEditor(QWidget):
         self._task = None
         self._closing = False
         self._tab = "crop"
+        self._crop_session = 0  # history index when the crop tool was entered; "Done" squashes after it
 
         self._worker = PreviewWorker(self)
         self._worker.ready.connect(self._on_preview)
+        app = QGuiApplication.instance()
+        if app is not None:  # never leave the render thread running at exit
+            app.aboutToQuit.connect(self._worker.stop)
 
         self._build_ui()
         self.crop_canvas.set_levels(self._orig_levels)
@@ -304,15 +308,17 @@ class PhotoEditor(QWidget):
         """Top right: one accent save button with its options, and a close icon."""
         self.btn_save = tool_button(text=self.tr_("editor_save_btn"), object_name="Primary")
         self.btn_save.setIcon(icons.icon("chevron_down", 14, halo=False))
-        self.btn_save.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.btn_save.setIconSize(QSize(14, 14))
+        self.btn_save.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # chevron after the label
         self.btn_save.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.btn_save.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(self.btn_save)
-        menu.addAction(self.tr_("editor_save_copy"), lambda: self._save(overwrite=False))
-        menu.addAction(self.tr_("editor_save_replace"), lambda: self._save(overwrite=True))
-        menu.addSeparator()
-        menu.addAction(self.tr_("editor_copy_clipboard"), self._copy_to_clipboard)
-        self.btn_save.setMenu(menu)
+        self.save_menu = Popover(self)
+        self.save_menu.add_item("copy", self.tr_("editor_save_copy"), self.tr_("editor_save_copy_hint"),
+                                lambda: self._save(overwrite=False))
+        self.save_menu.add_item("replace", self.tr_("editor_save_replace"), self.tr_("editor_save_replace_hint"),
+                                lambda: self._save(overwrite=True))
+        self.save_menu.add_separator()
+        self.save_menu.add_item("clipboard", self.tr_("editor_copy_clipboard"), "", self._copy_to_clipboard)
+        self.btn_save.clicked.connect(lambda: self.save_menu.open_under(self.btn_save))
         self.btn_cancel = HaloButton("close", self.tr_("editor_cancel") + "  (Esc)", size=28)
         self.actions = _row(self.btn_save, 6, self.btn_cancel, spacing=4, parent=self)
         self.btn_cancel.clicked.connect(self.request_cancel)
@@ -462,6 +468,10 @@ class PhotoEditor(QWidget):
         self.btn_redo.setEnabled(self._history.can_redo())
         self.btn_reset.setEnabled(self._state != self._history.initial or not self._state.is_identity)
         self.btn_save.setEnabled(not self._state.is_identity)
+        if self._history.index < self._crop_session:
+            self._crop_session = self._history.index  # undone past the session start
+        # Done is only meaningful once this crop session changed something.
+        self.btn_apply.setEnabled(self._state != self._history.state_at(self._crop_session))
 
     def _sync_aspect_label(self):
         ratio = self._state.aspect
@@ -582,6 +592,8 @@ class PhotoEditor(QWidget):
     def _switch_tab(self, tab: str):
         """``crop``, ``adjust``, or ``result`` (the finished photo after Done, no tool selected)."""
         crop = tab == "crop"
+        if crop and self._tab != "crop":
+            self._crop_session = self._history.index
         self._tab = tab
         self.tab_crop.setChecked(crop)
         self.tab_adjust.setChecked(tab == "adjust")
@@ -598,9 +610,16 @@ class PhotoEditor(QWidget):
         QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
 
     def _apply_crop(self):
-        """Done: accept the crop and show the finished photo."""
-        if self._tab == "crop":
-            self._switch_tab("result")
+        """Done: accept the crop and show the finished photo.
+
+        Everything done since the crop tool was opened becomes one undo step, so a
+        single undo after Done brings the photo back to how it was before cropping.
+        """
+        if self._tab != "crop" or not self.btn_apply.isEnabled():
+            return
+        self._history.squash_since(self._crop_session)
+        self._update_actions()
+        self._switch_tab("result")
 
     def _zoom(self, factor: float):
         if self.stack.currentWidget() is self.crop_canvas:
@@ -672,7 +691,7 @@ class PhotoEditor(QWidget):
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._tab == "crop":
             self._apply_crop()
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.btn_save.isEnabled():
-            self.btn_save.showMenu()
+            self.save_menu.open_under(self.btn_save)
         else:
             super().keyPressEvent(e)
             return

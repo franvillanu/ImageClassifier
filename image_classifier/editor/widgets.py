@@ -41,7 +41,7 @@ QToolButton:disabled {{ color: {TEXT_OFF}; background: rgba(255,255,255,0.04); }
 QToolButton::menu-indicator {{ image: none; width: 0px; }}
 QToolButton#Primary {{ background: {ACCENT}; }}
 QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
-QToolButton#Primary:disabled {{ background: rgba(0,120,215,0.35); color: rgba(255,255,255,0.5); }}
+QToolButton#Primary:disabled {{ background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.35); }}
 QToolButton#Danger {{ background: {DANGER}; }}
 QToolButton#Danger:hover {{ background: {DANGER_HOVER}; }}
 QToolButton#Text {{ background: transparent; }}
@@ -202,18 +202,145 @@ class HaloTextButton(HaloButton):
 class Card(QFrame):
     """Translucent black rounded card, the app's overlay container look."""
 
-    def __init__(self, parent=None, radius: float = 12.0):
+    def __init__(self, parent=None, radius: float = 12.0, fill: QColor | None = None):
         super().__init__(parent)
         self._radius = radius
+        self._fill = fill or CARD
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(QPen(CARD_LINE, 1))
-        p.setBrush(CARD)
+        p.setBrush(self._fill)
         p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), self._radius, self._radius)
         p.end()
+
+
+class _MenuRow(QAbstractButton):
+    """One popover option: icon, label and an optional dim hint line."""
+
+    def __init__(self, icon_name: str, title: str, hint: str = "", parent=None):
+        super().__init__(parent)
+        self._icon = icon_name
+        self._title = title
+        self._hint = hint
+        self._hover = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedHeight(56 if hint else 42)
+        from PyQt6.QtGui import QFontMetricsF
+        w = max(QFontMetricsF(ui_font(15)).horizontalAdvance(title), QFontMetricsF(ui_font(12)).horizontalAdvance(hint))
+        self.setMinimumWidth(int(14 + 22 + 14 + w + 22))
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if self._hover or self.isDown():
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(255, 255, 255, 34 if self.isDown() else 24))
+            p.drawRoundedRect(QRectF(self.rect()), 8, 8)
+        icons.icon(self._icon, 22, halo=False).paint(p, QRectF(14, (self.height() - 22) / 2, 22, 22).toRect())
+        x = 14 + 22 + 14
+        if self._hint:
+            p.setFont(ui_font(15))
+            p.setPen(QColor(TEXT))
+            p.drawText(QRectF(x, 8, self.width() - x, 22), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       self._title)
+            p.setFont(ui_font(12))
+            p.setPen(QColor(TEXT_DIM))
+            p.drawText(QRectF(x, 29, self.width() - x, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       self._hint)
+        else:
+            p.setFont(ui_font(15))
+            p.setPen(QColor(TEXT))
+            p.drawText(QRectF(x, 0, self.width() - x, self.height()),
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._title)
+        p.end()
+
+
+class Popover(QWidget):
+    """Menu card anchored under a button: fades and slides in, closes on outside click or Esc.
+
+    Covers its parent with an invisible backdrop so any click elsewhere dismisses it.
+    """
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.card = Card(self, radius=12, fill=QColor(16, 16, 18))
+        self._lay = QVBoxLayout(self.card)
+        self._lay.setContentsMargins(6, 6, 6, 6)
+        self._lay.setSpacing(2)
+        from PyQt6.QtCore import QEasingCurve, QPropertyAnimation
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        self._fx = QGraphicsOpacityEffect(self.card)
+        self.card.setGraphicsEffect(self._fx)
+        self._fade = QPropertyAnimation(self._fx, b"opacity", self)
+        self._slide = QPropertyAnimation(self.card, b"pos", self)
+        for a in (self._fade, self._slide):
+            a.setDuration(150)
+            a.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # The effect is only needed while fading; left on, it composites the card translucently.
+        self._fade.finished.connect(lambda: self._fx.setEnabled(False))
+        self.hide()
+
+    def add_item(self, icon_name: str, title: str, hint: str, callback):
+        row = _MenuRow(icon_name, title, hint)
+        row.clicked.connect(lambda: (self.close_menu(), callback()))
+        self._lay.addWidget(row)
+        return row
+
+    def add_separator(self):
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background: rgba(255,255,255,0.10); margin: 0px 10px;")
+        self._lay.addSpacing(3)
+        self._lay.addWidget(line)
+        self._lay.addSpacing(3)
+
+    def open_under(self, anchor: QWidget):
+        parent = self.parentWidget()
+        self.setGeometry(parent.rect())
+        self.card.adjustSize()
+        a = anchor.mapTo(parent, anchor.rect().bottomRight())
+        x = max(8, a.x() - self.card.width() + 1)
+        y = a.y() + 8
+        from PyQt6.QtCore import QPoint
+        self._slide.setStartValue(QPoint(x, y - 8))
+        self._slide.setEndValue(QPoint(x, y))
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self.card.move(x, y - 8)
+        self._fx.setEnabled(True)
+        self._fx.setOpacity(0.0)
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self._fade.start()
+        self._slide.start()
+
+    def close_menu(self):
+        self.hide()
+
+    def mousePressEvent(self, e):
+        if not self.card.geometry().contains(e.position().toPoint()):
+            self.close_menu()
+        e.accept()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.close_menu()
+        e.accept()
 
 
 class StraightenRuler(QWidget):

@@ -55,6 +55,13 @@ _PATHS = {
     "close": ['<path d="M13 13L35 35M35 13L13 35"/>'],
     "chevron_down": ['<path d="M14 19L24 29L34 19"/>'],
     "check": ['<path d="M10 25L20 35L38 14"/>'],
+    "copy": ['<rect x="16" y="15" width="23" height="27" rx="4"/>',
+             '<path d="M32 15V11A4 4 0 0 0 28 7H13A4 4 0 0 0 9 11V30A4 4 0 0 0 13 34H16"/>'],
+    "replace": ['<path d="M12 7H31L40 16V37A4 4 0 0 1 36 41H12A4 4 0 0 1 8 37V11A4 4 0 0 1 12 7Z"/>',
+                '<path d="M16 7V15A1 1 0 0 0 17 16H29A1 1 0 0 0 30 15V7"/>',
+                '<path d="M15 41V29A2 2 0 0 1 17 27H31A2 2 0 0 1 33 29V41"/>'],
+    "clipboard": ['<path d="M17 9H13A4 4 0 0 0 9 13V38A4 4 0 0 0 13 42H35A4 4 0 0 0 39 38V13A4 4 0 0 0 35 9H31"/>',
+                  '<rect x="17" y="5" width="14" height="8" rx="2.5"/>', '<path d="M17 24H31M17 32H26"/>'],
     "zoom_in": ['<circle cx="21" cy="21" r="12"/>', '<path d="M30 30L41 41M21 15V27M15 21H27"/>'],
     "zoom_out": ['<circle cx="21" cy="21" r="12"/>', '<path d="M30 30L41 41M15 21H27"/>'],
     "fit": ['<path d="M14 6H6V14M34 6H42V14M14 42H6V34M34 42H42V34"/>'],
@@ -65,13 +72,19 @@ _SCALES = (1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)
 _cache: dict = {}
 
 
-def _svg(name: str, halo: bool, color: str = "white") -> bytes:
+def _stroke(size: int) -> float:
+    """Optical sizing: small icons get proportionally heavier lines so they stay legible."""
+    return min(4.0, 2.0 * max(1.0, 24.0 / max(1, size)))
+
+
+def _svg(name: str, halo: bool, color: str = "white", size: int = 32) -> bytes:
     body = "".join(_PATHS[name])
     common = 'fill="none" stroke-linecap="round" stroke-linejoin="round"'
+    w = _stroke(size)
     layers = []
     if halo:
-        layers.append(f'<g stroke="black" stroke-width="4.5" {common}>{body.replace("white", "black")}</g>')
-    layers.append(f'<g stroke="{color}" stroke-width="2" {common}>{body.replace("white", color)}</g>')
+        layers.append(f'<g stroke="black" stroke-width="{w + 2.5:.2f}" {common}>{body.replace("white", "black")}</g>')
+    layers.append(f'<g stroke="{color}" stroke-width="{w:.2f}" {common}>{body.replace("white", color)}</g>')
     return ('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">'
             + "".join(layers) + "</svg>").encode()
 
@@ -83,7 +96,7 @@ def pixmap(name: str, size: int, scale: float = 1.0, halo: bool = True, color: s
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    QSvgRenderer(QByteArray(_svg(name, halo, color))).render(p, QRectF(0, 0, px, px))
+    QSvgRenderer(QByteArray(_svg(name, halo, color, size))).render(p, QRectF(0, 0, px, px))
     p.end()
     pm.setDevicePixelRatio(scale)
     return pm
