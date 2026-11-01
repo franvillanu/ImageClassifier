@@ -35,7 +35,7 @@ from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import EditState
 from image_classifier.editor.widgets import (
-    STYLE, AdjustSlider, AspectStrip, Card, HaloButton, StraightenRuler, tool_button,
+    STYLE, AdjustSlider, AspectStrip, Card, HaloButton, HaloTextButton, StraightenRuler, tool_button,
 )
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.saver import save_rgba
@@ -72,9 +72,11 @@ class _Task(QThread):
 
 
 class _Modal(QFrame):
-    """Centred confirm card over a dimmed editor, in the app's overlay style.
+    """Centred confirm card over a dimmed editor, styled exactly like the viewer's own
+    dialogs (export favorites, messages): black card, title on a dark pill, equal-width
+    buttons with the action in blue first and the way out in red. Scales with the window.
 
-    Without buttons it is a small busy card (e.g. "Saving…").
+    Without buttons it is a small busy card (e.g. "Saving...").
     """
 
     WIDTH = 420
@@ -88,12 +90,34 @@ class _Modal(QFrame):
         self._loop = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        card = Card(self, radius=14)
+        s = max(1.0, min(1.5, parent.width() / 1400))  # never tiny on a large window
+
+        def px(v):
+            return f"{round(v * s)}px"
+
+        card = QWidget(self)
         card.setObjectName("DialogCard")
-        card.setFixedWidth(self.WIDTH if buttons else 240)
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setFixedWidth(round((self.WIDTH if buttons else 260) * s))
+        card.setStyleSheet(f"""
+            QWidget#DialogCard {{ background-color: rgba(0, 0, 0, 200); border-radius: 8px;
+                                  border: 1px solid rgba(255, 255, 255, 30); }}
+            QLabel {{ background: transparent; color: white; font-size: {px(16)}; }}
+            QLabel#DialogTitle {{ font-size: {px(18)}; font-weight: bold; background-color: rgba(25, 25, 25, 200);
+                                  border-radius: 6px; padding: {px(8)}; }}
+            QToolButton {{ color: white; border: none; border-radius: 6px; font-size: {px(15)};
+                           padding: {px(8)} {px(12)}; min-height: {px(22)};
+                           background-color: rgba(50, 50, 50, 200); }}
+            QToolButton:hover {{ background-color: rgba(70, 70, 70, 220); }}
+            QToolButton#Primary {{ background-color: #007BFF; }}
+            QToolButton#Primary:hover {{ background-color: #0056b3; }}
+            QToolButton#Danger {{ background-color: #DC3545; }}
+            QToolButton#Danger:hover {{ background-color: #B22222; }}
+        """)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(26, 24, 26, 22)
-        lay.setSpacing(10)
+        m = round(20 * s)
+        lay.setContentsMargins(m, m, m, m)
+        lay.setSpacing(round(12 * s))
         heading = QLabel(title)
         heading.setWordWrap(True)
         if buttons:
@@ -103,17 +127,17 @@ class _Modal(QFrame):
         lay.addWidget(heading)
         if body:
             text = QLabel(body)
-            text.setObjectName("DialogBody")
             text.setWordWrap(True)
+            text.setContentsMargins(round(4 * s), 0, round(4 * s), 0)
             lay.addWidget(text)
         if buttons:
-            lay.addSpacing(12)
+            lay.addSpacing(round(4 * s))
             row = QHBoxLayout()
-            row.setSpacing(10)
-            row.addStretch(1)
+            row.setSpacing(round(10 * s))
             for key, label, obj in buttons:
                 b = tool_button(text=label, object_name=obj)
-                b.setMinimumWidth(110)
+                b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                b.setFixedHeight(round(38 * s))
                 b.clicked.connect(lambda _=False, k=key: self._finish(k))
                 row.addWidget(b)
             lay.addLayout(row)
@@ -307,18 +331,18 @@ class PhotoEditor(QWidget):
         self.ruler.set_decimal_separator("," if self._language == "es" else ".")
         self.btn_flip_h = HaloButton("flip_h", self.tr_("editor_flip_h"), size=26, box=40)
         self.btn_flip_v = HaloButton("flip_v", self.tr_("editor_flip_v"), size=26, box=40)
-        self.btn_aspect = tool_button("aspect", self.tr_("editor_aspect_free"),
-                                      tooltip=self.tr_("editor_aspect_title"), object_name="Text", icon_size=18)
+        self.btn_aspect = HaloTextButton(
+            "aspect", self.tr_("editor_aspect_free"), self.tr_("editor_aspect_title"),
+            reserve=[self.tr_(k) if k.startswith("editor_") else k for k, _ in ASPECTS])
         self.btn_aspect.setCheckable(True)
-        self.btn_aspect.setMinimumWidth(104)
         self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=26, box=40)
         self.crop_group = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
                                self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, 10,
                                spacing=2)
         self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=26, box=40)
         self.btn_apply = tool_button(text=self.tr_("editor_done"), tooltip=self.tr_("editor_apply_hint"),
-                                     object_name="Accept")
-        self.btn_apply.setIcon(icons.icon("check", 16, halo=False, color="black"))
+                                     object_name="Primary")
+        self.btn_apply.setIcon(icons.icon("check", 16, halo=False))
         self.btn_apply.setIconSize(QSize(16, 16))
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
@@ -695,8 +719,8 @@ class PhotoEditor(QWidget):
             name = os.path.basename(self._source_path)
             choice = _Modal(self, self.tr_("editor_overwrite_title"),
                             self.tr_("editor_overwrite_message").format(name=name), [
-                                ("cancel", self.tr_("editor_cancel"), ""),
                                 ("ok", self.tr_("editor_overwrite_confirm"), "Primary"),
+                                ("cancel", self.tr_("editor_cancel"), "Danger"),
                             ]).exec()
             if choice != "ok":
                 return
@@ -728,7 +752,7 @@ class PhotoEditor(QWidget):
     def request_cancel(self):
         if self._history.is_dirty:
             choice = _Modal(self, self.tr_("editor_discard_message"), self.tr_("editor_discard_body"), [
-                ("keep", self.tr_("editor_keep_editing"), ""),
+                ("keep", self.tr_("editor_keep_editing"), "Primary"),
                 ("discard", self.tr_("editor_discard"), "Danger"),
             ]).exec()
             if choice != "discard":

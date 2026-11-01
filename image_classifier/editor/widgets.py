@@ -44,8 +44,6 @@ QToolButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
 QToolButton#Primary:disabled {{ background: rgba(0,120,215,0.35); color: rgba(255,255,255,0.5); }}
 QToolButton#Danger {{ background: {DANGER}; }}
 QToolButton#Danger:hover {{ background: {DANGER_HOVER}; }}
-QToolButton#Accept {{ background: #f2f2f2; color: #000000; font-weight: 600; padding: 0px 18px 0px 14px; }}
-QToolButton#Accept:hover {{ background: #ffffff; }}
 QToolButton#Text {{ background: transparent; }}
 QToolButton#Text:hover {{ background: rgba(255,255,255,0.10); }}
 QMenu {{
@@ -159,6 +157,45 @@ class HaloButton(QAbstractButton):
                 p.drawRoundedRect(QRectF(0, self.height() / 2 - 9, 3, 18), 1.5, 1.5)
             else:
                 p.drawRoundedRect(QRectF(self.width() / 2 - 9, self.height() - 3, 18, 3), 1.5, 1.5)
+        p.end()
+
+
+class HaloTextButton(HaloButton):
+    """Halo icon followed by a label, both centred on the same line (e.g. the ratio picker)."""
+
+    PAD, GAP = 10, 8
+
+    def __init__(self, icon_name: str, text: str, tooltip: str = "", size: int = 24, height: int = 40,
+                 reserve: list[str] | None = None, parent=None):
+        """``reserve``: labels to size for, so the row doesn't shift when the label changes."""
+        super().__init__(icon_name, tooltip, size=size, box=height, indicator="bottom", parent=parent)
+        self._font = ui_font(14)
+        from PyQt6.QtGui import QFontMetricsF
+        metrics = QFontMetricsF(self._font)
+        tw = max(metrics.horizontalAdvance(t) for t in (reserve or []) + [text])
+        self.setFixedWidth(int(self.PAD + self._size + self.GAP + tw + self.PAD + 2))
+        self.setText(text)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if not self.isEnabled():
+            p.setOpacity(0.28)
+        elif self.isDown():
+            p.setOpacity(0.7)
+        elif not (self._hover or self.isChecked()):
+            p.setOpacity(0.8)
+        s = self._size
+        y = (self.height() - s) / 2.0
+        icons.icon(self._name, s).paint(p, QRectF(self.PAD, y, s, s).toRect())
+        p.setFont(self._font)
+        text_rect = QRectF(self.PAD + s + self.GAP, 0, self.width() - self.PAD - s - self.GAP, self.height())
+        halo_text(p, text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+        if self.isCheckable() and self.isChecked():
+            p.setOpacity(1.0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(ACCENT))
+            p.drawRoundedRect(QRectF(self.width() / 2 - 9, self.height() - 3, 18, 3), 1.5, 1.5)
         p.end()
 
 
