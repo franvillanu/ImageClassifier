@@ -4,14 +4,19 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
-from image_classifier.updates.notes import split_points
+from image_classifier.updates.notes import sections
+
+# kind -> (icon, colour); titles come from the caller (translated)
+SECTION_STYLE = {"new": ("enhance", "#4aa3ff"), "changed": ("refresh", "#f0b429"), "fixed": ("bug", "#3ccf7a")}
+DEFAULT_TITLES = {"new": "New features", "changed": "Changes", "fixed": "Fixes"}
 
 
 class WhatsNewOverlay(QWidget):
     """Dimmed full-window overlay with a centered card. `entries` is [(heading, text)]."""
 
-    def __init__(self, parent, title, entries, close_text, empty_text, on_closed):
+    def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None):
         super().__init__(parent)
+        titles = {**DEFAULT_TITLES, **(section_titles or {})}
         self._on_closed = on_closed
         self.setObjectName("WhatsNewOverlay")
         self.setGeometry(parent.rect())
@@ -33,7 +38,8 @@ class WhatsNewOverlay(QWidget):
             QLabel#title { font-size: 21px; font-weight: bold; }
             QLabel#heading { color: #4aa3ff; font-size: 14px; font-weight: bold; }
             QLabel#empty { color: #8a8f98; }
-            QLabel#dot { color: #4aa3ff; font-size: 15px; font-weight: bold; }
+            QLabel#dot { color: #8a8f98; font-size: 15px; font-weight: bold; }
+            QLabel#section { font-size: 15px; font-weight: bold; }
             QFrame#divider { background-color: rgba(255, 255, 255, 30); border: none; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
             QScrollBar:vertical { background: transparent; width: 8px; }
@@ -72,22 +78,17 @@ class WhatsNewOverlay(QWidget):
                 head = QLabel(heading, body)
                 head.setObjectName("heading")
                 body_layout.addWidget(head)
-            points = split_points(text) or [text]
-            for number, point in enumerate(points):
-                if number:
+            groups = sections(text) or [(None, [text])]
+            for g, (kind, points) in enumerate(groups):
+                if g:
+                    body_layout.addSpacing(14)
+                if kind:  # Sidera-style section: coloured icon + title, then its points
+                    body_layout.addLayout(self._section_header(body, kind, titles[kind]))
                     body_layout.addSpacing(6)
-                row = QHBoxLayout()
-                row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(10)
-                if len(points) > 1:  # several points: a list, not a paragraph
-                    dot = QLabel("•", body)
-                    dot.setObjectName("dot")
-                    row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
-                item = QLabel(point, body)
-                item.setWordWrap(True)
-                item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                row.addWidget(item, 1)
-                body_layout.addLayout(row)
+                for number, point in enumerate(points):
+                    if number:
+                        body_layout.addSpacing(6)
+                    body_layout.addLayout(self._point_row(body, point, bullet=bool(kind) or len(points) > 1))
             if index < len(entries) - 1:
                 body_layout.addSpacing(12)
         body_layout.addStretch(1)
@@ -107,6 +108,37 @@ class WhatsNewOverlay(QWidget):
         self._close_btn = close_btn
         self._scroll = scroll
         self._body = body
+
+    def _section_header(self, parent, kind, title):
+        from PyQt6.QtCore import QSize
+        from image_classifier.editor import icons
+        icon_name, colour = SECTION_STYLE[kind]
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        icon = QLabel(parent)
+        icon.setPixmap(icons.icon(icon_name, 20, halo=False, color=colour).pixmap(QSize(20, 20), self.devicePixelRatioF()))
+        icon.setFixedSize(20, 20)
+        label = QLabel(title, parent)
+        label.setObjectName("section")
+        label.setStyleSheet(f"color: {colour};")
+        row.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _point_row(self, parent, point, bullet):
+        row = QHBoxLayout()
+        row.setContentsMargins(28 if bullet else 0, 0, 0, 0)
+        row.setSpacing(10)
+        if bullet:
+            dot = QLabel("•", parent)
+            dot.setObjectName("dot")
+            row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+        item = QLabel(point, parent)
+        item.setWordWrap(True)
+        item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(item, 1)
+        return row
 
     def _place_card(self):
         width = min(620, max(320, self.width() - 80))

@@ -112,8 +112,10 @@ def missing_notes_message(version: str, subjects: list[str]) -> str:
     lines = [
         f"[ERROR] v{version} has no release notes, and they are shown to customers in the app.",
         "Add a line at the top of docs/release_notes.txt (after the # comments), for example:",
-        f"  {version}|What changed, written for customers|Lo que cambió, escrito para los clientes",
-        "Separate several points with ' • '. Nothing has been built, merged or published.",
+        f"  {version}|new: What is new, for customers • fixed: What was fixed"
+        "|new: Qué hay de nuevo, para los clientes • fixed: Qué se ha corregido",
+        "Separate points with ' • ' and start each with new:, changed: or fixed: (in both languages).",
+        "Nothing has been built, merged or published.",
     ]
     picked = [m.group(3).strip() for m in map(NOTE_SUBJECT_RE.match, subjects) if m]
     if picked:

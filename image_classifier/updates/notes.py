@@ -48,6 +48,25 @@ def split_points(text: str) -> list[str]:
     return [part.strip() for part in text.split(POINT_SEPARATOR) if part.strip()]
 
 
+# Each point may start with a section tag (same tag in both languages), like Sidera's notes:
+#   new: ...  changed: ...  fixed: ...
+SECTION_KINDS = ("new", "changed", "fixed")
+_SECTION_RE = re.compile(r"^(new|changed|fixed)\s*:\s*", re.IGNORECASE)
+
+
+def sections(text: str) -> list[tuple[Optional[str], list[str]]]:
+    """[(kind, points)] in the order new, changed, fixed; untagged points come first with kind None."""
+    groups: dict[Optional[str], list[str]] = {}
+    for point in split_points(text):
+        match = _SECTION_RE.match(point)
+        kind = match.group(1).lower() if match else None
+        body = point[match.end():].strip() if match else point
+        if body:
+            groups.setdefault(kind, []).append(body)
+    ordered = [(None, groups[None])] if None in groups else []
+    return ordered + [(kind, groups[kind]) for kind in SECTION_KINDS if kind in groups]
+
+
 def pick(entry: tuple[str, str, str], lang: str) -> str:
     return entry[2] if lang == "es" else entry[1]
 
