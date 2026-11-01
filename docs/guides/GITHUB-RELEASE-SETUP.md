@@ -21,7 +21,7 @@ There is no token file, no `GITHUB_TOKEN` and no `requests` dependency any more.
 
 ## Releasing
 
-Commit your changes and run the VS Code task **PR: create + merge (squash) + update main + delete branch**. It decides by itself whether a release is needed (app files changed since the last release, or a newer version in `docs/release_notes.txt`), then bumps the version, writes the notes if missing, builds, merges, publishes to the releases repo and verifies the result. See [RELEASE-PROTOCOL.md](RELEASE-PROTOCOL.md) for the details.
+Commit your changes and run the VS Code task **PR: create + merge (squash) + update main + delete branch**. It decides by itself whether a release is needed (app files changed since the last release, or a newer version in `docs/release_notes.txt`), then bumps the version, checks the hand-written notes are there (it stops if not), builds, merges, publishes to the releases repo and verifies the result. See [RELEASE-PROTOCOL.md](RELEASE-PROTOCOL.md) for the details.
 
 To publish by hand: `py scripts/create_github_release.py`.
 

@@ -28,7 +28,7 @@ Docs-, test- and script-only PRs do not trigger a release: the task just creates
 
 When a release is pending, the task automatically:
 1. bumps the patch version (or uses the notes' version) and syncs `version.txt`, `__init__.py`, `pyproject.toml`, `package.json`,
-2. writes the release-notes line from your `feat:`/`fix:`/`perf:`/`refactor:` commit subjects if the version has none (the Spanish text is a copy of the English one; edit `docs/release_notes.txt` in the next PR to polish it, or add your own line before running to control the wording),
+2. requires a hand-written, customer-facing line for that version in `docs/release_notes.txt` (`version|English|Spanish`, several points separated by ` • `, each starting with `new:`, `changed:` or `fixed:` in both languages so the app and the changelog page group them into New features / Changes / Fixes). If it is missing, the release stops before building and lists the commits since the last release for reference. Notes are never generated from commit subjects: they read like a git log,
 3. runs `Release.bat` (changelog, website, build, sign),
 4. commits the release files (`release: prepare vX.Y.Z`), pushes, creates and squash-merges the PR,
 5. publishes the release to `franvillanu/imageclassifier-releases`,

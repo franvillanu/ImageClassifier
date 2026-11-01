@@ -31,24 +31,30 @@ def test_app_files_trigger_a_release_but_docs_tests_and_scripts_do_not():
         assert not script.is_app_change(path), path
 
 
-# -- notes written from commits ------------------------------------------------------
-def test_note_from_subjects_uses_customer_facing_commits_only():
+# -- missing notes stop the release -------------------------------------------------
+def test_missing_notes_stop_the_release_with_instructions(monkeypatch):
+    import pytest
     script = load_script()
-    note = script.note_from_subjects([
-        "feat: put the star in the About title (#24)",
-        "fix(viewer): keep zoom when rotating",
-        "docs: update guide",
-        "chore: bump deps",
-        "release: prepare v2.0.9 (#23)",
-        "feat: put the star in the About title",
-    ])
-    assert note == "Put the star in the About title; Keep zoom when rotating."
+    monkeypatch.setattr(script, "notes_for_version", lambda v: None)
+    monkeypatch.setattr(script, "commit_subjects_since_release", lambda: [
+        "feat: put the star in the About title (#24)", "docs: update guide", "fix(viewer): keep zoom",
+        "feat: put the star in the About title"])
+    with pytest.raises(SystemExit) as info:
+        script.ensure_notes("2.0.12")
+    message = str(info.value)
+    assert "2.0.12|" in message and "docs/release_notes.txt" in message
+    assert "- put the star in the About title" in message and "- keep zoom" in message
+    assert "update guide" not in message and message.count("About title") == 1
 
 
-def test_note_falls_back_when_no_commit_qualifies():
+def test_existing_notes_or_dry_run_never_stop(monkeypatch, capsys):
     script = load_script()
-    assert script.note_from_subjects(["docs: x", "chore: y"]) == script.FALLBACK_NOTE
-    assert script.note_from_subjects([]) == script.FALLBACK_NOTE
+    monkeypatch.setattr(script, "notes_for_version", lambda v: ("2.0.12", "en", "es"))
+    script.ensure_notes("2.0.12")
+    monkeypatch.setattr(script, "notes_for_version", lambda v: None)
+    monkeypatch.setattr(script, "commit_subjects_since_release", lambda: [])
+    script.ensure_notes("2.0.12", dry_run=True)
+    assert "[WARN]" in capsys.readouterr().out
 
 
 def test_insert_notes_line_goes_after_the_header_comments():

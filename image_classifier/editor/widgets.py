@@ -350,40 +350,46 @@ class Popover(QWidget):
         e.accept()
 
 
-class StraightenRuler(QWidget):
-    """Slim tick ruler for the straighten angle; floats over the canvas with no background.
+class TickDial(QWidget):
+    """Fixed tick scale with a moving needle: minus on the left, plus on the right, 0 in the middle.
 
-    Drag to scrub (the ticks follow the pointer), wheel/arrow keys step 0.1 deg
-    (Shift: 1 deg), double-click resets to 0. Values snap to 0 when close.
+    Drag anywhere to move the value (right = up; hold Shift for fine control),
+    wheel/arrow keys step it, double-click resets to 0. Snaps to 0 when close.
+    Subclasses set the range, tick spacing and formatting.
     """
 
     valueChanged = pyqtSignal(float)
     pressed = pyqtSignal()
     released = pyqtSignal()
 
-    PX_PER_DEGREE = 8.0
-    SNAP = 0.3
+    LIMIT = 100
+    MINOR, MAJOR, LABEL_EVERY = 5, 25, 50
+    DECIMALS = 0
+    SNAP = 2.0
+    STEP, BIG_STEP = 1, 10
+    MARGIN = 14.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._value = 0.0
+        self._label = ""
         self._drag_x = None
         self._drag_value = 0.0
-        self._decimal = ","
-        self.setFixedHeight(46)
+        self.setFixedHeight(60)
         self.setMinimumWidth(240)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
-    def set_decimal_separator(self, sep: str):
-        self._decimal = sep
+    # ------------------------------------------------------------------ value
+    def set_label(self, label: str):
+        self._label = label
         self.update()
 
-    def value(self) -> float:
-        return self._value
+    def value(self):
+        return round(self._value, self.DECIMALS) if self.DECIMALS else int(round(self._value))
 
     def setValue(self, v: float, emit: bool = False):
-        v = round(max(-ANGLE_LIMIT, min(ANGLE_LIMIT, v)), 1)
+        v = round(max(-self.LIMIT, min(self.LIMIT, float(v))), self.DECIMALS)
         if v == self._value:
             return
         self._value = v
@@ -391,46 +397,73 @@ class StraightenRuler(QWidget):
         if emit:
             self.valueChanged.emit(v)
 
+    def number(self) -> str:
+        v = self.value()
+        if self.DECIMALS:
+            text = f"{0.0 if abs(v) < 0.05 else v:.{self.DECIMALS}f}"
+        else:
+            text = f"+{v}" if v > 0 else str(v)
+        return text.replace("-", "−")
+
     def text(self) -> str:
-        v = 0.0 if abs(self._value) < 0.05 else self._value
-        return f"{v:.1f}".replace(".", self._decimal).replace("-", "−") + "°"
+        return self.number()
 
-    def sizeHint(self):
-        return QSize(420, 46)
+    def px_per_unit(self) -> float:
+        return max(1e-6, (self.width() - 2 * self.MARGIN) / (2 * self.LIMIT))
 
+    def _x(self, v: float) -> float:
+        return self.MARGIN + (v + self.LIMIT) * self.px_per_unit()
+
+    # ------------------------------------------------------------------ painting
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        w, h = self.width(), self.height()
-        cx = w / 2.0
-        base = h - 6.0
-        ppd = self.PX_PER_DEGREE
-        first = int(max(-ANGLE_LIMIT, self._value - cx / ppd)) - 1
-        last = int(min(ANGLE_LIMIT, self._value + cx / ppd)) + 1
-        for deg in range(first, last + 1):
-            if abs(deg) > ANGLE_LIMIT:
-                continue
-            x = cx + (deg - self._value) * ppd
-            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
-            if fade <= 0:
-                continue
-            length = 12.0 if deg == 0 else 8.0 if deg % 5 == 0 else 4.0
-            alpha = (230 if deg == 0 else 150 if deg % 5 == 0 else 80) * fade
-            xr = round(x) + 0.5
-            p.setPen(QPen(QColor(0, 0, 0, int(alpha * 0.6)), 3))
-            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
-            p.setPen(QPen(QColor(255, 255, 255, int(alpha)), 1))
-            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
-        # needle
-        p.setPen(_round_pen(QColor(0, 0, 0, 150), 4))
-        p.drawLine(QPointF(cx, base - 18), QPointF(cx, base + 2))
-        p.setPen(_round_pen(QColor(ACCENT if self._value else TEXT), 2))
-        p.drawLine(QPointF(cx, base - 18), QPointF(cx, base + 2))
-        p.setFont(ui_font(13, QFont.Weight.DemiBold))
-        halo_text(p, QRectF(0, 0, w, base - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-                  self.text())
+        w = self.width()
+        base = 38.0
+        # track
+        p.setPen(_round_pen(QColor(255, 255, 255, 40), 2))
+        p.drawLine(QPointF(self._x(-self.LIMIT), base), QPointF(self._x(self.LIMIT), base))
+        # ticks above the track, labels below it
+        p.setFont(ui_font(11))
+        for unit in range(-self.LIMIT, self.LIMIT + 1, self.MINOR):
+            x = round(self._x(unit)) + 0.5
+            major = unit % self.MAJOR == 0
+            length = 10.0 if unit == 0 else 7.0 if major else 4.0
+            p.setPen(QPen(QColor(255, 255, 255, 190 if unit == 0 else 120 if major else 60), 1))
+            p.drawLine(QPointF(x, base - 3 - length), QPointF(x, base - 3))
+            if unit % self.LABEL_EVERY == 0:
+                p.setPen(QColor(255, 255, 255, 110))
+                p.drawText(QRectF(x - 24, base + 5, 48, 14), Qt.AlignmentFlag.AlignCenter,
+                           str(unit).replace("-", "−"))
+        # fill from zero to the value, then the knob
+        xz, xv = self._x(0), self._x(self._value)
+        if self._value:
+            p.setPen(_round_pen(QColor(ACCENT_HOVER), 3))
+            p.drawLine(QPointF(xz, base), QPointF(xv, base))
+        p.setPen(QPen(QColor(0, 0, 0, 140), 1))
+        p.setBrush(QColor(TEXT))
+        p.drawEllipse(QPointF(xv, base), 6.5, 6.5)
+        # readout: label (dim) + number (bold), centred above the scale
+        number = self.number() + self._suffix()
+        p.setFont(ui_font(14))
+        label = (self._label + "  ") if self._label else ""
+        label_w = p.fontMetrics().horizontalAdvance(label)
+        p.setFont(ui_font(14, QFont.Weight.DemiBold))
+        num_w = p.fontMetrics().horizontalAdvance(number)
+        x0 = (w - label_w - num_w) / 2
+        if label:
+            p.setFont(ui_font(14))
+            halo_text(p, QRectF(x0, 0, label_w, 20), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                      label, QColor(TEXT_DIM))
+        p.setFont(ui_font(14, QFont.Weight.DemiBold))
+        halo_text(p, QRectF(x0 + label_w, 0, num_w + 4, 20),
+                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, number)
         p.end()
 
+    def _suffix(self) -> str:
+        return ""
+
+    # ------------------------------------------------------------------ input
     def _snap(self, v: float) -> float:
         return 0.0 if abs(v) < self.SNAP else v
 
@@ -443,8 +476,10 @@ class StraightenRuler(QWidget):
     def mouseMoveEvent(self, e):
         if self._drag_x is None:
             return
-        v = self._drag_value - (e.position().x() - self._drag_x) / self.PX_PER_DEGREE
-        self.setValue(self._snap(v), emit=True)
+        fine = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        delta = (e.position().x() - self._drag_x) / self.px_per_unit()
+        v = self._drag_value + (delta / 10.0 if fine else delta)
+        self.setValue(v if fine else self._snap(v), emit=True)
 
     def mouseReleaseEvent(self, e):
         if self._drag_x is not None and e.button() == Qt.MouseButton.LeftButton:
@@ -465,12 +500,11 @@ class StraightenRuler(QWidget):
         steps = e.angleDelta().y() / 120.0 or e.angleDelta().x() / 120.0
         if steps:
             big = e.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            self._step(-steps * (1.0 if big else 0.1))
+            self._step(steps * (self.BIG_STEP if big else self.STEP))
         e.accept()
 
     def keyPressEvent(self, e):
-        big = e.modifiers() & Qt.KeyboardModifier.ShiftModifier
-        step = 1.0 if big else 0.1
+        step = self.BIG_STEP if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else self.STEP
         if e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Down):
             self._step(-step)
         elif e.key() in (Qt.Key.Key_Right, Qt.Key.Key_Up):
@@ -479,6 +513,37 @@ class StraightenRuler(QWidget):
             self._step(-self._value)
         else:
             super().keyPressEvent(e)
+
+
+class StraightenRuler(TickDial):
+    """Straighten angle, -45..45 degrees in 0.1 steps (positive turns the photo clockwise)."""
+
+    LIMIT = int(ANGLE_LIMIT)
+    MINOR, MAJOR, LABEL_EVERY = 1, 5, 15
+    DECIMALS = 1
+    SNAP = 0.3
+    STEP, BIG_STEP = 0.1, 1.0
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._decimal = ","
+
+    def set_decimal_separator(self, sep: str):
+        self._decimal = sep
+        self.update()
+
+    def number(self) -> str:
+        return super().number().replace(".", self._decimal)
+
+    def _suffix(self) -> str:
+        return "°"
+
+    def text(self) -> str:
+        return self.number() + "°"
+
+
+class ValueDial(TickDial):
+    """One adjustment, -100..100."""
 
 
 class AspectStrip(QWidget):
@@ -645,141 +710,3 @@ class AdjustDockButton(QAbstractButton):
             p.setBrush(QColor(ACCENT))
             p.drawRoundedRect(QRectF(c.x() - 9, self.height() - 3, 18, 3), 1.5, 1.5)
         p.end()
-
-
-class ValueDial(QWidget):
-    """Tick dial for one adjustment (-100..100), styled like the straighten ruler.
-
-    Drag to scrub (ticks follow the pointer), wheel steps 1 (Shift: 10),
-    double-click resets to 0. Snaps to 0 when passing close to it.
-    """
-
-    valueChanged = pyqtSignal(int)
-    pressed = pyqtSignal()
-    released = pyqtSignal()
-
-    PX_PER_UNIT = 2.6
-    SNAP = 2
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._value = 0
-        self._label = ""
-        self._drag_x = None
-        self._drag_value = 0
-        self.setFixedHeight(56)
-        self.setMinimumWidth(320)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setCursor(Qt.CursorShape.SizeHorCursor)
-
-    def set_label(self, label: str):
-        self._label = label
-        self.update()
-
-    def value(self) -> int:
-        return self._value
-
-    def setValue(self, v: int, emit: bool = False):
-        v = int(max(-100, min(100, round(v))))
-        if v == self._value:
-            return
-        self._value = v
-        self.update()
-        if emit:
-            self.valueChanged.emit(v)
-
-    def sizeHint(self):
-        return QSize(560, 56)
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        w, h = self.width(), self.height()
-        cx = w / 2.0
-        base = h - 6.0
-        ppu = self.PX_PER_UNIT
-        for unit in range(-100, 101, 5):
-            x = cx + (unit - self._value) * ppu
-            fade = max(0.0, 1.0 - (abs(x - cx) / (cx + 1)) ** 2)
-            if fade <= 0:
-                continue
-            major = unit % 25 == 0
-            length = 12.0 if unit == 0 else 8.0 if major else 4.0
-            alpha = (230 if unit == 0 else 150 if major else 80) * fade
-            xr = round(x) + 0.5
-            p.setPen(QPen(QColor(0, 0, 0, int(alpha * 0.6)), 3))
-            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
-            p.setPen(QPen(QColor(255, 255, 255, int(alpha)), 1))
-            p.drawLine(QPointF(xr, base - length), QPointF(xr, base))
-        # filled stretch between zero and the value
-        if self._value:
-            p.setPen(_round_pen(QColor(ACCENT_HOVER), 2))
-            p.drawLine(QPointF(cx - self._value * ppu, base + 1), QPointF(cx, base + 1))
-        p.setPen(_round_pen(QColor(0, 0, 0, 150), 4))
-        p.drawLine(QPointF(cx, base - 20), QPointF(cx, base + 2))
-        p.setPen(_round_pen(QColor(ACCENT if self._value else TEXT), 2))
-        p.drawLine(QPointF(cx, base - 20), QPointF(cx, base + 2))
-        v = self._value
-        number = (f"+{v}" if v > 0 else str(v).replace("-", "−"))
-        p.setFont(ui_font(14))
-        fm = p.fontMetrics()
-        label_w = fm.horizontalAdvance(self._label + "  ")
-        p.setFont(ui_font(14, QFont.Weight.DemiBold))
-        num_w = p.fontMetrics().horizontalAdvance(number)
-        x0 = cx - (label_w + num_w) / 2
-        top = QRectF(0, 0, w, base - 22)
-        p.setFont(ui_font(14))
-        halo_text(p, QRectF(x0, top.y(), label_w, top.height()),
-                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, self._label, QColor(TEXT_DIM))
-        p.setFont(ui_font(14, QFont.Weight.DemiBold))
-        halo_text(p, QRectF(x0 + label_w, top.y(), num_w + 4, top.height()),
-                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, number)
-        p.end()
-
-    def _snap(self, v: float) -> float:
-        return 0 if abs(v) < self.SNAP else v
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._drag_x = e.position().x()
-            self._drag_value = self._value
-            self.pressed.emit()
-
-    def mouseMoveEvent(self, e):
-        if self._drag_x is None:
-            return
-        v = self._drag_value - (e.position().x() - self._drag_x) / self.PX_PER_UNIT
-        self.setValue(self._snap(v), emit=True)
-
-    def mouseReleaseEvent(self, e):
-        if self._drag_x is not None and e.button() == Qt.MouseButton.LeftButton:
-            self._drag_x = None
-            self.released.emit()
-
-    def mouseDoubleClickEvent(self, e):
-        self.pressed.emit()
-        self.setValue(0, emit=True)
-        self.released.emit()
-
-    def _step(self, delta: int):
-        self.pressed.emit()
-        self.setValue(self._value + delta, emit=True)
-        self.released.emit()
-
-    def wheelEvent(self, e):
-        steps = e.angleDelta().y() / 120.0 or e.angleDelta().x() / 120.0
-        if steps:
-            big = e.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            self._step(int(round(steps * (10 if big else 1))))
-        e.accept()
-
-    def keyPressEvent(self, e):
-        step = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
-        if e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Down):
-            self._step(-step)
-        elif e.key() in (Qt.Key.Key_Right, Qt.Key.Key_Up):
-            self._step(step)
-        elif e.key() == Qt.Key.Key_0:
-            self._step(-self._value)
-        else:
-            super().keyPressEvent(e)

@@ -2486,7 +2486,9 @@ class PhotoViewer(QMainWindow):
         if hasattr(self, "floating_menu") and self.floating_menu is not None:
             self.floating_menu.setEnabled(False)
         self.whats_new_overlay = WhatsNewOverlay(
-            self, title, entries, t["close_label"], t["whats_new_empty"], self._on_whats_new_closed
+            self, title, entries, t["close_label"], t["whats_new_empty"], self._on_whats_new_closed,
+            section_titles={"new": t["whats_new_section_new"], "changed": t["whats_new_section_changed"],
+                            "fixed": t["whats_new_section_fixed"]},
         )
         self.whats_new_overlay.open_overlay()
 

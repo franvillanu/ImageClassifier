@@ -40,6 +40,21 @@ def get_today_date() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
+def split_points(text: str) -> list[str]:
+    """A note may list several points separated by ' • ' (same rule as the app)."""
+    return [part.strip() for part in text.split("•") if part.strip()]
+
+
+SECTIONS = (("new", "New features", "Nuevas funciones"), ("changed", "Changes", "Cambios"),
+            ("fixed", "Fixes", "Correcciones"))
+
+
+def split_section(point: str) -> tuple[str, str]:
+    """('new'|'changed'|'fixed'|'', text) from a point that may start with a section tag."""
+    match = re.match(r"^(new|changed|fixed)\s*:\s*", point, re.IGNORECASE)
+    return (match.group(1).lower(), point[match.end():].strip()) if match else ("", point)
+
+
 def get_user_release_notes(version: str) -> list[tuple[str, str]]:
     """
     Get user-facing release note (EN, ES) for this version from docs/release_notes.txt.
@@ -54,6 +69,9 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
             continue
         parts = line.split("|", 2)
         if len(parts) >= 3 and parts[0].strip() == version:
+            en, es = split_points(parts[1]), split_points(parts[2])
+            if len(en) == len(es) and en:
+                return list(zip(en, es))  # one list item per point
             return [(parts[1].strip(), parts[2].strip())]
     raise SystemExit(
         f"[ERROR] Missing customer-facing release notes for v{version} in "
@@ -61,24 +79,36 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
     )
 
 
+def _items(entries: list[tuple[str, str]]) -> str:
+    return "\n".join(
+        f'        <li data-en="{en}"\n'
+        f'            data-es="{es}">\n'
+        f'          {en}\n'
+        f'        </li>'
+        for en, es in entries
+    )
+
+
 def create_version_block(version: str, date: str, entries: list[tuple[str, str]]) -> str:
-    """Create HTML for a version block."""
-    items = []
-    for en, es in entries:
-        items.append(
-            f'        <li data-en="{en}"\n'
-            f'            data-es="{es}">\n'
-            f'          {en}\n'
-            f'        </li>'
-        )
-    items_html = "\n".join(items)
+    """Create HTML for a version block, grouped into New features / Changes / Fixes when tagged."""
+    tagged = [(split_section(en), split_section(es)[1]) for en, es in entries]
+    groups = []
+    if any(kind for (kind, _), _ in tagged):
+        for kind, title_en, title_es in SECTIONS + (("", "Changes", "Cambios"),):
+            items = [(en, es) for (k, en), es in tagged if k == kind]
+            if items:
+                groups.append((title_en, title_es, items))
+    else:
+        groups.append(("Changes", "Cambios", entries))
+    blocks = "\n".join(
+        f'      <p class="desc" data-en="{title_en}:" data-es="{title_es}:">{title_en}:</p>\n'
+        f'      <ul>\n{_items(items)}\n      </ul>'
+        for title_en, title_es, items in groups
+    )
     return f"""    <div class="version-block">
       <h2>v{version}</h2>
       <h3>{date}</h3>
-      <p class="desc" data-en="Changes:" data-es="Cambios:">Changes:</p>
-      <ul>
-{items_html}
-      </ul>
+{blocks}
     </div>
 
 """
