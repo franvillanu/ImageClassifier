@@ -28,3 +28,19 @@
 - [docs/guides/GIT-PROTOCOL.md](docs/guides/GIT-PROTOCOL.md) - Complete git protocol
 - `.cursor/rules/git-branch-gate.mdc` - Branch creation rules
 - `.cursor/rules/git-commit-push-gate.mdc` - Commit/push rules
+
+## Release notes (MANDATORY)
+
+The release script (`.vscode/pr_create_merge_update.ps1` → `Release.bat`) bumps the version automatically but **stops if `docs/release_notes.txt` has no entry for the new version**. Customers see those notes in the app, so they are written by hand.
+
+**Before telling the user to run the merge script:**
+
+1. Work out the next version: the latest published version + 1 patch (the script bumps it itself; do not edit `version.txt`, `pyproject.toml`, `package.json` or `__init__.py`).
+2. Add one line at the top of `docs/release_notes.txt`, after the `#` comments: `X.Y.Z|English|Español|YYYY-MM-DD`. Separate points with ` • ` and start each with `new:`, `changed:` or `fixed:` (same tags in both languages). Customer-facing only, no internal changes.
+3. Commit and push it on the working branch together with the changes.
+
+Do not ask the user whether to add the note: just add it.
+
+## One branch per session (MANDATORY)
+
+Use a single branch for all changes in a session. Never create extra branches or switch branches without telling the user which one they are on: they test by relaunching the app from the checked-out branch.
