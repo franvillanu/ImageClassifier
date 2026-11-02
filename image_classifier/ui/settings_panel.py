@@ -16,20 +16,21 @@ from image_classifier.ui.widgets import OverlayComboBox
 ACCENT = "#2a77c6"
 PANEL_WIDTH = 360
 
-SWITCH_ON = "#2fa36b"
+SWITCH_ON = "#3498DB"  # the app's own blue (as the old checkboxes)
 SEGMENT_ON = "#4a4f58"
 
 # Every rule is scoped with #SettingsContainer so it beats the app-wide `QWidget { background: black }`
 STYLE = f"""
     QWidget#SettingsContainer {{
-        background-color: #17181a; border: 1px solid #4a4f58; border-radius: 12px;
+        background-color: #17181a; border: 1px solid #3d4047; border-radius: 12px;
     }}
     #SettingsContainer QWidget {{ background: transparent; }}
     #SettingsContainer QLabel {{ color: #e8eaed; font-size: 14px; border: none; padding: 0; }}
     #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
     #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 11px; font-weight: bold; }}
-    #SettingsContainer QFrame#rule {{ background-color: #3a3e45; border: none; }}
-    #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #202226; border-radius: 8px; }}
+    #SettingsContainer QFrame#rule {{ background-color: #2c3036; border: none; }}
+    #SettingsContainer QWidget#Card {{ background-color: #1e2024; border: 1px solid #2c3036; border-radius: 10px; }}
+    #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #25282d; }}
     #SettingsContainer QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
     #SettingsContainer QScrollBar::handle:vertical {{ background: #3a3e45; border-radius: 4px; min-height: 28px; }}
     #SettingsContainer QScrollBar::handle:vertical:hover {{ background: #4d525a; }}
@@ -98,7 +99,7 @@ class ToggleRow(QWidget):
         self.setMinimumHeight(44)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 0, 10, 0)
+        row.setContentsMargins(14, 0, 12, 0)
         row.setSpacing(12)
         text = QLabel(label, self)
         text.setWordWrap(True)
@@ -183,12 +184,12 @@ class SettingsPanel(QWidget):
         # Never grow wider than the viewport (that would clip the switches under the scrollbar)
         self.body.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.body_layout = QVBoxLayout(self.body)
-        self.body_layout.setContentsMargins(8, 4, 8, 12)
+        self.body_layout.setContentsMargins(12, 0, 12, 14)
         self.body_layout.setSpacing(0)
         for group_title, rows in toggle_groups:
             self.add_group_title(group_title)
             for label, checked, callback in rows:
-                self.body_layout.addWidget(ToggleRow(label, checked, callback, self.body))
+                self._add(ToggleRow(label, checked, callback, self._card_widget))
 
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -216,34 +217,44 @@ class SettingsPanel(QWidget):
 
     # -- body builders ---------------------------------------------------
     def add_group_title(self, text):
+        """Start a new group: a small caption, then a rounded card that the next rows go into."""
         label = QLabel(text.upper(), self.body)
         label.setObjectName("groupTitle")
-        label.setContentsMargins(10, 14, 10, 6)
+        label.setContentsMargins(6, 16, 6, 6)
         self.body_layout.addWidget(label)
+        self._card_widget = QWidget(self.body)
+        self._card_widget.setObjectName("Card")
+        self._card_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._card = QVBoxLayout(self._card_widget)
+        self._card.setContentsMargins(0, 0, 0, 0)
+        self._card.setSpacing(0)
+        self.body_layout.addWidget(self._card_widget)
 
-    def add_row(self, widget):
-        self.body_layout.addWidget(widget)
+    def _add(self, widget):
+        if self._card.count():  # thin divider between the rows of a card
+            self._card.addWidget(_rule(self._card_widget))
+        self._card.addWidget(widget)
 
     def add_control(self, widget):
-        """A full-width control (segmented row, combo box) with side margins to line up with the rows."""
-        holder = QWidget(self.body)
+        """A full-width control (segmented row, combo box) inside the current card."""
+        holder = QWidget(self._card_widget)
         row = QHBoxLayout(holder)
-        row.setContentsMargins(10, 3, 10, 3)
+        row.setContentsMargins(10, 8, 10, 8)
         row.addWidget(widget)
-        self.body_layout.addWidget(holder)
+        self._add(holder)
 
     def add_action_row(self, text, button_text, on_click):
-        holder = QWidget(self.body)
-        holder.setMinimumHeight(48)
+        holder = QWidget(self._card_widget)
+        holder.setMinimumHeight(52)
         row = QHBoxLayout(holder)
-        row.setContentsMargins(10, 0, 10, 0)
+        row.setContentsMargins(14, 0, 10, 0)
         label = QLabel(text, holder)
         button = QPushButton(button_text, holder)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(on_click)
         row.addWidget(label, 1)
         row.addWidget(button)
-        self.body_layout.addWidget(holder)
+        self._add(holder)
         return label, button
 
     def finish(self):
