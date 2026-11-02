@@ -223,3 +223,38 @@ def test_preloads_follow_direction_and_cancel_stale_work(viewer_window, tmp_path
     viewer_window._schedule_preloads()
     assert set(viewer_window._preload_inflight) <= {files[2], files[4], files[1]}
     assert forward_two.cancelled
+
+
+def test_held_arrow_key_advances_only_after_the_photo_is_shown(viewer_window, tmp_path):
+    _make_photos(tmp_path, 12)
+    viewer = _open(viewer_window, tmp_path)
+    ImageLoaderRunnable._preview_cache.clear()
+    ImageLoaderRunnable._full_cache.clear()
+    start = viewer_window.current_index
+
+    shown_ids = set()
+    deadline = time.monotonic() + 0.6
+    while time.monotonic() < deadline:  # ~30 key repeats per second
+        viewer_window.show_next_image()
+        QApplication.instance().processEvents()
+        if viewer._shown_load_id == viewer.current_load_id:
+            shown_ids.add(viewer.current_load_id)
+        time.sleep(0.033)
+
+    advanced = viewer_window.current_index - start
+    assert advanced >= 2
+    # Rate is capped well below the raw repeat rate (18 events fit in 0.6 s).
+    assert advanced <= 0.6 / viewer_window.NAV_MIN_INTERVAL + 1
+    # Every photo passed was drawn (the in-flight one may still be loading).
+    assert len(shown_ids) >= advanced - 1
+
+
+def test_separate_key_presses_are_never_dropped(viewer_window, tmp_path):
+    _make_photos(tmp_path, 6)
+    _open(viewer_window, tmp_path)
+    start = viewer_window.current_index
+    for _ in range(3):
+        viewer_window.show_next_image()
+        QApplication.instance().processEvents()
+        time.sleep(viewer_window.NAV_REPEAT_GAP + 0.05)
+    assert viewer_window.current_index == start + 3

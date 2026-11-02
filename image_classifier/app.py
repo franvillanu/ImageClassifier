@@ -1,4 +1,5 @@
 import sys
+import time
 import traceback
 import datetime
 import os
@@ -179,6 +180,8 @@ class PhotoViewer(QMainWindow):
         self._preload_inflight = {}
         self._preload_token = 0
         self._nav_direction = 1
+        self._last_nav_attempt = 0.0
+        self._last_nav_advance = 0.0
         self._marked_save_timer = QTimer(self)
         self._marked_save_timer.setSingleShot(True)
         self._marked_save_timer.setInterval(250)
@@ -2735,7 +2738,30 @@ class PhotoViewer(QMainWindow):
         else:
             self.filename_label.hide()
 
+    # Held arrow key: a repeat only advances once the current photo is on screen,
+    # at most ~14 photos/s, so every photo passed is actually drawn.
+    NAV_REPEAT_GAP = 0.12       # key events closer than this count as a held key
+    NAV_MIN_INTERVAL = 0.07
+    NAV_STUCK_TIMEOUT = 1.5     # never block longer than this if a load never finishes
+
+    def _nav_step_allowed(self):
+        now = time.monotonic()
+        repeating = now - self._last_nav_attempt < self.NAV_REPEAT_GAP
+        self._last_nav_attempt = now
+        if repeating:
+            since_advance = now - self._last_nav_advance
+            viewer = self.image_viewer
+            shown = viewer._shown_load_id == viewer.current_load_id
+            if since_advance < self.NAV_MIN_INTERVAL:
+                return False
+            if not shown and since_advance < self.NAV_STUCK_TIMEOUT:
+                return False
+        self._last_nav_advance = now
+        return True
+
     def show_next_image(self):
+        if not self._nav_step_allowed():
+            return
         if self.unsaved_crop is not None:
             # If there are unsaved crop modifications, warn the user.
             if not self.prompt_unsaved_crop_warning():
@@ -2756,6 +2782,8 @@ class PhotoViewer(QMainWindow):
         self.show_image()
         
     def show_previous_image(self):
+        if not self._nav_step_allowed():
+            return
         if self.unsaved_crop is not None:
             if not self.prompt_unsaved_crop_warning():
                 return
