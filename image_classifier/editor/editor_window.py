@@ -29,6 +29,7 @@ from image_classifier.editor import geometry as g
 from image_classifier.editor import icons
 from image_classifier.editor.adjust_canvas import AdjustCanvas
 from image_classifier.editor.auto_enhance import estimate as estimate_enhancement
+from image_classifier.ui.scaling import ui_scale
 from image_classifier.editor.auto_straighten import estimate_angle
 from image_classifier.editor.crop_canvas import CropCanvas, build_levels
 from image_classifier.editor.history import EditHistory
@@ -94,7 +95,7 @@ class _Modal(QFrame):
         self._loop = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        s = max(1.0, min(1.5, parent.width() / 1400))  # never tiny on a large window
+        s = ui_scale(parent)  # the same gentle, screen-based scale as the other pop-ups
 
         def px(v):
             return f"{round(v * s)}px"
