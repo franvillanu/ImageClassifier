@@ -54,7 +54,6 @@ def _clear_icon() -> QIcon:
 def add_clear_button(line_edit: QLineEdit, tooltip: str = "") -> QAction:
     """A round x at the right end of the field, shown only while there is text."""
     action = QAction(_clear_icon(), tooltip, line_edit)
-    action.setVisible(bool(line_edit.text()))
 
     def clear():
         line_edit.clear()
@@ -63,4 +62,28 @@ def add_clear_button(line_edit: QLineEdit, tooltip: str = "") -> QAction:
     action.triggered.connect(clear)
     line_edit.textChanged.connect(lambda text: action.setVisible(bool(text)))
     line_edit.addAction(action, QLineEdit.ActionPosition.TrailingPosition)
+    action.setVisible(bool(line_edit.text()))  # adding an action shows it, so hide it again when empty
+    return action
+
+
+def _search_icon() -> QIcon:
+    size = 32
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor("#9aa1ab"))
+    pen.setWidth(3)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.drawEllipse(5, 5, 15, 15)
+    painter.drawLine(18, 18, 26, 26)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def add_search_icon(line_edit: QLineEdit) -> QAction:
+    """A magnifier at the left end of the field."""
+    action = QAction(_search_icon(), "", line_edit)
+    line_edit.addAction(action, QLineEdit.ActionPosition.LeadingPosition)
     return action

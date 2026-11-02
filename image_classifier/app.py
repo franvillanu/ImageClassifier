@@ -52,6 +52,7 @@ from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from image_classifier.ui.crop_overlay import CropOverlay
 from image_classifier.ui.settings_panel import Segmented, SettingsPanel
 from image_classifier.ui.scaling import scale_css, ui_scale
+from image_classifier.ui.help_panel import HELP_STYLE, HelpContent
 from image_classifier.ui.search_field import add_clear_button, matches as shortcut_matches
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
 from image_classifier.updates.notes import (
@@ -836,45 +837,10 @@ class PhotoViewer(QMainWindow):
         container = DraggableContainer(self.help_overlay)
         container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         container.setObjectName("HelpContainer")
-        container.setStyleSheet(scale_css("""
-            QWidget#HelpContainer {
-                background-color: #17181a;
-                border-radius: 12px;
-                border: 1px solid #3d4047;
-            }
-            QLabel {
-                background-color: transparent;
-                color: #fff;
-            }
-            #HelpContainer QTabWidget, #HelpContainer QTabBar, #HelpContainer QStackedWidget,
-            #HelpContainer QStackedWidget > QWidget, #HelpContainer QScrollArea,
-            #HelpContainer QScrollArea > QWidget, #HelpContainer QScrollArea > QWidget > QWidget,
-            #HelpContainer QScrollArea > QWidget > QWidget > QWidget {
-                background: transparent;
-                border: none;
-            }
-            #HelpContainer QLineEdit {
-                background-color: #0f1012;
-                border: 1px solid #3a3e45;
-            }
-            QTabWidget::pane {
-                border: none;
-            }
-            QTabBar::tab {
-                background-color: #333333;
-                border-radius: 8px;
-                padding: 10px 15px;
-                margin: 2px;
-                font-size: 16px;
-                color: white;
-            }
-            QTabBar::tab:selected {
-                background-color: #0056b3;
-            }
-        """, S))
+        container.setStyleSheet(scale_css(HELP_STYLE, S))
 
         # Instead of forcing a fixed size, set an initial size and use size policies.
-        container.resize(round(1025 * S), round(1000 * S))
+        container.resize(round(920 * S), round(1000 * S))
         container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         container.show()
         container.adjustSize()
@@ -893,143 +859,13 @@ class PhotoViewer(QMainWindow):
         y = 40
         container.move(x, y)
 
-        # Set up the main layout inside the container.
-        main_layout = QVBoxLayout(container)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
-
-        # Create a single-tab QTabWidget containing only the "Shortcuts" tab.
-        tab_widget = QTabWidget(container)
-        main_layout.addWidget(tab_widget)
-
-        # Shortcuts tab – build the content.
-        shortcuts_tab = QWidget()
-        shortcuts_tab_layout = QVBoxLayout(shortcuts_tab)
-        shortcuts_tab_layout.setContentsMargins(10, 10, 10, 10)
-        shortcuts_tab_layout.setSpacing(12)
-
-        # --- Search Row ---
-        search_row = QHBoxLayout()
-        search_label = QLabel(t["help_search_label"])  # e.g., "🔍 Search Shortcuts:"
-        search_label.setStyleSheet(scale_css("font-size: 18px; font-weight: bold; margin-right: 1px;", S))
-        self.shortcuts_search_line = QLineEdit()
-        self.shortcuts_search_line.setPlaceholderText(t["help_search_placeholder"])
-        self.shortcuts_search_line.setStyleSheet(scale_css("""
-            QLineEdit {
-                background-color: #1E1E1E;
-                color: #FFFFFF;
-                font-size: 16px;
-                padding: 6px;
-                border: 1px solid #444444;
-                border-radius: 6px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #666666;
-            }
-        """, S))
-        self.shortcuts_search_line.setFixedHeight(round(36 * S))
-        add_clear_button(self.shortcuts_search_line, "Clear" if self.current_language == "en" else "Borrar")
-        search_row.addWidget(search_label, 0, alignment=Qt.AlignmentFlag.AlignVCenter)
-        search_row.addWidget(self.shortcuts_search_line, 1)
-        shortcuts_tab_layout.addLayout(search_row)
-
-        # --- Scroll Area for the Shortcut Categories ---
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet(scale_css("""
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 0;
-                border: none;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #3a3e45;
-                min-height: 20px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #4d525a;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {
-                height: 0;
-                background: none;
-            }
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """, S))
-        shortcuts_tab_layout.addWidget(scroll_area, 1)
-
-        cat_container = QWidget()
-        cat_layout = QVBoxLayout(cat_container)
-        cat_layout.setContentsMargins(0, 0, 0, 0)
-        cat_layout.setSpacing(20)
-
-        # Clear out the previous shortcut rows list.
-        self.shortcut_rows = []
-
-        # Build the categories.
-        for category_name, items in SHORTCUT_CATEGORIES:
-            cat_label = QLabel(category_name)
-            cat_label.setStyleSheet(scale_css("""
-                font-size: 18px;
-                font-weight: bold;
-                color: #3399ff;
-                border-bottom: 1px solid #777;
-                margin-bottom: 4px;
-                padding-bottom: 8px;
-            """, S))
-            cat_layout.addWidget(cat_label)
-            for (k, desc) in items:
-                row_widget = QWidget()
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(0, round(4 * S), 0, round(4 * S))
-                row_layout.setSpacing(12)
-                key_label = QLabel(k)
-                key_label.setStyleSheet(scale_css("font-size: 17px; font-weight: bold;", S))
-                key_label.setFixedWidth(round(130 * S))
-                desc_label = QLabel(desc)
-                desc_label.setStyleSheet(scale_css("font-size: 18px;", S))
-                desc_label.setWordWrap(False)
-                row_layout.addWidget(key_label, 0, alignment=Qt.AlignmentFlag.AlignLeft)
-                row_layout.addWidget(desc_label, 1, alignment=Qt.AlignmentFlag.AlignLeft)
-                cat_layout.addWidget(row_widget)
-                # Store each row for search filtering.
-                self.shortcut_rows.append({
-                    "row_widget": row_widget,
-                    "key_orig": k,
-                    "desc_orig": desc,
-                    "category_orig": category_name,
-                    "key_label": key_label,
-                    "desc_label": desc_label,
-                })
-
-        cat_layout.addStretch()
-        scroll_area.setWidget(cat_container)
-
-        # Add the shortcuts tab to the tab widget.
-        tab_widget.addTab(shortcuts_tab, t["shortcuts_title"])
-
-        # --- Close Button ---
-        close_button = QPushButton(t["close_label"], container)
-        close_button.setStyleSheet(scale_css("""
-            QPushButton {
-                background-color: #DC3545;
-                color: white;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #B22222;
-            }
-        """, S))
-        main_layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignCenter)
-        close_button.clicked.connect(self.close_help_overlay)
+        # Header, search field and the category list
+        content = HelpContent(
+            container, t["help_title"], t["help_search_placeholder"], t["help_no_results"],
+            SHORTCUT_CATEGORIES, S, self.close_help_overlay,
+        )
+        self.shortcuts_search_line = content.search_line
+        self.shortcut_rows = content.rows
 
         # Finally, show and raise the overlay.
         container.show()
@@ -1038,24 +874,6 @@ class PhotoViewer(QMainWindow):
 
         # Ensure the search bar gets focus immediately.
         QTimer.singleShot(0, lambda: self.shortcuts_search_line.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
-
-        # --- Improved Search Behavior ---
-        import re
-
-        def strip_html_and_asterisk(raw_text: str) -> str:
-            # Remove any HTML tags
-            text_no_tags = re.sub(r'<[^>]*>', '', raw_text)
-            # Remove literal asterisks and extra whitespace
-            return text_no_tags.replace('*', '').strip()
-
-        def on_shortcuts_search_changed(text):
-            for row_info in self.shortcut_rows:
-                key_clean = strip_html_and_asterisk(row_info["key_orig"])
-                desc_clean = strip_html_and_asterisk(row_info["desc_orig"])
-                row_info["row_widget"].setVisible(shortcut_matches(text, key_clean, desc_clean))
-
-        self.shortcuts_search_line.textChanged.connect(on_shortcuts_search_changed)
-
 
         # --- Clicking Outside the Container Closes the Overlay ---
         def overlay_mousePressEvent(event):

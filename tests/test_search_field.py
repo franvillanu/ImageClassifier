@@ -21,3 +21,13 @@ def test_single_character_matches_only_the_key_and_empty_matches_all():
 def test_every_word_must_match():
     assert matches("guarda imagen", "Ctrl+S", "Guarda las modificaciones en la imagen actual")
     assert not matches("guarda zoom", "Ctrl+S", "Guarda las modificaciones en la imagen actual")
+
+
+def test_key_strings_become_keycaps():
+    from image_classifier.ui.help_panel import parse_keys
+
+    assert parse_keys("Ctrl+Shift+C") == (["Ctrl", "Shift", "C"], False)
+    assert parse_keys("F<span style='color: #E74C3C;'>*</span>") == (["F"], True)
+    assert parse_keys("Shift+⬆️<span style='color: #E74C3C;'>*</span>") == (["Shift", "↑"], True)
+    assert parse_keys("⬅️➡️") == (["←", "→"], False)
+    assert parse_keys("Mouse Wheel") == (["Mouse Wheel"], False)
