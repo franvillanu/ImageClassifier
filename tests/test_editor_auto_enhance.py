@@ -117,3 +117,46 @@ def test_clipped_highlights_are_pulled_back():
 def test_accepts_rgba():
     rgba = np.dstack([_scene(), np.full((300, 400), 255, np.uint8)])
     assert set(auto_enhance.estimate(rgba)) == set(auto_enhance.MANAGED)
+
+
+def _night():
+    """Mostly black with a few lit windows and a lamp: dark on purpose."""
+    img = np.full((300, 400, 3), 8, np.uint8)
+    img[40:70, 50:90] = (250, 220, 150)
+    img[120:150, 200:240] = (255, 235, 180)
+    img[200:215, 320:350] = (240, 240, 230)
+    return img
+
+
+def test_night_scene_keeps_its_mood():
+    est = auto_enhance.estimate(_night())
+    assert est["brightness"] <= 15 and est["shadows"] <= 15, est
+
+
+def test_backlit_scene_lifts_shadows_not_brightness():
+    img = np.full((300, 400, 3), 238, np.uint8)  # bright sky
+    img[140:] = (45, 32, 26)  # dark foreground in silhouette
+    est = auto_enhance.estimate(img)
+    assert est["shadows"] > 15 and est["brightness"] <= 15, est
+
+
+def test_dark_face_is_lifted_and_skin_is_not_oversaturated():
+    img = np.full((300, 400, 3), 235, np.uint8)
+    img[80:240, 120:280] = (95, 62, 48)  # a face in shade
+    est = auto_enhance.estimate(img)
+    assert est["shadows"] > 10 and est["saturation"] <= 6, est
+
+
+def test_green_cast_gets_tint_and_neutral_photo_none():
+    scene = _scene().astype(np.float32)
+    green = np.clip(scene * [0.88, 1.15, 0.88], 0, 255).astype(np.uint8)
+    assert auto_enhance.estimate(green)["tint"] > 0
+    assert auto_enhance.estimate(_scene())["tint"] == 0
+
+
+def test_enhancing_twice_does_not_keep_pushing():
+    for img in (_scene(), (_scene() * 0.7).astype(np.uint8), _drawing(), _night()):
+        first = auto_enhance.estimate(img)
+        fixed = apply_adjustments(img, Adjustments(**first))
+        second = auto_enhance.estimate(fixed)
+        assert all(abs(v) <= 12 for v in second.values()), (first, second)

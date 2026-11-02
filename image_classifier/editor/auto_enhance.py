@@ -11,6 +11,18 @@ never darkened just for being light. A drawing on white paper, snow or a beach
 are meant to be bright; pulling their average towards middle grey only makes
 them murky. Light is taken back only where the photo is actually blown out,
 and then with Highlights, which leaves the rest of the photo alone.
+
+Beyond global levels it reads the scene the way a retoucher does:
+
+* low-key photos (night, stage, candlelight: mostly deep black with real lights in them) keep
+  their mood, so only a fraction of the usual midtone lift is applied;
+* backlit or high-contrast scenes (a dark foreground under a bright sky) get Shadows lifted
+  instead of a global brightening that would burn out the sky;
+* skin is metered separately: a dark face lifts Shadows, and skin-heavy photos are never
+  pushed to more saturation;
+* the light's colour is corrected on both axes (warm/cool and green/magenta) from the photo's
+  whites only, so coloured subjects keep their colour;
+* a harshly lit scene with both ends nearly clipped gets a little less contrast.
 """
 from __future__ import annotations
 
@@ -22,7 +34,7 @@ from image_classifier.editor import adjust
 ANALYSIS_SIDE = 512
 WHITE = 0.96  # display level the brightest detail (99.5th percentile) is lifted to
 MIDTONE = 0.42  # display level a dark-looking photo's median is opened up towards
-MANAGED = ("exposure", "brightness", "contrast", "highlights", "shadows", "saturation", "warmth")
+MANAGED = ("exposure", "brightness", "contrast", "highlights", "shadows", "saturation", "warmth", "tint")
 
 
 def _to_linear(x):
@@ -38,31 +50,34 @@ def _clamp(v: float, lo: float, hi: float) -> int:
     return int(round(max(lo, min(hi, v))))
 
 
-def _warmth(lin: np.ndarray, tone: np.ndarray, sat: np.ndarray) -> int:
-    """White balance from the photo's whites (paper, clouds, walls); none if it has no whites.
+def _white_balance(lin: np.ndarray, tone: np.ndarray, sat: np.ndarray) -> tuple[int, int]:
+    """(warmth, tint) from the photo's whites (paper, clouds, walls); (0, 0) if it has no whites.
 
     The average colour is no guide: grass, sky or a sunset are coloured on purpose.
     """
     lit = (tone > 0.5) & (tone < 0.985)
     if lit.mean() < 0.02 or float(sat.mean()) < 0.04:  # a grey photo has no cast worth correcting
-        return 0
+        return 0, 0
     # Paper or a white wall is only tinted by the light: lamps can make it quite orange (~0.35), but
     # anything bluer than a faint tint is more likely a sky than a white.
     warm = lin[..., 0] >= lin[..., 2]
     whites = lit & (tone >= np.percentile(tone[lit], 60)) & (sat < np.where(warm, 0.4, 0.18))
     if whites.mean() < 0.02:
-        return 0
+        return 0, 0
     # A cast tints every white alike, so the most neutral of them still shows it, while pale
     # coloured objects (a yellow shirt) drop out.
     whites &= sat <= np.percentile(sat[whites], 30)
-    r = float(lin[..., 0][whites].mean())
-    b = float(lin[..., 2][whites].mean())
+    r, g, b = (float(lin[..., c][whites].mean()) for c in range(3))
+    warmth = tint = 0
     target = b / r  # want (1 + k w) r == (1 - k w) b
-    if abs(target - 1.0) <= 0.06:
-        return 0
-    k = adjust.WARMTH_GAIN
-    w_full = (target - 1.0) / (k * (target + 1.0))
-    return _clamp(0.6 * w_full * 100, -25, 25)  # part of the way: warm light is often the point
+    if abs(target - 1.0) > 0.06:
+        k = adjust.WARMTH_GAIN
+        w_full = (target - 1.0) / (k * (target + 1.0))
+        warmth = _clamp(0.6 * w_full * 100, -25, 25)  # part of the way: warm light is often the point
+    magenta = 0.5 * (r + b) / g  # want (1 - k t) g == mean(r, b): above 1 means too little green
+    if abs(magenta - 1.0) > 0.06:
+        tint = _clamp(0.5 * (1.0 - magenta) / adjust.TINT_GAIN * 100, -20, 20)
+    return warmth, tint
 
 
 def estimate(image: np.ndarray) -> dict[str, int]:
@@ -76,6 +91,14 @@ def estimate(image: np.ndarray) -> dict[str, int]:
     lum = lin @ adjust.LUMA
     shown = _to_srgb(lum)
     clipped = float(np.mean(shown > 0.98))
+    # Low-key: mostly deep black but with real lights in it. Dark on purpose, not underexposed.
+    low_key = float(np.mean(shown < 0.12)) >= 0.4 and float(np.percentile(shown, 99.5)) >= 0.8
+    # Backlit: a big dark area under a bright one. Brightening would burn the bright part; Shadows
+    # (below) recovers the dark part instead.
+    backlit = float(np.mean(shown > 0.7)) >= 0.1 and float(np.mean(shown < 0.15)) >= 0.3
+    sat = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)[..., 1].astype(np.float32) / 255.0
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb)
+    skin = (ycc[..., 1] >= 135) & (ycc[..., 1] <= 173) & (ycc[..., 2] >= 77) & (ycc[..., 2] <= 127) & (sat >= 0.18)
 
     # Exposure = white point: lift the brightest detail up to near white. Never negative.
     exposure = 0
@@ -93,7 +116,7 @@ def estimate(image: np.ndarray) -> dict[str, int]:
     if 0.02 < median < MIDTONE - 0.04:
         target = median + 0.7 * (MIDTONE - median)
         b = 2.0 * (1.0 - np.log(target) / np.log(median))
-        brightness = _clamp(100 * b, 0, 45)
+        brightness = _clamp(100 * b, 0, 12 if low_key or backlit else 45)  # dark on purpose: a nudge at most
         tone = np.power(tone, adjust.brightness_gamma(brightness / 100))
         median = float(np.median(tone))
 
@@ -106,14 +129,26 @@ def estimate(image: np.ndarray) -> dict[str, int]:
     if median > 0.3 and (median < 0.85 or p5 < 0.6):
         contrast = max(_clamp((0.78 - spread) * 90, 0, 30), _clamp((float(p1) - 0.06) * 120, 0, 25))
 
+    if contrast == 0 and spread > 0.88 and p1 < 0.03:  # harsh light: both ends already close to clipping
+        contrast = -_clamp((spread - 0.88) * 150, 0, 15)
+
     # Highlights only where the photo is blown out; Shadows only where it is crushed to black.
     highlights = -_clamp(clipped * 300 + max(0.0, float(np.percentile(shown, 98)) - 0.97) * 400, 0, 60) \
         if clipped >= 0.02 else 0
     crushed = float(np.mean(tone < 0.03))
     shadows = _clamp(crushed * 500 + max(0.0, 0.06 - float(np.percentile(tone, 2))) * 300, 0, 50)
+    # Backlit / high contrast: a big dark area next to a bright one is detail to recover with
+    # Shadows, not something to fix by brightening everything (which would burn the bright part).
+    if float(np.mean(tone > 0.7)) >= 0.1:
+        deep = float(np.mean(tone < 0.15))
+        shadows = max(shadows, _clamp((deep - 0.15) * 150 * (0.4 if low_key else 1.0), 0, 40))
+    # Skin is the eye's reference: a dark face is lifted whatever the rest of the photo does.
+    skin_share = float(skin.mean())
+    if skin_share >= 0.05:
+        skin_tone = float(np.median(tone[skin]))
+        shadows = max(shadows, _clamp((0.5 - skin_tone) * 150, 0, 40))
 
     # Colour: lift dull colour a little, calm very loud colour, and neutralise the light.
-    sat = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)[..., 1].astype(np.float32) / 255.0
     lit = (tone > 0.08) & (tone < 0.92)  # ignore near-black / near-white pixels
     mean_sat = float(sat[lit].mean()) if lit.any() else float(sat.mean())
     if lit.mean() < 0.05 or mean_sat < 0.06:  # no colour to lift, only noise
@@ -124,6 +159,9 @@ def estimate(image: np.ndarray) -> dict[str, int]:
         saturation = -_clamp((mean_sat - 0.6) * 60, 0, 15)
     else:
         saturation = 0
+    if skin_share >= 0.08:  # portraits: never push skin towards orange
+        saturation = min(saturation, 6)
 
+    warmth, tint = _white_balance(lin, tone, sat)
     return {"exposure": exposure, "brightness": brightness, "contrast": contrast, "highlights": highlights,
-            "shadows": shadows, "saturation": saturation, "warmth": _warmth(lin, tone, sat)}
+            "shadows": shadows, "saturation": saturation, "warmth": warmth, "tint": tint}
