@@ -32,8 +32,8 @@ class WhatsNewOverlay(QWidget):
         self.card.setObjectName("WhatsNewCard")
         self.card.setStyleSheet("""
             QWidget#WhatsNewCard {
-                background-color: #14161c; border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 40);
+                background-color: #17181a; border-radius: 12px;
+                border: 1px solid #3d4047;
             }
             QLabel { background: transparent; color: white; font-size: 15px; }
             QLabel#title { font-size: 21px; font-weight: bold; }
@@ -47,10 +47,12 @@ class WhatsNewOverlay(QWidget):
             QLabel#dot { color: #8a8f98; font-size: 15px; font-weight: bold; }
             QLabel#section { font-size: 15px; font-weight: bold; }
             QFrame#divider { background-color: rgba(255, 255, 255, 60); border: none; }
-            QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
-            QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
-            QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 24px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
+            QScrollBar:vertical { background: transparent; border: none; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #3a3e45; border-radius: 4px; min-height: 28px; }
+            QScrollBar::handle:vertical:hover { background: #4d525a; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: transparent; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
             QPushButton {
                 background-color: #DC3545; color: white; border: none;
                 border-radius: 8px; padding: 8px 28px; font-size: 15px;

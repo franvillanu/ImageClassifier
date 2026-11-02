@@ -833,9 +833,9 @@ class PhotoViewer(QMainWindow):
         container.setObjectName("HelpContainer")
         container.setStyleSheet("""
             QWidget#HelpContainer {
-                background-color: rgba(0, 0, 0, 200);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
+                background-color: #17181a;
+                border-radius: 12px;
+                border: 1px solid #3d4047;
             }
             QLabel {
                 background-color: transparent;
@@ -1126,9 +1126,9 @@ class PhotoViewer(QMainWindow):
         container.setMinimumWidth(380)
         container.setStyleSheet("""
             QWidget#AboutContainer {
-                background-color: #14161c;
+                background-color: #17181a;
                 border-radius: 14px;
-                border: 1px solid rgba(255, 255, 255, 40);
+                border: 1px solid #3d4047;
             }
             QLabel { background-color: transparent; color: white; font-size: 15px; }
             QLabel#aboutAppName { font-size: 26px; font-weight: bold; }
@@ -2830,9 +2830,9 @@ class PhotoViewer(QMainWindow):
         container.setObjectName("ExportContainer")
         container.setStyleSheet("""
             QWidget#ExportContainer {
-                background-color: rgba(0, 0, 0, 200);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
+                background-color: #17181a;
+                border-radius: 12px;
+                border: 1px solid #3d4047;
             }
             QLabel {
                 background-color: rgba(50, 50, 50, 200);
@@ -3069,9 +3069,9 @@ class PhotoViewer(QMainWindow):
         container.setObjectName("BrightnessContainer")
         container.setStyleSheet("""
             QWidget#BrightnessContainer {
-                background-color: rgba(0, 0, 0, 200);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
+                background-color: #17181a;
+                border-radius: 12px;
+                border: 1px solid #3d4047;
             }
             QLabel { background-color: transparent; color: white; font-size: 16px; }
             QSlider { background-color: transparent; }
