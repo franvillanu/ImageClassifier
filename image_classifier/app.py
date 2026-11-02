@@ -697,7 +697,7 @@ class PhotoViewer(QMainWindow):
         Opens a Help overlay with only the Shortcuts section.
         Closes any open settings overlay.
         """
-        S = 1.0  # the Help pop-up keeps its fixed sizes (only the options panel scales)
+        S = ui_scale(self)
         # Close settings overlay if it is open
         if hasattr(self, "settings_overlay") and self.settings_overlay is not None:
             self.close_settings_overlay()

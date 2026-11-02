@@ -28,8 +28,8 @@ def test_common_screens_keep_the_written_sizes():
     assert ui_scale(FakeWidget(1440)) == 1.0
 
 
-def test_4k_screens_get_bigger_text_even_with_display_scaling():
-    assert 1.4 < ui_scale(FakeWidget(1193, 1.75)) < 1.5  # 3840x2088 at 175%
+def test_4k_screens_get_a_moderate_increase():
+    assert 1.15 < ui_scale(FakeWidget(1193, 1.75)) < 1.25  # 3840x2088 at 175%
     assert ui_scale(FakeWidget(4000, 2.0)) == MAX_SCALE
 
 
