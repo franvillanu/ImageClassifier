@@ -48,7 +48,7 @@ class WhatsNewOverlay(QWidget):
             QLabel#section { font-size: 15px; font-weight: bold; }
             QFrame#divider { background-color: rgba(255, 255, 255, 60); border: none; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
-            QScrollBar:vertical { background: transparent; width: 8px; }
+            QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
             QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 24px; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
             QPushButton {
@@ -73,7 +73,7 @@ class WhatsNewOverlay(QWidget):
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 8, 0)
+        body_layout.setContentsMargins(0, 0, 22, 0)
         body_layout.setSpacing(4)
         if not entries:
             empty = QLabel(empty_text, body)
@@ -174,7 +174,7 @@ class WhatsNewOverlay(QWidget):
         return row
 
     def _place_card(self):
-        width = min(620, max(320, self.width() - 80))
+        width = min(800, max(320, self.width() - 80))
         self.card.setFixedWidth(width)
         self._body.setFixedWidth(width - 26 * 2 - 8)
         content = self._body.layout().totalHeightForWidth(self._body.width())

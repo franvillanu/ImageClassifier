@@ -16,46 +16,49 @@ from image_classifier.ui.widgets import OverlayComboBox
 ACCENT = "#2a77c6"
 PANEL_WIDTH = 360
 
+SWITCH_ON = "#2fa36b"
+SEGMENT_ON = "#4a4f58"
+
+# Every rule is scoped with #SettingsContainer so it beats the app-wide `QWidget { background: black }`
 STYLE = f"""
     QWidget#SettingsContainer {{
-        background-color: #17181a; border: 1px solid #2a2d32; border-radius: 14px;
+        background-color: #17181a; border: 1px solid #4a4f58; border-radius: 14px;
     }}
-    QLabel {{ background: transparent; color: #e8eaed; font-size: 14px; border: none; padding: 0; }}
-    QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
-    QLabel#groupTitle {{ color: #9aa1ab; font-size: 11px; font-weight: bold; letter-spacing: 1px; }}
-    QLabel#hint {{ color: #9aa1ab; }}
-    QFrame#rule {{ background-color: #2a2d32; border: none; }}
-    QWidget#ToggleRow:hover {{ background-color: #202226; border-radius: 8px; }}
-    QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
-    QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
-    QScrollBar::handle:vertical {{ background: #3a3e45; border-radius: 4px; min-height: 28px; }}
-    QScrollBar::handle:vertical:hover {{ background: #4d525a; }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-    QPushButton {{
-        background-color: #3a3e45; color: white; border: none; border-radius: 8px;
-        font-size: 13px; font-weight: bold; min-height: 36px; padding: 0 14px;
+    #SettingsContainer QWidget {{ background: transparent; }}
+    #SettingsContainer QLabel {{ color: #e8eaed; font-size: 14px; border: none; padding: 0; }}
+    #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
+    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 11px; font-weight: bold; }}
+    #SettingsContainer QFrame#rule {{ background-color: #3a3e45; border: none; }}
+    #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #202226; border-radius: 8px; }}
+    #SettingsContainer QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+    #SettingsContainer QScrollBar::handle:vertical {{ background: #3a3e45; border-radius: 4px; min-height: 28px; }}
+    #SettingsContainer QScrollBar::handle:vertical:hover {{ background: #4d525a; }}
+    #SettingsContainer QScrollBar::add-line:vertical, #SettingsContainer QScrollBar::sub-line:vertical {{ height: 0; }}
+    #SettingsContainer QScrollBar::add-page:vertical, #SettingsContainer QScrollBar::sub-page:vertical {{ background: transparent; }}
+    #SettingsContainer QPushButton {{
+        background-color: #3a3e45; color: white; border: 1px solid #4a4f58; border-radius: 8px;
+        font-size: 13px; font-weight: bold; min-height: 34px; padding: 0 14px;
     }}
-    QPushButton:hover {{ background-color: #4d525a; }}
-    QPushButton#closeX {{ background: transparent; min-height: 36px; min-width: 36px; padding: 0; }}
-    QPushButton#closeX:hover {{ background-color: #3a3e45; }}
-    QPushButton#aboutBtn {{ background-color: {ACCENT}; min-height: 40px; }}
-    QPushButton#aboutBtn:hover {{ background-color: #3586dc; }}
-    QPushButton#helpBtn {{ background-color: #6b4fc4; min-height: 40px; }}
-    QPushButton#helpBtn:hover {{ background-color: #7b5fd6; }}
-    QWidget#Segmented {{ background-color: #0f1012; border-radius: 10px; }}
-    QWidget#Segmented QPushButton {{
-        background: transparent; color: #aab0b8; font-weight: normal; border-radius: 8px;
-        min-height: 34px; padding: 0 8px;
+    #SettingsContainer QPushButton:hover {{ background-color: #4d525a; }}
+    #SettingsContainer QPushButton#closeX {{ background: transparent; border: none; min-height: 36px; min-width: 36px; padding: 0; }}
+    #SettingsContainer QPushButton#closeX:hover {{ background-color: #3a3e45; }}
+    #SettingsContainer QPushButton#aboutBtn {{ background-color: {ACCENT}; border: none; min-height: 40px; }}
+    #SettingsContainer QPushButton#aboutBtn:hover {{ background-color: #3586dc; }}
+    #SettingsContainer QPushButton#helpBtn {{ background-color: #6b4fc4; border: none; min-height: 40px; }}
+    #SettingsContainer QPushButton#helpBtn:hover {{ background-color: #7b5fd6; }}
+    #SettingsContainer QWidget#Segmented {{ background-color: #0f1012; border: 1px solid #3a3e45; border-radius: 10px; }}
+    #SettingsContainer QWidget#Segmented QPushButton {{
+        background: transparent; border: none; color: #aab0b8; font-weight: normal; border-radius: 8px;
+        min-height: 32px; padding: 0 8px;
     }}
-    QWidget#Segmented QPushButton:hover {{ background-color: #202226; }}
-    QWidget#Segmented QPushButton:checked {{ background-color: {ACCENT}; color: white; }}
-    QComboBox {{
+    #SettingsContainer QWidget#Segmented QPushButton:hover {{ background-color: #202226; }}
+    #SettingsContainer QWidget#Segmented QPushButton:checked {{ background-color: {SEGMENT_ON}; color: white; font-weight: bold; }}
+    #SettingsContainer QComboBox {{
         min-height: 34px; background-color: #0f1012; color: white; font-size: 14px;
-        border-radius: 8px; padding: 0 12px; border: 1px solid #2a2d32;
+        border-radius: 8px; padding: 0 12px; border: 1px solid #3a3e45;
     }}
-    QComboBox:hover {{ border-color: {ACCENT}; }}
-    QComboBox::drop-down {{ border: none; width: 24px; }}
+    #SettingsContainer QComboBox:hover {{ border-color: #6b717b; }}
+    #SettingsContainer QComboBox::drop-down {{ border: none; width: 24px; }}
 """
 
 
@@ -75,7 +78,7 @@ class ToggleSwitch(QAbstractButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(ACCENT if self.isChecked() else "#5b6068"))
+        painter.setBrush(QColor(SWITCH_ON if self.isChecked() else "#5b6068"))
         painter.drawRoundedRect(QRectF(0, 0, 40, 22), 11, 11)
         painter.setBrush(QColor("white"))
         painter.drawEllipse(QRectF(21 if self.isChecked() else 3, 3, 16, 16))
