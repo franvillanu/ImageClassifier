@@ -20,6 +20,7 @@ class AdjustCanvas(QWidget):
         self._image: QImage | None = None
         self._size = (1, 1)  # logical (full-resolution) size the image represents
         self._compare: tuple[QImage, tuple[int, int]] | None = None
+        self._compare_zoom: float | None = None
         self._zoom: float | None = None  # None = fit
         self._center = QPointF(0.5, 0.5)  # view centre in normalised image coords
         self._drag = None
@@ -48,7 +49,13 @@ class AdjustCanvas(QWidget):
         self._emit_zoom()
         self.update()
 
-    def set_compare(self, compare: tuple[QImage, tuple[int, int]] | None):
+    def set_compare(self, compare: tuple[QImage, tuple[int, int]] | None, zoom: float | None = None):
+        """Show ``compare`` (image, size) instead of the edit, at ``zoom`` (the edit's screen scale).
+
+        Keeping the scale means the original is drawn at its true size next to what you were
+        looking at, instead of being refitted (and shrunk) to the window.
+        """
+        self._compare_zoom = zoom if compare is not None else None
         self._compare = compare
         self._emit_zoom()
         self.update()
@@ -65,7 +72,9 @@ class AdjustCanvas(QWidget):
 
     def zoom(self) -> float:
         _, size = self._shown()
-        return self._fit_zoom(size) if self._zoom is None or self._compare is not None else self._zoom
+        if self._compare is not None:
+            return self._compare_zoom or self._fit_zoom(size)
+        return self._fit_zoom(size) if self._zoom is None else self._zoom
 
     def display_scale(self, size: tuple[int, int]) -> float:
         """Physical screen pixels per output pixel an image of ``size`` would be shown at."""

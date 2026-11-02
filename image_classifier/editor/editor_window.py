@@ -670,8 +670,10 @@ class PhotoEditor(QWidget):
             return
         self._comparing = on
         if on:
-            self._compare_return = self.stack.currentWidget()
-            self.adjust_canvas.set_compare((self._orig_qimage, self._size))
+            self._compare_return = shown = self.stack.currentWidget()
+            view = getattr(self.crop_canvas, "_view", None) if shown is self.crop_canvas else None
+            zoom = view.zoom if view is not None else self.adjust_canvas.zoom()  # what the edit is shown at
+            self.adjust_canvas.set_compare((self._orig_qimage, self._size), zoom)
             self.stack.setCurrentWidget(self.adjust_canvas)
         else:
             self.adjust_canvas.set_compare(None)
