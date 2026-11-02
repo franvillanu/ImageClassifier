@@ -72,3 +72,17 @@ def test_current_version_has_bundled_notes():
 
     entry = notes_for_version(__version__)
     assert entry is not None and entry[1] and entry[2]
+
+
+def test_optional_date_is_kept_out_of_the_spanish_text(tmp_path):
+    from image_classifier.updates.notes import format_release_date, release_dates
+
+    path = tmp_path / "release_notes.txt"
+    path.write_text("2.0.2|Two EN|Dos ES|2026-11-02\n2.0.1|One EN|Uno ES\n2.0.0|Zero EN|Cero ES|someday\n", encoding="utf-8")
+    entries = load_release_notes(path)
+    assert pick(notes_for_version("2.0.2", entries), "es") == "Dos ES"
+    assert release_dates(path) == {"2.0.2": "2026-11-02"}
+    assert format_release_date("2026-11-02", "en") == "2 Nov 2026"
+    assert format_release_date("2026-11-02", "es") == "2 nov 2026"
+    assert format_release_date(None, "en") is None
+    assert format_release_date("2026-13-40", "en") is None
