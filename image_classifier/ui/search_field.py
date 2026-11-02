@@ -1,11 +1,13 @@
-"""Shortcut-search helpers: forgiving text matching and a clear (x) button for a line edit."""
+"""Shortcut-search helpers: forgiving text matching and a search box with a magnifier and a clear button."""
 
 import re
 import unicodedata
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import QLineEdit
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton
+
+from image_classifier.ui.scaling import px
 
 
 def fold(text: str) -> str:
@@ -32,58 +34,81 @@ def matches(query: str, key: str, description: str) -> bool:
     return all(token in combined or any(token.startswith(w) for w in words) for token in query.split())
 
 
-def _clear_icon() -> QIcon:
-    size = 32
-    pixmap = QPixmap(size, size)
+def _icon_pixmap(side: int, draw) -> QPixmap:
+    """A transparent `side`x`side` (logical pixels) pixmap, drawn sharply on high-DPI screens."""
+    screen = QGuiApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen else 1.0
+    pixmap = QPixmap(round(side * ratio), round(side * ratio))
+    pixmap.setDevicePixelRatio(ratio)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#4a4f58"))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(2, 2, size - 4, size - 4)
-    pen = QPen(QColor("#e8eaed"))
-    pen.setWidth(3)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(pen)
-    painter.drawLine(11, 11, 21, 21)
-    painter.drawLine(21, 11, 11, 21)
+    draw(painter, side)
     painter.end()
-    return QIcon(pixmap)
+    return pixmap
 
 
-def add_clear_button(line_edit: QLineEdit, tooltip: str = "") -> QAction:
-    """A round x at the right end of the field, shown only while there is text."""
-    action = QAction(_clear_icon(), tooltip, line_edit)
-
-    def clear():
-        line_edit.clear()
-        line_edit.setFocus()
-
-    action.triggered.connect(clear)
-    line_edit.textChanged.connect(lambda text: action.setVisible(bool(text)))
-    line_edit.addAction(action, QLineEdit.ActionPosition.TrailingPosition)
-    action.setVisible(bool(line_edit.text()))  # adding an action shows it, so hide it again when empty
-    return action
-
-
-def _search_icon() -> QIcon:
-    size = 32
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+def _draw_magnifier(painter: QPainter, side: int):
     pen = QPen(QColor("#9aa1ab"))
-    pen.setWidth(3)
+    pen.setWidthF(side * 0.1)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
-    painter.drawEllipse(5, 5, 15, 15)
-    painter.drawLine(18, 18, 26, 26)
-    painter.end()
-    return QIcon(pixmap)
+    lens = side * 0.58
+    painter.drawEllipse(round(side * 0.1), round(side * 0.1), round(lens), round(lens))
+    painter.drawLine(round(side * 0.68), round(side * 0.68), round(side * 0.9), round(side * 0.9))
 
 
-def add_search_icon(line_edit: QLineEdit) -> QAction:
-    """A magnifier at the left end of the field."""
-    action = QAction(_search_icon(), "", line_edit)
-    line_edit.addAction(action, QLineEdit.ActionPosition.LeadingPosition)
-    return action
+def _draw_cross(painter: QPainter, side: int):
+    pen = QPen(QColor("#ffffff"))
+    pen.setWidthF(side * 0.14)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    low, high = side * 0.28, side * 0.72
+    painter.drawLine(round(low), round(low), round(high), round(high))
+    painter.drawLine(round(high), round(low), round(low), round(high))
+
+
+class SearchBox(QFrame):
+    """Rounded field: magnifier, text, and a round clear button that shows only while there is text.
+
+    Style it through the object names SearchBox, searchInput and clearBtn.
+    """
+
+    def __init__(self, placeholder: str, scale: float = 1.0, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SearchBox")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(px(16, scale), 0, px(10, scale), 0)
+        row.setSpacing(px(10, scale))
+
+        side = px(20, scale)
+        magnifier = QLabel(self)
+        magnifier.setPixmap(_icon_pixmap(side, _draw_magnifier))
+        magnifier.setFixedSize(side, side)
+        row.addWidget(magnifier, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.line = QLineEdit(self)
+        self.line.setObjectName("searchInput")
+        self.line.setPlaceholderText(placeholder)
+        row.addWidget(self.line, 1)
+
+        button_side = px(28, scale)
+        cross = px(16, scale)
+        self.clear_button = QPushButton(self)
+        self.clear_button.setObjectName("clearBtn")
+        self.clear_button.setIcon(QIcon(_icon_pixmap(cross, _draw_cross)))
+        self.clear_button.setIconSize(QSize(cross, cross))
+        self.clear_button.setFixedSize(button_side, button_side)
+        self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.clear_button.setVisible(False)
+        self.clear_button.clicked.connect(self._clear)
+        row.addWidget(self.clear_button, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.line.textChanged.connect(lambda text: self.clear_button.setVisible(bool(text)))
+        self.setFocusProxy(self.line)
+
+    def _clear(self):
+        self.line.clear()
+        self.line.setFocus()

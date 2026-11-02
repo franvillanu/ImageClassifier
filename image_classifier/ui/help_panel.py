@@ -3,10 +3,10 @@
 import re
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from image_classifier.ui.scaling import px
-from image_classifier.ui.search_field import add_clear_button, add_search_icon, matches
+from image_classifier.ui.search_field import SearchBox, matches
 
 HELP_STYLE = """
     QWidget#HelpContainer { background-color: #17181a; border: 1px solid #3d4047; border-radius: 12px; }
@@ -16,8 +16,8 @@ HELP_STYLE = """
     #HelpContainer QLabel#note { color: #E74C3C; font-size: 16px; font-weight: bold; }
     #HelpContainer QLabel#empty { color: #9aa1ab; font-size: 16px; }
     #HelpContainer QLabel#keycap {
-        background-color: #262930; color: white; font-size: 15px; font-weight: bold;
-        border: 1px solid #3d4047; border-bottom: 3px solid #3d4047; border-radius: 8px; padding: 0 10px;
+        background-color: #262930; color: white; font-size: 13px; font-weight: bold;
+        border: 1px solid #3d4047; border-bottom: 3px solid #3d4047; border-radius: 7px; padding: 0 8px;
     }
     #HelpContainer QLabel#catTitle { font-size: 17px; font-weight: bold; }
     #HelpContainer QWidget#catHead { border-bottom: 1px solid #3d4047; }
@@ -27,11 +27,10 @@ HELP_STYLE = """
         min-width: 40px; min-height: 40px;
     }
     #HelpContainer QPushButton#closeX:hover { background-color: #3a3e45; }
-    #HelpContainer QLineEdit {
-        background-color: #0f1012; color: white; font-size: 17px; padding: 0 8px;
-        border: 1px solid #3d4047; border-radius: 10px;
-    }
-    #HelpContainer QLineEdit:focus { border-color: #6b717b; }
+    #HelpContainer QFrame#SearchBox { background-color: #0f1012; border: 1px solid #3d4047; border-radius: 10px; }
+    #HelpContainer QLineEdit#searchInput { background: transparent; color: white; font-size: 17px; border: none; padding: 0; }
+    #HelpContainer QPushButton#clearBtn { background-color: #4a4f58; border: none; border-radius: 14px; padding: 0; }
+    #HelpContainer QPushButton#clearBtn:hover { background-color: #5b6068; }
     #HelpContainer QScrollBar:vertical { background: transparent; border: none; width: 8px; margin: 0; }
     #HelpContainer QScrollBar::handle:vertical { background: #3a3e45; border-radius: 4px; min-height: 28px; }
     #HelpContainer QScrollBar::handle:vertical:hover { background: #4d525a; }
@@ -91,12 +90,10 @@ class HelpContent:
         search_holder = QWidget(container)
         search_row = QHBoxLayout(search_holder)
         search_row.setContentsMargins(px(28, s), 0, px(28, s), px(16, s))
-        self.search_line = QLineEdit(search_holder)
-        self.search_line.setPlaceholderText(placeholder)
-        self.search_line.setFixedHeight(px(48, s))
-        add_search_icon(self.search_line)
-        add_clear_button(self.search_line)
-        search_row.addWidget(self.search_line)
+        search_box = SearchBox(placeholder, s, search_holder)
+        search_box.setFixedHeight(px(48, s))
+        self.search_line = search_box.line
+        search_row.addWidget(search_box)
         outer.addWidget(search_holder)
 
         body = QWidget()
@@ -171,8 +168,8 @@ class HelpContent:
             cap = QLabel(key, keys_box)
             cap.setObjectName("keycap")
             cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cap.setFixedHeight(px(34, s))
-            cap.setMinimumWidth(px(34, s))
+            cap.setFixedHeight(px(30, s))
+            cap.setMinimumWidth(px(30, s))
             keys_row.addWidget(cap)
         if has_note:
             note = QLabel("*", keys_box)

@@ -53,7 +53,6 @@ from image_classifier.ui.crop_overlay import CropOverlay
 from image_classifier.ui.settings_panel import Segmented, SettingsPanel
 from image_classifier.ui.scaling import scale_css, ui_scale
 from image_classifier.ui.help_panel import HELP_STYLE, HelpContent
-from image_classifier.ui.search_field import add_clear_button, matches as shortcut_matches
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
 from image_classifier.updates.notes import (
     format_release_date, load_release_notes, notes_for_version, pick, release_dates,
