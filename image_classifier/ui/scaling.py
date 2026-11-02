@@ -3,12 +3,12 @@
 import re
 
 REFERENCE_HEIGHT = 1440  # physical screen height (pixels) up to which sizes are used as written
-GENTLENESS = 0.45  # how much of the extra resolution turns into bigger text (the rest stays as space)
+GENTLENESS = 0.28  # how much of the extra resolution turns into bigger text (the rest stays as space)
 MAX_SCALE = 1.35
 
 
 def ui_scale(widget) -> float:
-    """1.0 on screens up to 1440p, then a gentle increase with the physical resolution (a 4K screen gets about 1.2).
+    """1.0 on screens up to 1440p, then a gentle increase with the physical resolution (a 4K screen gets about 1.13).
 
     Uses the screen (not the window), so it does not change when the window is resized, and the
     physical pixel height (logical height x device pixel ratio), so a 4K display gets bigger text
