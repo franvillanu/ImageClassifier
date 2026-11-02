@@ -20,24 +20,54 @@ def notes_path() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "docs" / "release_notes.txt"
 
 
-def load_release_notes(path: Optional[Path] = None) -> list[tuple[str, str, str]]:
-    """[(version, english, spanish)] newest first. Lines are `version|English|Spanish`."""
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_lines(path: Optional[Path]) -> list[tuple[str, str, str, Optional[str]]]:
+    """[(version, english, spanish, date)] newest first. Lines are `version|English|Spanish[|YYYY-MM-DD]`."""
     path = path or notes_path()
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return []
-    entries = []
+    rows = []
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split("|", 2)
-        if len(parts) == 3 and parse_version(parts[0]):
-            version, en, es = (p.strip() for p in parts)
-            entries.append((version, en, es or en))
-    entries.sort(key=lambda e: parse_version(e[0]), reverse=True)
-    return entries
+        parts = line.split("|", 3)
+        if len(parts) >= 3 and parse_version(parts[0]):
+            version, en, es = (p.strip() for p in parts[:3])
+            date = parts[3].strip() if len(parts) == 4 and DATE_RE.match(parts[3].strip()) else None
+            rows.append((version, en, es or en, date))
+    rows.sort(key=lambda r: parse_version(r[0]), reverse=True)
+    return rows
+
+
+def load_release_notes(path: Optional[Path] = None) -> list[tuple[str, str, str]]:
+    """[(version, english, spanish)] newest first."""
+    return [row[:3] for row in _parse_lines(path)]
+
+
+def release_dates(path: Optional[Path] = None) -> dict[str, str]:
+    """{version: 'YYYY-MM-DD'} for the versions whose notes line carries a date."""
+    return {row[0]: row[3] for row in _parse_lines(path) if row[3]}
+
+
+_MONTHS = {
+    "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+    "es": ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"),
+}
+
+
+def format_release_date(iso: Optional[str], lang: str) -> Optional[str]:
+    """'2026-11-02' -> '2 Nov 2026' (or '2 nov 2026'); None if there is no valid date."""
+    if not iso or not DATE_RE.match(iso):
+        return None
+    year, month, day = (int(p) for p in iso.split("-"))
+    if not 1 <= month <= 12:
+        return None
+    return f"{day} {_MONTHS['es' if lang == 'es' else 'en'][month - 1]} {year}"
 
 
 POINT_SEPARATOR = "•"

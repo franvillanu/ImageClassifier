@@ -7,14 +7,15 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollAre
 from image_classifier.updates.notes import sections
 
 # kind -> (icon, colour); titles come from the caller (translated)
-SECTION_STYLE = {"new": ("enhance", "#4aa3ff"), "changed": ("refresh", "#f0b429"), "fixed": ("bug", "#3ccf7a")}
+SECTION_STYLE = {"new": ("enhance", "#3ccf7a"), "changed": ("refresh", "#b9a2ff"), "fixed": ("bug", "#ffa159")}
 DEFAULT_TITLES = {"new": "New features", "changed": "Changes", "fixed": "Fixes"}
 
 
 class WhatsNewOverlay(QWidget):
-    """Dimmed full-window overlay with a centered card. `entries` is [(heading, text)]."""
+    """Dimmed full-window overlay with a centered card. `entries` is [(heading, text[, date])]."""
 
-    def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None):
+    def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None,
+                 latest_text=None):
         super().__init__(parent)
         titles = {**DEFAULT_TITLES, **(section_titles or {})}
         self._on_closed = on_closed
@@ -36,11 +37,16 @@ class WhatsNewOverlay(QWidget):
             }
             QLabel { background: transparent; color: white; font-size: 15px; }
             QLabel#title { font-size: 21px; font-weight: bold; }
-            QLabel#heading { color: #4aa3ff; font-size: 14px; font-weight: bold; }
+            QLabel#heading { color: white; font-size: 22px; font-weight: bold; }
+            QLabel#chip {
+                background-color: #2a77c6; color: white; border-radius: 11px;
+                padding: 0 10px; font-size: 12px; font-weight: bold;
+            }
+            QLabel#date { color: #9aa1ab; font-size: 13px; }
             QLabel#empty { color: #8a8f98; }
             QLabel#dot { color: #8a8f98; font-size: 15px; font-weight: bold; }
             QLabel#section { font-size: 15px; font-weight: bold; }
-            QFrame#divider { background-color: rgba(255, 255, 255, 30); border: none; }
+            QFrame#divider { background-color: rgba(255, 255, 255, 60); border: none; }
             QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
             QScrollBar:vertical { background: transparent; width: 8px; }
             QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 24px; }
@@ -73,11 +79,19 @@ class WhatsNewOverlay(QWidget):
             empty = QLabel(empty_text, body)
             empty.setObjectName("empty")
             body_layout.addWidget(empty)
-        for index, (heading, text) in enumerate(entries):
+        for index, entry in enumerate(entries):
+            heading, text, *rest = entry
+            date = rest[0] if rest else None
+            if index:  # clear break between versions
+                body_layout.addSpacing(14)
+                rule = QFrame(body)
+                rule.setObjectName("divider")
+                rule.setFixedHeight(1)
+                body_layout.addWidget(rule)
+                body_layout.addSpacing(16)
             if heading:
-                head = QLabel(heading, body)
-                head.setObjectName("heading")
-                body_layout.addWidget(head)
+                body_layout.addLayout(self._version_header(body, heading, date, latest_text if index == 0 else None))
+                body_layout.addSpacing(8)
             groups = sections(text) or [(None, [text])]
             for g, (kind, points) in enumerate(groups):
                 if g:
@@ -89,8 +103,6 @@ class WhatsNewOverlay(QWidget):
                     if number:
                         body_layout.addSpacing(6)
                     body_layout.addLayout(self._point_row(body, point, bullet=bool(kind) or len(points) > 1))
-            if index < len(entries) - 1:
-                body_layout.addSpacing(12)
         body_layout.addStretch(1)
 
         scroll = QScrollArea(self.card)
@@ -108,6 +120,27 @@ class WhatsNewOverlay(QWidget):
         self._close_btn = close_btn
         self._scroll = scroll
         self._body = body
+
+    def _version_header(self, parent, heading, date, latest_text):
+        """Version number, optional 'Latest' chip, and the release date on the right."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        head = QLabel(heading, parent)
+        head.setObjectName("heading")
+        row.addWidget(head, 0, Qt.AlignmentFlag.AlignVCenter)
+        if latest_text:
+            chip = QLabel(latest_text, parent)
+            chip.setObjectName("chip")
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chip.setFixedHeight(22)
+            row.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch(1)
+        if date:
+            when = QLabel(date, parent)
+            when.setObjectName("date")
+            row.addWidget(when, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
 
     def _section_header(self, parent, kind, title):
         from PyQt6.QtCore import QSize

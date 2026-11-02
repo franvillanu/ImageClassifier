@@ -50,8 +50,11 @@ from image_classifier.ui.whats_new import WhatsNewOverlay
 from image_classifier.ui.icons import IconFactory
 from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from image_classifier.ui.crop_overlay import CropOverlay
+from image_classifier.ui.settings_panel import Segmented, SettingsPanel
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
-from image_classifier.updates.notes import load_release_notes, notes_for_version, pick
+from image_classifier.updates.notes import (
+    format_release_date, load_release_notes, notes_for_version, pick, release_dates,
+)
 from image_classifier.ui import (
     IconFactory,
     BaseOverlay,
@@ -236,6 +239,7 @@ class PhotoViewer(QMainWindow):
             self, title, entries, t["close_label"], t["whats_new_empty"], self._on_whats_new_closed,
             section_titles={"new": t["whats_new_section_new"], "changed": t["whats_new_section_changed"],
                             "fixed": t["whats_new_section_fixed"]},
+            latest_text=t["whats_new_latest"],
         )
         self.whats_new_overlay.open_overlay()
 
@@ -264,7 +268,11 @@ class PhotoViewer(QMainWindow):
 
     def open_release_history(self):
         t = translations[self.current_language]
-        entries = [(f"v{e[0]}", pick(e, self.current_language)) for e in load_release_notes()]
+        dates = release_dates()
+        entries = [
+            (f"v{e[0]}", pick(e, self.current_language), format_release_date(dates.get(e[0]), self.current_language))
+            for e in load_release_notes()
+        ]
         self.open_whats_new(t["whats_new_history"], entries)
 
     def check_for_updates_manually(self):
@@ -478,325 +486,77 @@ class PhotoViewer(QMainWindow):
                 event.ignore()
         self.settings_overlay.keyPressEvent = overlay_keypress
 
-        class DraggableContainer(QWidget):
-            def __init__(self, parent=None):
-                super().__init__(parent)
-                self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-
-                self.drag_offset = None
-
-            def mousePressEvent(self, event):
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.drag_offset = event.position().toPoint()
-                super().mousePressEvent(event)
-
-            def mouseMoveEvent(self, event):
-                if self.drag_offset is not None:
-                    new_pos = self.mapToParent(event.position().toPoint() - self.drag_offset)
-                    self.move(new_pos)
-                super().mouseMoveEvent(event)
-
-            def mouseReleaseEvent(self, event):
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.drag_offset = None
-                super().mouseReleaseEvent(event)
-
-
-        container = DraggableContainer(self.settings_overlay)
-        container.setObjectName("SettingsContainer")
-        container.setStyleSheet("""
-            QWidget#SettingsContainer {
-                background-color: rgba(0, 0, 0, 200);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
-            }
-            QLabel {
-                background-color: rgba(50, 50, 50, 200);
-                color: white;
-                font-size: 16px;
-                border: 1px solid rgba(255, 255, 255, 30);
-                border-radius: 6px;
-                padding: 8px;
-            }
-            QCheckBox, QRadioButton {
-                min-height: 30px;
-                background-color: rgba(50, 50, 50, 200);
-                color: white;
-                font-size: 16px;
-                border-radius: 6px;
-                padding: 6px;
-            }
-            QCheckBox::indicator, QRadioButton::indicator {
-                width: 20px;
-                height: 20px;
-                border-radius: 4px;
-                border: 1px solid #777;
-                background: #333;
-            }
-            QCheckBox::indicator:checked, QRadioButton::indicator:checked {
-                background-color: #3498DB;
-                border: 1px solid #3498DB;
-            }
-            QPushButton {
-                background-color: #555555;
-                color: white;
-                border-radius: 6px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #777777;
-            }
-            QPushButton#closeSettingsBtn {
-                background-color: #DC3545;
-            }
-            QPushButton#closeSettingsBtn:hover {
-                background-color: #B22222;
-            }
-        """)
-        # Make sure it can't exceed overlay size
-        container.setMinimumSize(250, 250)
-        container.setMaximumSize(
-            self.settings_overlay.width() - 40,
-            self.settings_overlay.height() - 40
-        )
-
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(8)
-
         t = translations[self.current_language]
+        en = self.current_language == "en"
+        cache_label = "Cache previews on disk" if en else "Guardar vistas previas en disco"
 
-        # Title label
-        title_label = QLabel(t["options_title"], container)
-        title_label.setStyleSheet("""
-            font-size: 18px;
-            font-weight: bold;
-            background-color: rgba(25,25,25,200);
-            color: white;
-            border: 1px solid rgba(25,25,25,200);
-            border-radius: 6px;
-            padding: 8px;
-        """)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        title_label.setFixedHeight(40)
-        layout.addWidget(title_label)
-        layout.addSpacing(5)        
-
-        # Build checkboxes for settings
-        settings_items = [
-            (t["reset_zoom"], self.reset_zoom_on_new_image, lambda st: self.set_reset_zoom(bool(st))),
-            (t["rotate_all_option"], self.rotate_all, lambda st: self.set_rotate_all(bool(st))),
-            (t["show_filename"], self.show_filename, lambda st: self.set_show_filename(bool(st))),
-            (t["load_last_folder"], getattr(self, "load_last_folder", False), lambda st: self.set_load_last_folder(bool(st))),
-            (t["loop_navigation"], self.loop_navigation, lambda st: self.set_loop_navigation(bool(st))),
-            (t["menu_dock_left"], self.menu_dock_left, lambda st: self.toggle_menu_dock(bool(st))),
-            (t["update_check_startup"], self.check_updates, lambda st: self.set_check_updates(bool(st))),
-            #(t["hide_navigation_controls"], self.hide_navigation_controls, lambda st: self.set_hide_navigation_controls(bool(st)))
+        toggle_groups = [
+            (t["settings_group_general"], [
+                (t["update_check_startup"], self.check_updates, self.set_check_updates),
+                (t["load_last_folder"], getattr(self, "load_last_folder", False), self.set_load_last_folder),
+                (t["menu_dock_left"], self.menu_dock_left, self.toggle_menu_dock),
+            ]),
+            (t["settings_group_viewing"], [
+                (t["loop_navigation"], self.loop_navigation, self.set_loop_navigation),
+                (t["reset_zoom"], self.reset_zoom_on_new_image, self.set_reset_zoom),
+                (t["rotate_all_option"], self.rotate_all, self.set_rotate_all),
+                (t["show_filename"], self.show_filename, self.set_show_filename),
+            ]),
+            (t["settings_group_storage"], [
+                (cache_label, self.preview_cache_enabled, self.set_preview_cache_enabled),
+            ]),
         ]
-        # Sort them by label, so they appear consistently
-        sorted_items = sorted(settings_items, key=lambda item: item[0].lower())
-        for label_text, init_state, callback in sorted_items:
-            cb = QCheckBox(label_text, container)
-            cb.setChecked(init_state)
-            cb.stateChanged.connect(lambda st, c=callback: c(st))
-            layout.addWidget(cb)
+        container = SettingsPanel(
+            self.settings_overlay, t["options_title"], toggle_groups,
+            t["about_button"], t["help_button"],
+            self.open_about_overlay, self.open_help_overlay, self.close_settings_overlay,
+        )
 
-        cache_label = (
-            "Cache previews on disk"
-            if self.current_language == "en"
-            else "Guardar vistas previas en disco"
-        )
-        cache_checkbox = QCheckBox(cache_label, container)
-        cache_checkbox.setChecked(self.preview_cache_enabled)
-        cache_checkbox.stateChanged.connect(
-            lambda state: self.set_preview_cache_enabled(bool(state))
-        )
-        layout.addWidget(cache_checkbox)
+        def cache_size_text(megabytes):
+            return f"Preview cache: {megabytes:.0f} MB" if en else f"Caché de vistas previas: {megabytes:.0f} MB"
 
-        cache_size_mb = ImageLoaderRunnable.disk_cache_size() / (1024 * 1024)
-        clear_cache_text = (
-            f"Clear preview cache ({cache_size_mb:.0f} MB)"
-            if self.current_language == "en"
-            else f"Borrar caché de vistas previas ({cache_size_mb:.0f} MB)"
-        )
-        clear_cache_button = QPushButton(clear_cache_text, container)
+        cache_widgets = {}
 
         def clear_preview_cache():
             ImageLoaderRunnable.clear_disk_cache()
-            clear_cache_button.setText(
-                "Clear preview cache (0 MB)"
-                if self.current_language == "en"
-                else "Borrar caché de vistas previas (0 MB)"
-            )
+            cache_widgets["label"].setText(cache_size_text(0))
 
-        clear_cache_button.clicked.connect(clear_preview_cache)
-        layout.addWidget(clear_cache_button)
-        layout.addSpacing(5)
+        cache_widgets["label"], _ = container.add_action_row(
+            cache_size_text(ImageLoaderRunnable.disk_cache_size() / (1024 * 1024)),
+            "Clear" if en else "Borrar",
+            clear_preview_cache,
+        )
 
-        # --- Sorting Options Section (within your existing settings overlay) ---
-        # 'container' is the QWidget for the overlay and 'layout' its QVBoxLayout.
-        # Use the translation dictionary 't' defined earlier in open_settings_overlay.
-
-        sort_label = QLabel(t["sort_by"], container)
-        sort_label.setStyleSheet("""
-            font-size: 18px;
-            background-color: rgba(25,25,25,200);
-            color: white;
-            border: 1px solid rgba(25,25,25,200);
-            border-radius: 6px;
-            padding: 8px;
-        """)
-        sort_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        sort_label.setFixedHeight(40)
-        layout.addWidget(sort_label)
-
-        # Define a common style for both combo boxes.
-        combo_style = """
-        QComboBox {
-            min-height: 30px;
-            background-color: rgba(50,50,50,200);
-            color: white;
-            font-size: 16px;
-            border-radius: 6px;
-            padding: 6px 10px;
-            border: 1px solid rgba(255,255,255,30);
-        }
-        QComboBox:hover {
-            background-color: #0078D7;
-        }
-        QComboBox::drop-down {
-            border: none;
-            width: 24px;
-        }
-        QComboBox::down-arrow {
-            image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMSAxMSAxIDYgNyIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48L3N2Zz4=");
-        }
-        QComboBox QAbstractItemView {
-            background-color: rgba(50,50,50,200);
-            color: white;
-            selection-background-color: rgba(85,85,85,0.7);
-            border: 1px solid rgba(255,255,255,30);
-        }
-        """
-
-        # --- Criterion ComboBox ---
-        criterion_combo = OverlayComboBox(container)
-        criterion_combo.setStyleSheet(combo_style)
+        container.add_group_title(t["sort_by"])
+        criterion_combo = OverlayComboBox(container.body)
         criterion_combo.addItem(t["sort_file_name"], "file_name")
         criterion_combo.addItem(t["sort_date_modified"], "date_modified")
         criterion_combo.addItem(t["sort_size"], "size")
-        if self.sort_option == "file_name":
-            criterion_combo.setCurrentIndex(0)
-        elif self.sort_option == "date_modified":
-            criterion_combo.setCurrentIndex(1)
-        elif self.sort_option == "size":
-            criterion_combo.setCurrentIndex(2)
+        criterion_combo.setCurrentIndex(max(0, criterion_combo.findData(self.sort_option)))
         criterion_combo.currentIndexChanged.connect(
             lambda index: self.set_sort_option(criterion_combo.itemData(index))
         )
-        layout.addWidget(criterion_combo)
+        container.add_control(criterion_combo)
+        container.add_control(Segmented(
+            [(t["sort_ascending"], True), (t["sort_descending"], False)],
+            bool(self.sort_ascending), self.set_sort_ascending,
+        ))
 
-        # --- Order ComboBox ---
-        order_combo = OverlayComboBox(container)
-        order_combo.setStyleSheet(combo_style)
-        order_combo.addItem(t["sort_ascending"], True)
-        order_combo.addItem(t["sort_descending"], False)
-        if self.sort_ascending:
-            order_combo.setCurrentIndex(0)
-        else:
-            order_combo.setCurrentIndex(1)
-        order_combo.currentIndexChanged.connect(
-            lambda index: self.set_sort_ascending(order_combo.itemData(index))
-        )
-        layout.addWidget(order_combo)
+        container.add_group_title(t["theme"])
+        theme_keys = ["black", "dark_grey", "inkstone"]
+        container.add_control(Segmented(
+            [(t[key], key) for key in theme_keys],
+            self.theme if self.theme in theme_keys else "black", self.set_theme,
+        ))
 
-        # --- Theme selector ---
-        theme_label = QLabel(t["theme"], container)
-        theme_label.setStyleSheet("""
-            font-size: 18px;
-            background-color: rgba(25,25,25,200);
-            color: white;
-            border: 1px solid rgba(25,25,25,200);
-            border-radius: 6px;
-            padding: 8px;
-        """)
-        theme_label.setFixedHeight(38)
-        layout.addWidget(theme_label)
+        container.add_group_title(t["language"])
+        container.add_control(Segmented(
+            [("English", "en"), ("Español", "es")], self.current_language, self.set_language,
+        ))
+        container.finish()
 
-        theme_combo = OverlayComboBox(container)
-        theme_combo.setStyleSheet(combo_style)
-        theme_combo.addItem(t["black"],     "black")
-        theme_combo.addItem(t["dark_grey"], "dark_grey")
-        theme_combo.addItem(t["inkstone"],  "inkstone")
-        
-        # select current theme
-        keys = ["black", "dark_grey", "inkstone"]
-        current = self.theme if self.theme in keys else "black"
-        idx = keys.index(current)
-        theme_combo.setCurrentIndex(idx)
-
-        theme_combo.currentIndexChanged.connect(
-            lambda i: self.set_theme(theme_combo.itemData(i))
-        )
-        layout.addWidget(theme_combo)
-        layout.addSpacing(5)
-
-        # --- Language Options Section ---
-        lang_label = QLabel(t["language"], container)
-        lang_label.setStyleSheet("""
-            font-size: 18px;
-            background-color: rgba(25,25,25,200);
-            color: white;
-            border: 1px solid rgba(25,25,25,200);
-            border-radius: 6px;
-            padding: 8px;
-        """)
-        lang_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        lang_label.setFixedHeight(40)
-        layout.addWidget(lang_label)
-
-        lang_layout = QHBoxLayout()
-        layout.addLayout(lang_layout)
-
-        radio_en = QRadioButton("English", container)
-        radio_es = QRadioButton("Español", container)
-        lang_layout.addWidget(radio_en)
-        lang_layout.addWidget(radio_es)
-
-        # Group language radio buttons in their own QButtonGroup:
-        lang_group = QButtonGroup(container)
-        lang_group.addButton(radio_en)
-        lang_group.addButton(radio_es)
-
-        if self.current_language == "en":
-            radio_en.setChecked(True)
-        else:
-            radio_es.setChecked(True)
-
-        radio_en.toggled.connect(lambda checked: self.set_language("en") if checked else None)
-        radio_es.toggled.connect(lambda checked: self.set_language("es") if checked else None)
-
-        layout.addWidget(radio_en)
-        layout.addWidget(radio_es)
-        layout.addStretch()
-
-        # Buttons at bottom
-        about_btn = QPushButton(t["about_button"], container)
-        help_btn = QPushButton(t["help_button"], container)
-        close_btn = QPushButton(t["close_label"], container)
-        close_btn.setObjectName("closeSettingsBtn")
-        for btn in (about_btn, help_btn, close_btn):
-            btn.setMinimumHeight(34)
-        layout.addSpacing(5)
-        layout.addWidget(about_btn)
-        layout.addSpacing(2)
-        layout.addWidget(help_btn)
-        layout.addSpacing(2)
-        layout.addWidget(close_btn)
-
-        about_btn.clicked.connect(self.open_about_overlay)
-        help_btn.clicked.connect(self.open_help_overlay)
-        close_btn.clicked.connect(self.close_settings_overlay)
+        # Never taller than the window: the body scrolls, the header and footer stay put
+        container.setFixedHeight(min(container.preferred_height(), self.settings_overlay.height() - 40))
 
         # Clicking outside => close
         def overlay_mousePressEvent(ev):
@@ -814,8 +574,6 @@ class PhotoViewer(QMainWindow):
         self.settings_overlay.raise_()
         QApplication.processEvents()
 
-
-        container.adjustSize()
         # Then place it next to the floating_menu.settings_button, like before
         btn_local_pos = self.floating_menu.settings_button.pos()
         pos_in_main = self.floating_menu.mapTo(self, btn_local_pos)
@@ -828,6 +586,7 @@ class PhotoViewer(QMainWindow):
             x = self.settings_overlay.width() - container.width() - 20
         if y + container.height() > self.settings_overlay.height():
             y = self.settings_overlay.height() - container.height() - 20
+        y = max(y, 20) if container.height() <= self.settings_overlay.height() - 40 else 20
 
         container.move(x, y)
         container.show()

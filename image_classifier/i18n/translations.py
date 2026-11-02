@@ -94,6 +94,9 @@ translations = {
         "favorites": "Favorites",
         "non_favorites": "Non-Favorites",
         "options_title": "Options",
+        "settings_group_general": "General",
+        "settings_group_viewing": "Viewing",
+        "settings_group_storage": "Storage",
         "rotate_all_option": "Rotate ⟳ applies to all images",
         
         # 5. Help & Shortcuts
@@ -370,6 +373,7 @@ translations = {
         "whats_new_section_new": "New features",
         "whats_new_section_changed": "Changes",
         "whats_new_section_fixed": "Fixes",
+        "whats_new_latest": "Latest",
         "editor_auto_enhance": "Auto",
         "editor_auto_enhance_tip": "Automatic enhancement: balances exposure, contrast, highlights, shadows and colour",
         "editor_auto_enhanced": "Automatic enhancement applied. Fine-tune any adjustment, or Ctrl+Z to undo",
@@ -497,6 +501,9 @@ translations = {
         "favorites": "Favoritas",
         "non_favorites": "No Favoritas",
         "options_title": "Opciones",
+        "settings_group_general": "General",
+        "settings_group_viewing": "Visualización",
+        "settings_group_storage": "Almacenamiento",
         "rotate_all_option": "Rotar ⟳ se aplica a todas las imágenes",
         
         # 5. Ayuda y Comandos
@@ -774,6 +781,7 @@ translations = {
         "whats_new_section_new": "Nuevas funciones",
         "whats_new_section_changed": "Cambios",
         "whats_new_section_fixed": "Correcciones",
+        "whats_new_latest": "Última",
         "editor_auto_enhance": "Auto",
         "editor_auto_enhance_tip": "Mejora automática: equilibra exposición, contraste, luces, sombras y color",
         "editor_auto_enhanced": "Mejora automática aplicada. Ajusta lo que quieras o pulsa Ctrl+Z para deshacer",
