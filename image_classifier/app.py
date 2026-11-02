@@ -841,6 +841,17 @@ class PhotoViewer(QMainWindow):
                 background-color: transparent;
                 color: #fff;
             }
+            #HelpContainer QTabWidget, #HelpContainer QTabBar, #HelpContainer QStackedWidget,
+            #HelpContainer QStackedWidget > QWidget, #HelpContainer QScrollArea,
+            #HelpContainer QScrollArea > QWidget, #HelpContainer QScrollArea > QWidget > QWidget,
+            #HelpContainer QScrollArea > QWidget > QWidget > QWidget {
+                background: transparent;
+                border: none;
+            }
+            #HelpContainer QLineEdit {
+                background-color: #0f1012;
+                border: 1px solid #3a3e45;
+            }
             QTabWidget::pane {
                 border: none;
             }
@@ -922,18 +933,18 @@ class PhotoViewer(QMainWindow):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setStyleSheet("""
             QScrollBar:vertical {
-                background: #333;
-                width: 14px;
+                background: transparent;
+                width: 8px;
                 margin: 0;
                 border: none;
             }
             QScrollBar::handle:vertical {
-                background-color: #555;
+                background-color: #3a3e45;
                 min-height: 20px;
-                border-radius: 7px;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #777;
+                background-color: #4d525a;
             }
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {
