@@ -29,6 +29,14 @@ from image_classifier.imaging import (
     WorkerSignals,
     sharpen_cv2,
 )
+from image_classifier.imaging.loader import (
+    PRIORITY_CURRENT,
+    PRIORITY_FULL_RESOLUTION,
+    PRIORITY_PRELOAD_AHEAD,
+    PRIORITY_PRELOAD_NEXT,
+    PRIORITY_PRELOAD_PREVIOUS,
+    preview_dimension_for,
+)
 from image_classifier.config import get_config_file
 from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.qtimage import qimage_to_rgba
@@ -172,6 +180,8 @@ class NearestViewport(QOpenGLWidget):
 # AdvancedGraphicsImageViewer
 # ------------------------------------------------------------------------
 class AdvancedGraphicsImageViewer(QGraphicsView):
+    FULL_RESOLUTION_DWELL_MS = 250
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -197,146 +207,243 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.zoom_factor = 1.0
         self.fit_zoom_factor = 1.0
         self.loader = None
+        self.full_loader = None
         self.loading_dialog = None
         self.full_resolution_ready = False
+        self.current_load_id = 0
+        self._shown_load_id = None
+        # (source cacheKey, viewport-sized frame) reused by fit-mode re-renders.
+        self._display_cache = None
+        # Full-resolution decode starts once the user settles on a photo, so fast
+        # browsing never queues 24 MP decodes it will skip past.
+        self._full_request_timer = QTimer(self)
+        self._full_request_timer.setSingleShot(True)
+        self._full_request_timer.setInterval(self.FULL_RESOLUTION_DWELL_MS)
+        self._full_request_timer.timeout.connect(self.request_full_resolution)
         self._brightness_timer = QTimer(self)
         self._brightness_timer.setSingleShot(True)
         self._brightness_timer.timeout.connect(self._apply_pending_brightness)
         self._pending_brightness = 1.0
         self._brightness_program = None
 
-    def setImage(self, image_path, reset_zoom=True, preserve_zoom=False):
-        import os
-        from PyQt6.QtCore import QThreadPool
-
-        # 0) Normalize here the same way the loader did:
-        norm = os.path.normcase(os.path.abspath(image_path))
-
-        # 1) Increment load counter & record path
-        self.load_counter     = getattr(self, "load_counter", 0) + 1
-        self.current_load_id  = self.load_counter
-        self.current_loading_image = norm
-        preview_dimension = max(
-            1024,
-            min(
-                4096,
-                max(self.viewport().width(), self.viewport().height()) * 2,
-            ),
+    def preview_dimension(self) -> int:
+        """Preview size that covers the viewport 1:1 in physical pixels."""
+        viewport = self.viewport()
+        return preview_dimension_for(
+            viewport.width(),
+            viewport.height(),
+            viewport.devicePixelRatioF(),
         )
 
-        # 2) Cache-first: if we’ve already decoded full-res, skip threading
-        pix = ImageLoaderRunnable.get_cached_pixmap(norm)
-        if pix is not None:
+    def _cancel_pending_loads(self):
+        self._full_request_timer.stop()
+        for attr in ("loader", "full_loader"):
+            worker = getattr(self, attr, None)
+            if worker is not None:
+                worker.cancel()
+                setattr(self, attr, None)
+
+    def setImage(self, image_path, reset_zoom=True, preserve_zoom=False):
+        """Show ``image_path``: screen-sized frame first, full resolution on demand.
+
+        Order of preference: in-memory preview (instant), in-memory full image
+        (instant, scaled once), otherwise a high-priority preview decode. The
+        full-resolution frame is attached later without re-rendering the screen.
+        """
+        norm = ImageLoaderRunnable.normalize_path(image_path)
+
+        self.load_counter = getattr(self, "load_counter", 0) + 1
+        self.current_load_id = self.load_counter
+        load_id = self.current_load_id
+        self.current_loading_image = norm
+        self._cancel_pending_loads()
+        self.full_resolution_ready = False
+
+        # Reset per-image adjustments *before* anything is shown. show_image() stages
+        # the target's saved rotation/brightness in desired_*; onImageLoaded applies them.
+        self.cached_texture = None
+        self.brightness_factor = 1.0
+        if hasattr(self, "brightness_slider"):
+            self.brightness_slider.setValue(0)
+        self.compare_enabled = False
+
+        dimension = self.preview_dimension()
+        full = ImageLoaderRunnable.get_cached_image(norm)
+        preview = ImageLoaderRunnable.get_cached_preview(norm, dimension)
+
+        if preview is not None:
             self.onImageLoaded(
-                pix,
+                QPixmap.fromImage(preview),
                 reset_zoom,
                 preserve_zoom,
-                self.current_load_id,
+                load_id,
+                full_resolution=False,
+            )
+            if full is not None:
+                self._attach_full_resolution(QPixmap.fromImage(full), load_id)
+            else:
+                self._full_request_timer.start()
+            return
+
+        if full is not None:
+            self.onImageLoaded(
+                QPixmap.fromImage(full),
+                reset_zoom,
+                preserve_zoom,
+                load_id,
                 full_resolution=True,
             )
             return
 
-        # 3) Otherwise cancel old loader and start a new one…
-        if getattr(self, "loader", None):
-            self.loader.cancel()
-            self.loader = None
-
-        window = self.window()
-        window.image_loading = True
-        cached_preview = ImageLoaderRunnable.get_cached_preview(
-            norm,
-            preview_dimension,
-        )
-        self._preview_shown_for_load_id = None
-        if cached_preview is not None:
-            self._preview_shown_for_load_id = self.current_load_id
-            self.onImageLoaded(
-                QPixmap.fromImage(cached_preview),
-                reset_zoom,
-                preserve_zoom,
-                self.current_load_id,
-                full_resolution=False,
-            )
+        self.window().image_loading = True
         worker = ImageLoaderRunnable(
-            image_path,
-            max_dimension=preview_dimension,
+            norm,
+            max_dimension=dimension,
             progressive=True,
-            load_full=True,
+            load_full=False,
         )
         worker.signals.previewReady.connect(
-            lambda frame, id=self.current_load_id:
-                self.onImageFrameLoaded(
-                    frame,
-                    reset_zoom,
-                    preserve_zoom,
-                    id,
-                )
+            lambda frame, id=load_id:
+                self._on_frame(frame, reset_zoom, preserve_zoom, id)
         )
+        # Small sources are decoded whole in one pass and arrive as full frames.
         worker.signals.fullReady.connect(
-            lambda frame, id=self.current_load_id:
-                self.onImageFrameLoaded(
-                    frame,
-                    False,
-                    preserve_zoom,
-                    id,
-                )
+            lambda frame, id=load_id:
+                self._on_frame(frame, reset_zoom, preserve_zoom, id)
         )
-        # Show user-friendly error message instead of silent print
-        def handle_error(err, load_id=self.current_load_id):
-            if load_id != self.current_load_id:
-                return
-            window = self.window()
-            window.image_loading = False
-            self.loader = None
-            if hasattr(window, 'show_custom_dialog'):
-                lang = getattr(window, 'current_language', 'en')
-                if lang == 'es':
-                    msg = f"No se pudo cargar la imagen:\n{err}"
-                else:
-                    msg = f"Failed to load image:\n{err}"
-                window.show_custom_dialog(msg, icon_type="error", buttons="ok")
-            else:
-                # Fallback if dialog method not available
-                print(f"Error loading image: {err}")
-        worker.signals.error.connect(handle_error)
-        QThreadPool.globalInstance().start(worker)
+        worker.signals.error.connect(
+            lambda err, id=load_id: self._on_load_error(err, id)
+        )
         self.loader = worker
+        worker.start(PRIORITY_CURRENT)
 
-        # --- RESET BRIGHTNESS & COMPARE-MODE FOR NEW IMAGE ---
-        # Nuke any old GPU texture so we rebuild it fresh
-        self.cached_texture    = None
-        # Reset brightness back to neutral
-        self.brightness_factor = 1.0
-        # If you have a brightness slider widget, reset its UI
-        if hasattr(self, "brightness_slider"):
-            self.brightness_slider.setValue(0)
-        # Turn off split-view compare so no diagonal line
-        self.compare_enabled   = False
-
-    def onImageFrameLoaded(
-        self,
-        frame: ImageFrame,
-        reset_zoom: bool,
-        preserve_zoom: bool,
-        load_id: int,
-    ):
+    def _on_frame(self, frame: ImageFrame, reset_zoom: bool, preserve_zoom: bool, load_id: int):
         if load_id != self.current_load_id:
             return
-        if (
-            not frame.full_resolution
-            and load_id == getattr(self, "_preview_shown_for_load_id", None)
-        ):
+        pixmap = QPixmap.fromImage(frame.image)
+        if self._shown_load_id != load_id:
+            self.loader = None
+            self.onImageLoaded(
+                pixmap,
+                reset_zoom,
+                preserve_zoom,
+                load_id,
+                full_resolution=frame.full_resolution,
+            )
+            if not frame.full_resolution:
+                self._full_request_timer.start()
             return
-        if frame.full_resolution:
-            self._preview_shown_for_load_id = None
-        self.onImageLoaded(
-            QPixmap.fromImage(frame.image),
-            reset_zoom,
-            preserve_zoom,
-            load_id,
-            full_resolution=frame.full_resolution,
-        )
+        if frame.full_resolution and not self.full_resolution_ready:
+            self._attach_full_resolution(pixmap, load_id)
 
+    def request_full_resolution(self):
+        """Start (or finish from cache) the full-resolution load for the current image."""
+        self._full_request_timer.stop()
+        if self.full_resolution_ready or self.full_loader is not None:
+            return
+        if self._shown_load_id != self.current_load_id:
+            # Nothing on screen yet; the preview handler re-arms the timer.
+            return
+        norm = getattr(self, "current_loading_image", None)
+        if not norm:
+            return
+        load_id = self.current_load_id
+        cached = ImageLoaderRunnable.get_cached_image(norm)
+        if cached is not None:
+            self._attach_full_resolution(QPixmap.fromImage(cached), load_id)
+            return
+        worker = ImageLoaderRunnable(
+            norm,
+            max_dimension=self.preview_dimension(),
+            progressive=True,
+            load_full=True,
+            load_preview=False,
+        )
+        worker.signals.fullReady.connect(
+            lambda frame, id=load_id: self._on_full_frame(frame, id)
+        )
+        worker.signals.error.connect(
+            lambda err, id=load_id: self._on_load_error(err, id)
+        )
+        self.full_loader = worker
+        worker.start(PRIORITY_FULL_RESOLUTION)
+
+    def _on_full_frame(self, frame: ImageFrame, load_id: int):
+        if load_id != self.current_load_id:
+            return
+        self.full_loader = None
+        self._attach_full_resolution(QPixmap.fromImage(frame.image), load_id)
+
+    def _attach_full_resolution(self, pixmap: QPixmap, load_id: int):
+        """Swap in the full-resolution source without a visible re-render.
+
+        Fit mode: the preview on screen already covers the viewport 1:1, so it is
+        kept as the display frame and only the source changes (no frame drop, no
+        quality "pop"). Zoomed in: the view is rescaled by preview/full so the same
+        part of the photo stays under the same screen pixels.
+        """
+        if load_id != self.current_load_id or pixmap.isNull():
+            return
+        previous = self.original_pixmap
+        self.full_resolution_ready = True
+        self.cached_texture = None
+        if previous is None or previous.isNull():
+            self.original_pixmap = pixmap
+            self._display_cache = None
+            self.updatePixmap()
+            return
+        # Keyboard zoom keeps auto_fit set, so decide from the actual scale (as the
+        # original full-frame handler did) rather than the flag alone.
+        at_fit = self.auto_fit and abs(self.transform().m11() - self.fit_zoom_factor) < 0.01
+        if at_fit:
+            self.original_pixmap = pixmap
+            self._display_cache = (pixmap.cacheKey(), previous)
+            return
+
+        self.auto_fit = False
+        ratio = previous.width() / pixmap.width() if pixmap.width() else 1.0
+        center = self.mapToScene(self.viewport().rect().center())
+        self.original_pixmap = pixmap
+        self._display_cache = None
+        self.updatePixmap()
+        if abs(ratio - 1.0) > 1e-3:
+            self.scale(ratio, ratio)
+            self.zoom_factor = self.transform().m11()
+            self.fit_zoom_factor *= ratio
+            self.centerOn(QPointF(center.x() / ratio, center.y() / ratio))
+            self._apply_sampling_mode()
+
+    def _on_load_error(self, err, load_id):
+        if load_id != self.current_load_id:
+            return
+        window = self.window()
+        window.image_loading = False
+        self.loader = None
+        self.full_loader = None
+        if hasattr(window, 'show_custom_dialog'):
+            lang = getattr(window, 'current_language', 'en')
+            if lang == 'es':
+                msg = f"No se pudo cargar la imagen:\n{err}"
+            else:
+                msg = f"Failed to load image:\n{err}"
+            window.show_custom_dialog(msg, icon_type="error", buttons="ok")
+        else:
+            print(f"Error loading image: {err}")
+
+    def _apply_sampling_mode(self):
+        """Bilinear when the photo is drawn smaller than its pixels, nearest when zoomed in.
+
+        Nearest-neighbour keeps pixel-peeping crisp, but when downscaling it drops
+        whole rows/columns, which shows up as jagged edges and shimmering detail.
+        """
+        scale = abs(self.transform().m11()) * self.viewport().devicePixelRatioF()
+        mode = (
+            Qt.TransformationMode.SmoothTransformation
+            if scale < 0.999
+            else Qt.TransformationMode.FastTransformation
+        )
+        if self.pixmap_item.transformationMode() != mode:
+            self.pixmap_item.setTransformationMode(mode)
 
     def _cancel_loader(self):
         """Safely cancel the image loader and close the overlay, if any."""
@@ -392,7 +499,9 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             return
 
         # QPixmap is implicitly shared. Avoid a full-frame copy on every load.
+        self._shown_load_id = load_id
         self.original_pixmap = pixmap
+        self._display_cache = None
         self.full_resolution_ready = full_resolution
         self.cached_texture  = None
 
@@ -425,9 +534,9 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             self.adjustToFit()
         else:
             display_pix = self._pixmapWithRotationAndBrightness()
-            self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
             self.pixmap_item.setPixmap(display_pix)
             self.scene.setSceneRect(self.pixmap_item.boundingRect())
+            self._apply_sampling_mode()
 
         self.pixmap_item.setVisible(True)
 
@@ -478,21 +587,23 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         source = self.original_pixmap
         if source is None or source.isNull() or not self.auto_fit:
             return source
-        max_dimension = max(
-            1024,
-            min(
-                4096,
-                max(self.viewport().width(), self.viewport().height()) * 2,
-            ),
-        )
+        max_dimension = self.preview_dimension()
         if max(source.width(), source.height()) <= max_dimension:
             return source
-        return source.scaled(
+        cached = self._display_cache
+        if cached is not None and cached[0] == source.cacheKey():
+            frame = cached[1]
+            # Valid while it still covers the viewport (window may have grown).
+            if max(frame.width(), frame.height()) >= max_dimension - 2:
+                return frame
+        frame = source.scaled(
             max_dimension,
             max_dimension,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        self._display_cache = (source.cacheKey(), frame)
+        return frame
 
     def renderFullResolution(self) -> QPixmap:
         """Render current non-destructive adjustments at source resolution."""
@@ -562,7 +673,6 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
 
         # 6) Show the baked pixmap
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
         self.pixmap_item.setPixmap(baked)
 
         # 7) Fit that pixmap to the view & update scene bounds
@@ -574,6 +684,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         scale = self.transform().m11()
         self.zoom_factor     = scale
         self.fit_zoom_factor = scale
+        self._apply_sampling_mode()
 
         # 9) Center (unless explicitly skipped)
         if not getattr(self, "skip_centering", False):
@@ -622,14 +733,14 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # 4) Tag with original DPR
         baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
 
-        # 5) Nearest‐neighbor into item + update bounds
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+        # 5) Into item + update bounds
         self.pixmap_item.setPixmap(baked)
         self.scene.setSceneRect(self.pixmap_item.boundingRect())
 
         # 6) Restore transform & anchor so zoom/pan stay exactly where they were
         self.setTransform(saved_transform)
         self.setTransformationAnchor(saved_anchor)
+        self._apply_sampling_mode()
 
 
     def setBrightness(self, factor):
@@ -661,6 +772,9 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         new_scene_pos = self.mapToScene(event.position().toPoint())
         delta = new_scene_pos - old_scene_pos
         self.translate(delta.x(), delta.y())
+        self._apply_sampling_mode()
+        # Zooming needs real pixels: skip the dwell delay.
+        self.request_full_resolution()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         self.auto_fit = True
@@ -718,6 +832,8 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.scale(factor, factor)
         self.zoom_factor = self.transform().m11()
         self.centerOn(scene_center)
+        self._apply_sampling_mode()
+        self.request_full_resolution()
 
     def rotate_clockwise(self):
         self.rotation_angle = (self.rotation_angle + 90) % 360
@@ -2434,7 +2550,10 @@ class PhotoViewer(QMainWindow):
         self.image_rotations = {}
         self.norm_to_original = {}
         self._directory_cache = {}
-        self._preload_inflight = set()
+        # path -> (token, loader) for neighbour preloads currently queued or decoding
+        self._preload_inflight = {}
+        self._preload_token = 0
+        self._nav_direction = 1
         self._marked_save_timer = QTimer(self)
         self._marked_save_timer.setSingleShot(True)
         self._marked_save_timer.setInterval(250)
@@ -4699,6 +4818,7 @@ class PhotoViewer(QMainWindow):
             # Save the currently displayed image as the "previous"
             self.previous_image = self.image_files[self.current_index]
             self.current_index = 0
+            self._nav_direction = 1
             self.show_image()
 
     def go_to_last_image(self):
@@ -4706,6 +4826,7 @@ class PhotoViewer(QMainWindow):
             # Save the currently displayed image as the "previous"
             self.previous_image = self.image_files[self.current_index]
             self.current_index = len(self.image_files) - 1
+            self._nav_direction = -1
             self.show_image()
         
 
@@ -4810,7 +4931,7 @@ class PhotoViewer(QMainWindow):
         self._history.clear()
         self._modified.clear()
         self._current_path = None
-        self._preload_inflight.clear()
+        self._cancel_preloads()
         # ————————————————————————————————————————————————————————
 
         # Unsaved‐crop check (unchanged)
@@ -4897,65 +5018,82 @@ class PhotoViewer(QMainWindow):
         self.image_loading = True
 
         # ——— Phase 2: display current image before scheduling speculative work ———
-        viewer = self.image_viewer
-        pix = ImageLoaderRunnable.get_cached_pixmap(path)
-        if pix is not None:
-            viewer.load_counter = getattr(viewer, "load_counter", 0) + 1
-            viewer.current_load_id = viewer.load_counter
-            viewer.onImageLoaded(
-                pix,
-                reset_zoom,
-                preserve_zoom,
-                viewer.current_load_id,
-                full_resolution=True,
-            )
-        else:
-            viewer.setImage(path, reset_zoom, preserve_zoom)
+        self.image_viewer.setImage(path, reset_zoom, preserve_zoom)
 
-        # ——— Phase 3: preload display-sized neighbors, forward first ———
-        from PyQt6.QtCore import QThreadPool
-        preview_dimension = max(
-            1024,
-            min(
-                4096,
-                max(viewer.viewport().width(), viewer.viewport().height()) * 2,
-            ),
-        )
-        for neighbor_index in (self.current_index + 1, self.current_index - 1):
-            if not (0 <= neighbor_index < len(self.image_files)):
-                continue
-            neighbor_path = self.image_files[neighbor_index]
-            if (
-                ImageLoaderRunnable.get_cached_preview(
-                    neighbor_path,
-                    preview_dimension,
-                )
-                is not None
-            ):
-                continue
-            if neighbor_path in self._preload_inflight:
-                continue
-            loader = ImageLoaderRunnable(
-                neighbor_path,
-                max_dimension=preview_dimension,
-                progressive=True,
-                load_full=False,
-            )
-            self._preload_inflight.add(neighbor_path)
-            loader.signals.previewReady.connect(
-                lambda _frame, path=neighbor_path:
-                    self._preload_inflight.discard(path)
-            )
-            loader.signals.error.connect(
-                lambda _err, path=neighbor_path:
-                    self._preload_inflight.discard(path)
-            )
-            QThreadPool.globalInstance().start(loader)
+        # ——— Phase 3: preload screen-sized neighbours in the direction of travel ———
+        self._schedule_preloads()
 
         # ——— Phase 4: refresh controls ———
         self.update_floating_controls()
 
 
+
+    def _cancel_preloads(self):
+        for _token, loader in self._preload_inflight.values():
+            loader.cancel()
+        self._preload_inflight.clear()
+
+    def _preload_finished(self, path, token):
+        entry = self._preload_inflight.get(path)
+        if entry is not None and entry[0] == token:
+            self._preload_inflight.pop(path, None)
+
+    def _schedule_preloads(self):
+        """Keep the next two photos (travel direction) and the previous one decoded.
+
+        Preloads that fell out of that window are cancelled, so holding an arrow
+        key never leaves a backlog of decodes for photos already skipped past.
+        """
+        total = len(self.image_files)
+        if total <= 1 or not (0 <= self.current_index < total):
+            self._cancel_preloads()
+            return
+        step = -1 if self._nav_direction < 0 else 1
+        plan = (
+            (step, PRIORITY_PRELOAD_NEXT),
+            (-step, PRIORITY_PRELOAD_PREVIOUS),
+            (2 * step, PRIORITY_PRELOAD_AHEAD),
+        )
+        current_path = self.image_files[self.current_index]
+        targets = []
+        for offset, priority in plan:
+            index = self.current_index + offset
+            if self.loop_navigation:
+                index %= total
+            elif not (0 <= index < total):
+                continue
+            path = self.image_files[index]
+            if path != current_path and path not in (p for p, _ in targets):
+                targets.append((path, priority))
+
+        wanted = {path for path, _ in targets}
+        for path in list(self._preload_inflight):
+            if path not in wanted:
+                self._preload_inflight.pop(path)[1].cancel()
+
+        dimension = self.image_viewer.preview_dimension()
+        for path, priority in targets:
+            if path in self._preload_inflight:
+                continue
+            if (
+                ImageLoaderRunnable.get_cached_preview(path, dimension) is not None
+                or ImageLoaderRunnable.get_cached_image(path) is not None
+            ):
+                continue
+            self._preload_token += 1
+            token = self._preload_token
+            loader = ImageLoaderRunnable(
+                path,
+                max_dimension=dimension,
+                progressive=True,
+                load_full=False,
+            )
+            done = lambda *_args, p=path, t=token: self._preload_finished(p, t)
+            loader.signals.previewReady.connect(done)
+            loader.signals.fullReady.connect(done)
+            loader.signals.error.connect(done)
+            self._preload_inflight[path] = (token, loader)
+            loader.start(priority)
 
     def update_window_title_and_label(self, image_path):
         t = translations[self.current_language]
@@ -4989,6 +5127,7 @@ class PhotoViewer(QMainWindow):
             self.current_index += 1
         elif self.loop_navigation:
             self.current_index = 0
+        self._nav_direction = 1
         self.show_image()
         
     def show_previous_image(self):
@@ -5007,6 +5146,7 @@ class PhotoViewer(QMainWindow):
             self.current_index -= 1
         elif self.loop_navigation:
             self.current_index = len(self.image_files) - 1
+        self._nav_direction = -1
         self.show_image()
 
     def toggle_favorite(self):
@@ -5193,7 +5333,7 @@ class PhotoViewer(QMainWindow):
             # 1) Move to trash
             send2trash.send2trash(os.path.abspath(current_image))
             ImageLoaderRunnable.drop_cached_pixmap(current_image)
-            self._preload_inflight.discard(current_image)
+            self._preload_inflight.pop(current_image, None)
             self._invalidate_directory_cache(self.current_directory)
 
             # 2) Remove from the filtered list in memory
@@ -5471,6 +5611,7 @@ class PhotoViewer(QMainWindow):
 
     def open_brightness_overlay(self):
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,
@@ -5549,7 +5690,8 @@ class PhotoViewer(QMainWindow):
 
         # 8) Capture the initial state for undo (but do NOT push yet)
         self._brightness_initial_state = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6069,6 +6211,7 @@ class PhotoViewer(QMainWindow):
         if not self.image_files or self.current_index < 0:
             return
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             t = translations.get(self.current_language, translations["en"])
             self.show_ephemeral_message(
                 t.get(
@@ -6268,7 +6411,7 @@ class PhotoViewer(QMainWindow):
             for deleted_image in non_favorites:
                 if not os.path.exists(deleted_image):
                     ImageLoaderRunnable.drop_cached_pixmap(deleted_image)
-                    self._preload_inflight.discard(deleted_image)
+                    self._preload_inflight.pop(deleted_image, None)
             self._invalidate_directory_cache(self.current_directory)
 
             # Remove deleted files from the current list
@@ -6313,6 +6456,7 @@ class PhotoViewer(QMainWindow):
             return
         t = translations.get(self.current_language, translations["en"])
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(t.get("full_resolution_loading", "Full-resolution image is still loading."))
             return
         pixmap = self.image_viewer.original_pixmap
@@ -6362,6 +6506,7 @@ class PhotoViewer(QMainWindow):
 
     def open_crop_overlay(self):
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,
@@ -6488,7 +6633,8 @@ class PhotoViewer(QMainWindow):
 
         # ==== BEGIN ORIGINAL push_undo_state BODY ====
         state = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6500,6 +6646,29 @@ class PhotoViewer(QMainWindow):
         # ==== END ORIGINAL BODY ====
 
         after = len(hist["undo"])
+
+    def _restore_snapshot_resolution(self, state):
+        """Keep ``full_resolution_ready`` truthful after restoring an undo/redo snapshot.
+
+        A snapshot taken before the full-resolution frame arrived holds the screen
+        preview. Pixel edits (crop, sharpen, editor) require full resolution, so such a
+        snapshot is always the unedited file: restore the full frame instead when it is
+        cached, otherwise mark the view as preview-only (save/edit stay blocked) and
+        fetch it. Without this, saving after an undo could write the downscaled preview.
+        """
+        viewer = self.image_viewer
+        viewer._display_cache = None
+        if state.get("full_res", True):
+            viewer.full_resolution_ready = True
+            return
+        path = getattr(self, "_current_path", None)
+        full = ImageLoaderRunnable.get_cached_image(path) if path else None
+        if full is not None:
+            viewer.original_pixmap = QPixmap.fromImage(full)
+            viewer.full_resolution_ready = True
+        else:
+            viewer.full_resolution_ready = False
+            viewer.request_full_resolution()
 
     def undo_action(self):
         """
@@ -6518,7 +6687,8 @@ class PhotoViewer(QMainWindow):
 
         # 2) Push current into redo
         curr = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6528,6 +6698,7 @@ class PhotoViewer(QMainWindow):
 
         # 3) Apply popped state
         self.image_viewer.original_pixmap   = state["pixmap"]
+        self._restore_snapshot_resolution(state)
         self.image_viewer.rotation_angle    = state["rotation"]
         self.image_viewer.brightness_factor = state["brightness"]
         # clear out any old GPU cache so we rebuild on next paint
@@ -6584,7 +6755,8 @@ class PhotoViewer(QMainWindow):
 
         # 2) Push current into undo
         curr = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6594,6 +6766,7 @@ class PhotoViewer(QMainWindow):
 
         # 3) Apply popped state
         self.image_viewer.original_pixmap   = state["pixmap"]
+        self._restore_snapshot_resolution(state)
         self.image_viewer.rotation_angle    = state["rotation"]
         self.image_viewer.brightness_factor = state["brightness"]
         # clear any old GPU texture cache
@@ -6761,6 +6934,7 @@ class PhotoViewer(QMainWindow):
         We only snapshot when the user actually applies the change.
         """
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,

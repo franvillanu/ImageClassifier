@@ -3,20 +3,84 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 
 from PIL import Image, ImageOps
-from PyQt6.QtCore import QObject, QRunnable, QSize, QStandardPaths, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import (
+    QObject,
+    QRunnable,
+    QSize,
+    QStandardPaths,
+    Qt,
+    QThread,
+    QThreadPool,
+    pyqtSignal,
+    pyqtSlot,
+)
 from PyQt6.QtGui import QImage, QImageReader, QPixmap
 
 HEIF_EXTENSIONS = (".heic", ".heif")
 PREVIEW_CACHE_VERSION = 1
 DEFAULT_PREVIEW_DIMENSION = 2048
+MIN_PREVIEW_DIMENSION = 1024
+MAX_PREVIEW_DIMENSION = 4096
+PREVIEW_DIMENSION_STEP = 128
+
+# Thread-pool priorities (higher runs first). The image on screen always wins; the
+# next image in the travel direction comes before the full-resolution upgrade.
+PRIORITY_CURRENT = 10
+PRIORITY_PRELOAD_NEXT = 6
+PRIORITY_FULL_RESOLUTION = 5
+PRIORITY_PRELOAD_PREVIOUS = 4
+PRIORITY_PRELOAD_AHEAD = 3
+
 _heif_registered = False
 _heif_lock = threading.Lock()
+
+
+def _decode_thread_count() -> int:
+    """Concurrent decodes: enough to overlap preloads, few enough to keep memory bounded."""
+    return max(2, min(4, QThread.idealThreadCount() - 1))
+
+
+def preview_dimension_for(width: float, height: float, device_pixel_ratio: float = 1.0) -> int:
+    """Longest preview side that covers a viewport 1:1 in physical pixels.
+
+    A photo fitted to the viewport is never drawn larger than the viewport's longest
+    side, so decoding beyond that only costs time and memory. The value is rounded up
+    to a fixed step so small window-size changes keep hitting the same cache entries.
+    """
+    longest = max(float(width), float(height)) * max(1.0, float(device_pixel_ratio or 1.0))
+    stepped = int(math.ceil(longest / PREVIEW_DIMENSION_STEP)) * PREVIEW_DIMENSION_STEP
+    return max(MIN_PREVIEW_DIMENSION, min(MAX_PREVIEW_DIMENSION, stepped))
+
+
+def to_display_format(image: QImage) -> QImage:
+    """Return ``image`` in QPixmap's native raster format.
+
+    ``QPixmap.fromImage`` runs on the GUI thread. With a native-format image it is
+    effectively free; with any other format (e.g. RGBA8888) it performs a full-frame
+    conversion that freezes the UI for tens of milliseconds per photo. Converting here,
+    on the worker thread, keeps that cost off the GUI thread.
+    """
+    if image.isNull():
+        return image
+    target = (
+        QImage.Format.Format_ARGB32_Premultiplied
+        if image.hasAlphaChannel()
+        else QImage.Format.Format_RGB32
+    )
+    if image.format() == target:
+        return image
+    return image.convertToFormat(target)
+
+
+class _LoadCancelled(Exception):
+    """Raised inside a worker when its result is no longer wanted."""
 
 
 def _ensure_heif_registered():
@@ -46,16 +110,32 @@ def _read_with_pillow(image_path: str) -> QImage:
     if os.path.splitext(image_path)[1].lower() in HEIF_EXTENSIONS:
         _ensure_heif_registered()
     with Image.open(image_path) as pil_image:
-        pil_image = ImageOps.exif_transpose(pil_image).convert("RGBA")
-        data = pil_image.tobytes("raw", "RGBA")
+        pil_image = ImageOps.exif_transpose(pil_image)
+        has_alpha = pil_image.mode in ("RGBA", "LA", "PA", "RGBa", "La") or (
+            pil_image.mode == "P" and "transparency" in pil_image.info
+        )
+        if has_alpha:
+            pil_image = pil_image.convert("RGBA")
+            data = pil_image.tobytes("raw", "RGBA")
+            image = QImage(
+                data,
+                pil_image.width,
+                pil_image.height,
+                pil_image.width * 4,
+                QImage.Format.Format_RGBA8888,
+            )
+            # convertToFormat always allocates here (formats differ), detaching from ``data``.
+            return image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        pil_image = pil_image.convert("RGB")
+        data = pil_image.tobytes("raw", "RGB")
         image = QImage(
             data,
             pil_image.width,
             pil_image.height,
-            pil_image.width * 4,
-            QImage.Format.Format_RGBA8888,
+            pil_image.width * 3,
+            QImage.Format.Format_RGB888,
         )
-        return image.copy()
+        return image.convertToFormat(QImage.Format.Format_RGB32)
 
 
 def save_pixmap(pixmap: QPixmap, image_path: str) -> bool:
@@ -145,12 +225,17 @@ class ImageLoaderRunnable(QRunnable):
     _cache_bytes_limit = 512 * 1024 * 1024
     _cache_bytes = 0
     _full_cache = _ImageCache(_cache_bytes_limit)
-    _preview_cache = _ImageCache(128 * 1024 * 1024)
+    # Screen-sized previews are ~9 MB at 1080p and ~38 MB at 4K; 256 MB keeps the
+    # current photo, the preload window and recent history resident on either.
+    _preview_cache = _ImageCache(256 * 1024 * 1024)
     _cache_lock = threading.RLock()
-    _native_decode_slots = threading.Semaphore(2)
+    _native_decode_slots = threading.Semaphore(_decode_thread_count())
     _heif_decode_slots = threading.Semaphore(1)
     _disk_cache_limit = 1024 * 1024 * 1024
     _disk_cache_enabled = True
+    _disk_cache_estimate = None
+    _disk_cache_lock = threading.Lock()
+    _thread_pool = None
 
     def __init__(
         self,
@@ -159,14 +244,35 @@ class ImageLoaderRunnable(QRunnable):
         *,
         progressive: bool = False,
         load_full: bool = True,
+        load_preview: bool = True,
     ):
         super().__init__()
         self.image_path = self.normalize_path(image_path)
         self.max_dimension = max(256, int(max_dimension))
         self.progressive = progressive
         self.load_full = load_full
+        self.load_preview = load_preview
         self.signals = WorkerSignals()
         self._cancelled = False
+
+    @classmethod
+    def thread_pool(cls) -> QThreadPool:
+        """Dedicated decode pool.
+
+        Sized to the number of decode slots so queued work waits in the pool's
+        priority queue (where the on-screen image can overtake preloads) instead of
+        blocking on a semaphore in arrival order.
+        """
+        if cls._thread_pool is None:
+            pool = QThreadPool()
+            pool.setMaxThreadCount(_decode_thread_count())
+            pool.setExpiryTimeout(30000)
+            cls._thread_pool = pool
+        return cls._thread_pool
+
+    def start(self, priority: int = 0):
+        """Queue this loader on the decode pool."""
+        self.thread_pool().start(self, priority)
 
     @classmethod
     def normalize_path(cls, image_path: str) -> str:
@@ -298,7 +404,16 @@ class ImageLoaderRunnable(QRunnable):
             temp_path = cache_path + ".tmp"
             if image.save(temp_path, "JPG", 88):
                 os.replace(temp_path, cache_path)
-                cls._prune_disk_cache()
+                written = os.path.getsize(cache_path)
+                # Only rescan the folder when the running estimate crosses the limit.
+                with cls._disk_cache_lock:
+                    if cls._disk_cache_estimate is None:
+                        needs_scan = True
+                    else:
+                        cls._disk_cache_estimate += written
+                        needs_scan = cls._disk_cache_estimate > cls._disk_cache_limit
+                if needs_scan:
+                    cls._prune_disk_cache()
         except OSError:
             return
 
@@ -315,6 +430,8 @@ class ImageLoaderRunnable(QRunnable):
                     total += stat.st_size
                     entries.append((stat.st_atime_ns, stat.st_size, entry.path))
             if total <= cls._disk_cache_limit:
+                with cls._disk_cache_lock:
+                    cls._disk_cache_estimate = total
                 return
             entries.sort()
             target = int(cls._disk_cache_limit * 0.9)
@@ -326,6 +443,8 @@ class ImageLoaderRunnable(QRunnable):
                     pass
                 if total <= target:
                     break
+            with cls._disk_cache_lock:
+                cls._disk_cache_estimate = total
         except OSError:
             return
 
@@ -341,6 +460,8 @@ class ImageLoaderRunnable(QRunnable):
                             pass
         except OSError:
             pass
+        with cls._disk_cache_lock:
+            cls._disk_cache_estimate = None
 
     @classmethod
     def disk_cache_size(cls):
@@ -357,6 +478,14 @@ class ImageLoaderRunnable(QRunnable):
     def cancel(self):
         self._cancelled = True
 
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def _raise_if_cancelled(self):
+        if self._cancelled:
+            raise _LoadCancelled()
+
     def _scaled_preview(self, image: QImage):
         if max(image.width(), image.height()) <= self.max_dimension:
             return image
@@ -367,11 +496,18 @@ class ImageLoaderRunnable(QRunnable):
         )
 
     def _read_qt_preview(self):
+        """Decode a screen-sized frame.
+
+        Returns ``(image, is_full)``; ``is_full`` is True when the source already fits
+        the preview size, so the decoded frame *is* the full-resolution image.
+        """
         with self._native_decode_slots:
+            self._raise_if_cancelled()
             reader = QImageReader(self.image_path)
             reader.setAutoTransform(True)
             reader.setAllocationLimit(512)
             size = reader.size()
+            scaled = False
             if size.isValid() and max(size.width(), size.height()) > self.max_dimension:
                 size.scale(
                     self.max_dimension,
@@ -379,10 +515,12 @@ class ImageLoaderRunnable(QRunnable):
                     Qt.AspectRatioMode.KeepAspectRatio,
                 )
                 reader.setScaledSize(size)
-            return reader.read()
+                scaled = True
+            return reader.read(), not scaled
 
     def _read_full(self):
         with self._native_decode_slots:
+            self._raise_if_cancelled()
             reader = QImageReader(self.image_path)
             reader.setAutoTransform(True)
             reader.setAllocationLimit(512)
@@ -392,7 +530,7 @@ class ImageLoaderRunnable(QRunnable):
         return _read_with_pillow(self.image_path)
 
     def _emit_preview(self, image: QImage):
-        image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        image = to_display_format(image)
         self._preview_cache.put(
             self._preview_key(self.image_path, self.max_dimension),
             image,
@@ -402,7 +540,7 @@ class ImageLoaderRunnable(QRunnable):
         )
 
     def _emit_full(self, image: QImage):
-        image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        image = to_display_format(image)
         self._full_cache.put(self._memory_source_key(self.image_path), image)
         frame = ImageFrame(self.image_path, image, full_resolution=True)
         self.signals.fullReady.emit(frame)
@@ -413,10 +551,15 @@ class ImageLoaderRunnable(QRunnable):
     def run(self):
         if self._cancelled:
             return
+        try:
+            self._run()
+        except _LoadCancelled:
+            return
 
+    def _run(self):
         full = self.get_cached_image(self.image_path)
         if full is not None:
-            if self.progressive:
+            if self.progressive and self.load_preview:
                 preview = self._scaled_preview(full)
                 self._emit_preview(preview)
             if self.load_full:
@@ -430,13 +573,15 @@ class ImageLoaderRunnable(QRunnable):
                 self.signals.error.emit(f"Failed to read {self.image_path}")
             return
 
-        preview = self.get_cached_preview(self.image_path, self.max_dimension)
-        if preview is None:
-            preview = self._load_disk_preview(self.image_path, self.max_dimension)
-        if preview is not None:
-            self._emit_preview(preview)
-            if not self.load_full:
-                return
+        preview = None
+        if self.load_preview:
+            preview = self.get_cached_preview(self.image_path, self.max_dimension)
+            if preview is None:
+                preview = self._load_disk_preview(self.image_path, self.max_dimension)
+            if preview is not None:
+                self._emit_preview(preview)
+                if not self.load_full:
+                    return
 
         extension = os.path.splitext(self.image_path)[1].lower()
         try:
@@ -444,10 +589,12 @@ class ImageLoaderRunnable(QRunnable):
                 # pillow-heif cannot perform a reduced decode. Decode once, derive the
                 # preview, then retain the same full frame for the quality upgrade.
                 with self._heif_decode_slots:
-                    if self._cancelled:
-                        return
-                    full = self._read_full()
-                if preview is None and not self._cancelled:
+                    self._raise_if_cancelled()
+                    full = to_display_format(self._read_full())
+                if not self.load_full:
+                    # Keep the expensive decode so the later upgrade is a cache hit.
+                    self._full_cache.put(self._memory_source_key(self.image_path), full)
+                if self.load_preview and preview is None and not self._cancelled:
                     preview = self._scaled_preview(full)
                     self._emit_preview(preview)
                     self._store_disk_preview(
@@ -459,21 +606,27 @@ class ImageLoaderRunnable(QRunnable):
                     self._emit_full(full)
                 return
 
-            if preview is None:
-                preview = self._read_qt_preview()
+            if self.load_preview and preview is None:
+                preview, is_full = self._read_qt_preview()
                 if preview.isNull():
                     raise OSError("preview decode failed")
-                if not self._cancelled:
-                    self._emit_preview(preview)
-                    self._store_disk_preview(
-                        self.image_path,
-                        self.max_dimension,
-                        preview,
-                    )
+                if self._cancelled:
+                    return
+                if is_full:
+                    # Source fits the screen: this decode is the full image.
+                    self._emit_full(preview)
+                    return
+                self._emit_preview(preview)
+                self._store_disk_preview(
+                    self.image_path,
+                    self.max_dimension,
+                    preview,
+                )
 
             if self.load_full and not self._cancelled:
                 full = self._read_full()
                 if not self._cancelled:
                     self._emit_full(full)
         except (OSError, ValueError, SyntaxError, RuntimeError, EOFError):
-            self.signals.error.emit(f"Failed to read {self.image_path}")
+            if not self._cancelled:
+                self.signals.error.emit(f"Failed to read {self.image_path}")
