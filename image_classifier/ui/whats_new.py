@@ -180,7 +180,7 @@ class WhatsNewOverlay(QWidget):
 
     def _place_card(self):
         s = self._s
-        width = min(px(800, s), max(px(320, s), self.width() - 80))
+        width = min(px(560, s), max(px(320, s), self.width() - 80))
         self.card.setFixedWidth(width)
         self._body.setFixedWidth(width - px(26, s) * 2 - px(8, s))
         content = self._body.layout().totalHeightForWidth(self._body.width())
