@@ -26,9 +26,9 @@ STYLE = f"""
         background-color: #17181a; border: 1px solid #3d4047; border-radius: 12px;
     }}
     #SettingsContainer QWidget {{ background: transparent; }}
-    #SettingsContainer QLabel {{ color: #e8eaed; font-size: 14px; border: none; padding: 0; }}
+    #SettingsContainer QLabel {{ color: #e8eaed; font-size: 15px; border: none; padding: 0; }}
     #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
-    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 11px; font-weight: bold; }}
+    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 12px; font-weight: bold; padding: 18px 6px 8px 6px; }}
     #SettingsContainer QFrame#rule {{ background-color: #2c3036; border: none; }}
     #SettingsContainer QWidget#Card {{ background-color: #1e2024; border: 1px solid #2c3036; border-radius: 10px; }}
     #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #25282d; }}
@@ -226,7 +226,6 @@ class SettingsPanel(QWidget):
         """Start a new group: a small caption, then a rounded card that the next rows go into."""
         label = QLabel(text.upper(), self.body)
         label.setObjectName("groupTitle")
-        label.setContentsMargins(px(6, self.scale), px(16, self.scale), px(6, self.scale), px(6, self.scale))
         self.body_layout.addWidget(label)
         self._card_widget = QWidget(self.body)
         self._card_widget.setObjectName("Card")

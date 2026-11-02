@@ -5,7 +5,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from image_classifier.updates.notes import sections
-from image_classifier.ui.scaling import px, scale_css, ui_scale
+from image_classifier.ui.scaling import px, scale_css
 
 # kind -> (icon, colour); titles come from the caller (translated)
 SECTION_STYLE = {"new": ("enhance", "#3ccf7a"), "changed": ("refresh", "#b9a2ff"), "fixed": ("bug", "#ffa159")}
@@ -18,7 +18,7 @@ class WhatsNewOverlay(QWidget):
     def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None,
                  latest_text=None):
         super().__init__(parent)
-        self._s = s = ui_scale(parent)
+        self._s = s = 1.0  # release notes keep their fixed sizes (only the options panel scales)
         titles = {**DEFAULT_TITLES, **(section_titles or {})}
         self._on_closed = on_closed
         self.setObjectName("WhatsNewOverlay")

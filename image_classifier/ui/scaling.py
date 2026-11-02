@@ -1,18 +1,26 @@
-"""Scale pop-up text and spacing with the window, so they stay readable on large screens."""
+"""Scale pop-up text and spacing with the screen's resolution, so they stay readable on large screens."""
 
 import re
 
-BASE_HEIGHT = 1000  # window height at which sizes are used as written
-MAX_SCALE = 1.8
+REFERENCE_HEIGHT = 1440  # physical screen height (pixels) up to which sizes are used as written
+MAX_SCALE = 1.6
 
 
 def ui_scale(widget) -> float:
-    """1.0 on small windows, growing with the window height up to MAX_SCALE."""
+    """1.0 on screens up to 1440p, growing with the physical resolution up to MAX_SCALE.
+
+    Uses the screen (not the window), so it does not change when the window is resized, and the
+    physical pixel height (logical height x device pixel ratio), so a 4K display gets bigger text
+    even when Windows display scaling already enlarges everything a little.
+    """
     try:
-        height = widget.window().height() if widget is not None else BASE_HEIGHT
+        screen = widget.screen() if widget is not None else None
+        if screen is None:
+            return 1.0
+        physical_height = screen.geometry().height() * screen.devicePixelRatio()
     except RuntimeError:
-        height = BASE_HEIGHT
-    return max(1.0, min(MAX_SCALE, height / BASE_HEIGHT))
+        return 1.0
+    return max(1.0, min(MAX_SCALE, physical_height / REFERENCE_HEIGHT))
 
 
 def px(value: float, scale: float) -> int:
