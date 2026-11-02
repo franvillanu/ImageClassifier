@@ -22,7 +22,7 @@ SEGMENT_ON = "#4a4f58"
 # Every rule is scoped with #SettingsContainer so it beats the app-wide `QWidget { background: black }`
 STYLE = f"""
     QWidget#SettingsContainer {{
-        background-color: #17181a; border: 1px solid #4a4f58; border-radius: 14px;
+        background-color: #17181a; border: 1px solid #4a4f58; border-radius: 12px;
     }}
     #SettingsContainer QWidget {{ background: transparent; }}
     #SettingsContainer QLabel {{ color: #e8eaed; font-size: 14px; border: none; padding: 0; }}
