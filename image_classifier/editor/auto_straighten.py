@@ -45,7 +45,8 @@ def estimate_angle(image: np.ndarray) -> float | None:
     if lines is None:
         return None
     tilts, weights = [], []
-    for x1, y1, x2, y2 in lines[:, 0, :]:
+    # OpenCV 4 returns (N, 1, 4); OpenCV 5 returns (N, 4). Normalise both.
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
         dx, dy = float(x2 - x1), float(y2 - y1)
         length = math.hypot(dx, dy)
         a = math.degrees(math.atan2(dy, dx))  # screen convention: positive = clockwise

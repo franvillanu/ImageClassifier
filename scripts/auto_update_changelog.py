@@ -67,7 +67,7 @@ def get_user_release_notes(version: str) -> list[tuple[str, str]]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split("|", 2)
+        parts = line.split("|", 3)  # a 4th field is the optional release date
         if len(parts) >= 3 and parts[0].strip() == version:
             en, es = split_points(parts[1]), split_points(parts[2])
             if len(en) == len(es) and en:

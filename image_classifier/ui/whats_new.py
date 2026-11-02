@@ -5,17 +5,20 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from image_classifier.updates.notes import sections
+from image_classifier.ui.scaling import px, scale_css
 
 # kind -> (icon, colour); titles come from the caller (translated)
-SECTION_STYLE = {"new": ("enhance", "#4aa3ff"), "changed": ("refresh", "#f0b429"), "fixed": ("bug", "#3ccf7a")}
+SECTION_STYLE = {"new": ("enhance", "#3ccf7a"), "changed": ("refresh", "#b9a2ff"), "fixed": ("bug", "#ffa159")}
 DEFAULT_TITLES = {"new": "New features", "changed": "Changes", "fixed": "Fixes"}
 
 
 class WhatsNewOverlay(QWidget):
-    """Dimmed full-window overlay with a centered card. `entries` is [(heading, text)]."""
+    """Dimmed full-window overlay with a centered card. `entries` is [(heading, text[, date])]."""
 
-    def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None):
+    def __init__(self, parent, title, entries, close_text, empty_text, on_closed, section_titles=None,
+                 latest_text=None):
         super().__init__(parent)
+        self._s = s = 1.0  # release notes keep their fixed sizes (only the options panel scales)
         titles = {**DEFAULT_TITLES, **(section_titles or {})}
         self._on_closed = on_closed
         self.setObjectName("WhatsNewOverlay")
@@ -29,31 +32,38 @@ class WhatsNewOverlay(QWidget):
 
         self.card = QWidget(self)
         self.card.setObjectName("WhatsNewCard")
-        self.card.setStyleSheet("""
+        self.card.setStyleSheet(scale_css("""
             QWidget#WhatsNewCard {
-                background-color: #14161c; border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 40);
+                background-color: #17181a; border-radius: 12px;
+                border: 1px solid #3d4047;
             }
             QLabel { background: transparent; color: white; font-size: 15px; }
             QLabel#title { font-size: 21px; font-weight: bold; }
-            QLabel#heading { color: #4aa3ff; font-size: 14px; font-weight: bold; }
+            QLabel#heading { color: white; font-size: 22px; font-weight: bold; }
+            QLabel#chip {
+                background-color: #2a77c6; color: white; border-radius: 11px;
+                padding: 0 10px; font-size: 12px; font-weight: bold;
+            }
+            QLabel#date { color: #9aa1ab; font-size: 13px; }
             QLabel#empty { color: #8a8f98; }
             QLabel#dot { color: #8a8f98; font-size: 15px; font-weight: bold; }
             QLabel#section { font-size: 15px; font-weight: bold; }
-            QFrame#divider { background-color: rgba(255, 255, 255, 30); border: none; }
-            QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
-            QScrollBar:vertical { background: transparent; width: 8px; }
-            QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 24px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QFrame#divider { background-color: rgba(255, 255, 255, 60); border: none; }
+            QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
+            QScrollBar:vertical { background: transparent; border: none; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #3a3e45; border-radius: 4px; min-height: 28px; }
+            QScrollBar::handle:vertical:hover { background: #4d525a; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: transparent; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
             QPushButton {
                 background-color: #DC3545; color: white; border: none;
                 border-radius: 8px; padding: 8px 28px; font-size: 15px;
             }
             QPushButton:hover { background-color: #B22222; }
-        """)
+        """, s))
         layout = QVBoxLayout(self.card)
-        layout.setContentsMargins(26, 22, 26, 22)
-        layout.setSpacing(18)
+        layout.setContentsMargins(px(26, s), px(22, s), px(26, s), px(22, s))
+        layout.setSpacing(px(18, s))
 
         title_label = QLabel(title, self.card)
         title_label.setObjectName("title")
@@ -67,30 +77,36 @@ class WhatsNewOverlay(QWidget):
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 8, 0)
-        body_layout.setSpacing(4)
+        body_layout.setContentsMargins(0, 0, px(22, s), 0)
+        body_layout.setSpacing(px(4, s))
         if not entries:
             empty = QLabel(empty_text, body)
             empty.setObjectName("empty")
             body_layout.addWidget(empty)
-        for index, (heading, text) in enumerate(entries):
+        for index, entry in enumerate(entries):
+            heading, text, *rest = entry
+            date = rest[0] if rest else None
+            if index:  # clear break between versions
+                body_layout.addSpacing(px(14, s))
+                rule = QFrame(body)
+                rule.setObjectName("divider")
+                rule.setFixedHeight(1)
+                body_layout.addWidget(rule)
+                body_layout.addSpacing(px(16, s))
             if heading:
-                head = QLabel(heading, body)
-                head.setObjectName("heading")
-                body_layout.addWidget(head)
+                body_layout.addLayout(self._version_header(body, heading, date, latest_text if index == 0 else None))
+                body_layout.addSpacing(px(8, s))
             groups = sections(text) or [(None, [text])]
             for g, (kind, points) in enumerate(groups):
                 if g:
-                    body_layout.addSpacing(14)
+                    body_layout.addSpacing(px(14, s))
                 if kind:  # Sidera-style section: coloured icon + title, then its points
                     body_layout.addLayout(self._section_header(body, kind, titles[kind]))
-                    body_layout.addSpacing(6)
+                    body_layout.addSpacing(px(6, s))
                 for number, point in enumerate(points):
                     if number:
-                        body_layout.addSpacing(6)
+                        body_layout.addSpacing(px(6, s))
                     body_layout.addLayout(self._point_row(body, point, bullet=bool(kind) or len(points) > 1))
-            if index < len(entries) - 1:
-                body_layout.addSpacing(12)
         body_layout.addStretch(1)
 
         scroll = QScrollArea(self.card)
@@ -109,6 +125,27 @@ class WhatsNewOverlay(QWidget):
         self._scroll = scroll
         self._body = body
 
+    def _version_header(self, parent, heading, date, latest_text):
+        """Version number, optional 'Latest' chip, and the release date on the right."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        head = QLabel(heading, parent)
+        head.setObjectName("heading")
+        row.addWidget(head, 0, Qt.AlignmentFlag.AlignVCenter)
+        if latest_text:
+            chip = QLabel(latest_text, parent)
+            chip.setObjectName("chip")
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chip.setFixedHeight(px(22, self._s))
+            row.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch(1)
+        if date:
+            when = QLabel(date, parent)
+            when.setObjectName("date")
+            row.addWidget(when, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
     def _section_header(self, parent, kind, title):
         from PyQt6.QtCore import QSize
         from image_classifier.editor import icons
@@ -117,8 +154,9 @@ class WhatsNewOverlay(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
         icon = QLabel(parent)
-        icon.setPixmap(icons.icon(icon_name, 20, halo=False, color=colour).pixmap(QSize(20, 20), self.devicePixelRatioF()))
-        icon.setFixedSize(20, 20)
+        side = px(20, self._s)
+        icon.setPixmap(icons.icon(icon_name, side, halo=False, color=colour).pixmap(QSize(side, side), self.devicePixelRatioF()))
+        icon.setFixedSize(side, side)
         label = QLabel(title, parent)
         label.setObjectName("section")
         label.setStyleSheet(f"color: {colour};")
@@ -128,7 +166,7 @@ class WhatsNewOverlay(QWidget):
 
     def _point_row(self, parent, point, bullet):
         row = QHBoxLayout()
-        row.setContentsMargins(28 if bullet else 0, 0, 0, 0)
+        row.setContentsMargins(px(28, self._s) if bullet else 0, 0, 0, 0)
         row.setSpacing(10)
         if bullet:
             dot = QLabel("•", parent)
@@ -141,11 +179,12 @@ class WhatsNewOverlay(QWidget):
         return row
 
     def _place_card(self):
-        width = min(620, max(320, self.width() - 80))
+        s = self._s
+        width = min(px(800, s), max(px(320, s), self.width() - 80))
         self.card.setFixedWidth(width)
-        self._body.setFixedWidth(width - 26 * 2 - 8)
+        self._body.setFixedWidth(width - px(26, s) * 2 - px(8, s))
         content = self._body.layout().totalHeightForWidth(self._body.width())
-        chrome = 190  # title, divider, button, spacing and margins
+        chrome = px(190, s)  # title, divider, button, spacing and margins
         scroll_height = min(content, max(120, int(self.height() * 0.8) - chrome))
         self._scroll.setFixedHeight(scroll_height)
         self.card.adjustSize()
