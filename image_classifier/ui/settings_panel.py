@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 
 from image_classifier.ui.widgets import OverlayComboBox
+from image_classifier.ui.scaling import px, scale_css
 
 ACCENT = "#2a77c6"
 PANEL_WIDTH = 360
@@ -64,47 +65,51 @@ STYLE = f"""
 
 
 class ToggleSwitch(QAbstractButton):
-    """A checkable on/off switch (40x22)."""
+    """A checkable on/off switch (40x22 at scale 1)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, scale=1.0):
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFixedSize(px(40, scale), px(22, scale))
 
     def sizeHint(self):
-        return QSize(40, 22)
+        return self.size()
 
     def paintEvent(self, _event):
+        w, h = self.width(), self.height()
+        gap = h * 3 / 22
+        knob = h - 2 * gap
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(SWITCH_ON if self.isChecked() else "#5b6068"))
-        painter.drawRoundedRect(QRectF(0, 0, 40, 22), 11, 11)
+        painter.drawRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
         painter.setBrush(QColor("white"))
-        painter.drawEllipse(QRectF(21 if self.isChecked() else 3, 3, 16, 16))
+        painter.drawEllipse(QRectF(w - gap - knob if self.isChecked() else gap, gap, knob, knob))
         if self.hasFocus():
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QColor("#8cc1ff"))
-            painter.drawRoundedRect(QRectF(0.5, 0.5, 39, 21), 10.5, 10.5)
+            painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), h / 2, h / 2)
 
 
 class ToggleRow(QWidget):
     """Label on the left, switch on the right; clicking anywhere on the row flips it."""
 
-    def __init__(self, label, checked, callback, parent=None):
+    def __init__(self, label, checked, callback, parent=None, scale=1.0):
         super().__init__(parent)
         self.setObjectName("ToggleRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumHeight(44)
+        self.setMinimumHeight(px(44, scale))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         row = QHBoxLayout(self)
-        row.setContentsMargins(14, 0, 12, 0)
-        row.setSpacing(12)
+        row.setContentsMargins(px(14, scale), 0, px(12, scale), 0)
+        row.setSpacing(px(12, scale))
         text = QLabel(label, self)
         text.setWordWrap(True)
         text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.switch = ToggleSwitch(self)
+        self.switch = ToggleSwitch(self, scale)
         self.switch.setChecked(bool(checked))
         self.switch.toggled.connect(lambda state: callback(bool(state)))
         row.addWidget(text, 1)
@@ -121,13 +126,13 @@ class ToggleRow(QWidget):
 class Segmented(QWidget):
     """Exclusive row of buttons; `options` is [(label, value)]."""
 
-    def __init__(self, options, current, on_change, parent=None):
+    def __init__(self, options, current, on_change, parent=None, scale=1.0):
         super().__init__(parent)
         self.setObjectName("Segmented")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         row = QHBoxLayout(self)
-        row.setContentsMargins(3, 3, 3, 3)
-        row.setSpacing(2)
+        row.setContentsMargins(px(3, scale), px(3, scale), px(3, scale), px(3, scale))
+        row.setSpacing(px(2, scale))
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         for label, value in options:
@@ -153,12 +158,13 @@ class SettingsPanel(QWidget):
     toggle_groups: [(title, [(label, checked, callback(bool))])]
     """
 
-    def __init__(self, parent, title, toggle_groups, about_text, help_text, on_about, on_help, on_close):
+    def __init__(self, parent, title, toggle_groups, about_text, help_text, on_about, on_help, on_close, scale=1.0):
         super().__init__(parent)
+        self.scale = scale
         self.setObjectName("SettingsContainer")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(STYLE)
-        self.setFixedWidth(PANEL_WIDTH)
+        self.setStyleSheet(scale_css(STYLE, scale))
+        self.setFixedWidth(px(PANEL_WIDTH, scale))
         self._drag_offset = None
 
         outer = QVBoxLayout(self)
@@ -167,7 +173,7 @@ class SettingsPanel(QWidget):
 
         header = QWidget(self)
         head_row = QHBoxLayout(header)
-        head_row.setContentsMargins(18, 8, 8, 8)
+        head_row.setContentsMargins(px(18, scale), px(8, scale), px(8, scale), px(8, scale))
         heading = QLabel(title, header)
         heading.setObjectName("panelTitle")
         close_x = QPushButton("✕", header)
@@ -184,26 +190,26 @@ class SettingsPanel(QWidget):
         # Never grow wider than the viewport (that would clip the switches under the scrollbar)
         self.body.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.body_layout = QVBoxLayout(self.body)
-        self.body_layout.setContentsMargins(12, 0, 12, 14)
+        self.body_layout.setContentsMargins(px(12, scale), 0, px(12, scale), px(14, scale))
         self.body_layout.setSpacing(0)
         for group_title, rows in toggle_groups:
             self.add_group_title(group_title)
             for label, checked, callback in rows:
-                self._add(ToggleRow(label, checked, callback, self._card_widget))
+                self._add(ToggleRow(label, checked, callback, self._card_widget, scale))
 
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setMinimumHeight(120)
+        self.scroll.setMinimumHeight(px(120, scale))
         self.scroll.setWidget(self.body)
         outer.addWidget(self.scroll, 1)
 
         outer.addWidget(_rule(self))
         footer = QWidget(self)
         foot_row = QHBoxLayout(footer)
-        foot_row.setContentsMargins(12, 10, 12, 10)
-        foot_row.setSpacing(8)
+        foot_row.setContentsMargins(px(12, scale), px(10, scale), px(12, scale), px(10, scale))
+        foot_row.setSpacing(px(8, scale))
         about = QPushButton(about_text, footer)
         about.setObjectName("aboutBtn")
         help_btn = QPushButton(help_text, footer)
@@ -220,7 +226,7 @@ class SettingsPanel(QWidget):
         """Start a new group: a small caption, then a rounded card that the next rows go into."""
         label = QLabel(text.upper(), self.body)
         label.setObjectName("groupTitle")
-        label.setContentsMargins(6, 16, 6, 6)
+        label.setContentsMargins(px(6, self.scale), px(16, self.scale), px(6, self.scale), px(6, self.scale))
         self.body_layout.addWidget(label)
         self._card_widget = QWidget(self.body)
         self._card_widget.setObjectName("Card")
@@ -239,15 +245,15 @@ class SettingsPanel(QWidget):
         """A full-width control (segmented row, combo box) inside the current card."""
         holder = QWidget(self._card_widget)
         row = QHBoxLayout(holder)
-        row.setContentsMargins(10, 8, 10, 8)
+        row.setContentsMargins(px(10, self.scale), px(8, self.scale), px(10, self.scale), px(8, self.scale))
         row.addWidget(widget)
         self._add(holder)
 
     def add_action_row(self, text, button_text, on_click):
         holder = QWidget(self._card_widget)
-        holder.setMinimumHeight(52)
+        holder.setMinimumHeight(px(52, self.scale))
         row = QHBoxLayout(holder)
-        row.setContentsMargins(14, 0, 10, 0)
+        row.setContentsMargins(px(14, self.scale), 0, px(10, self.scale), 0)
         label = QLabel(text, holder)
         button = QPushButton(button_text, holder)
         button.setCursor(Qt.CursorShape.PointingHandCursor)

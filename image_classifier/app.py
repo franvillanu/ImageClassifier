@@ -51,6 +51,8 @@ from image_classifier.ui.icons import IconFactory
 from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from image_classifier.ui.crop_overlay import CropOverlay
 from image_classifier.ui.settings_panel import Segmented, SettingsPanel
+from image_classifier.ui.scaling import scale_css, ui_scale
+from image_classifier.ui.search_field import add_clear_button, matches as shortcut_matches
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
 from image_classifier.updates.notes import (
     format_release_date, load_release_notes, notes_for_version, pick, release_dates,
@@ -510,6 +512,7 @@ class PhotoViewer(QMainWindow):
             self.settings_overlay, t["options_title"], toggle_groups,
             t["about_button"], t["help_button"],
             self.open_about_overlay, self.open_help_overlay, self.close_settings_overlay,
+            scale=ui_scale(self),
         )
 
         def cache_size_text(megabytes):
@@ -539,19 +542,20 @@ class PhotoViewer(QMainWindow):
         container.add_control(criterion_combo)
         container.add_control(Segmented(
             [(t["sort_ascending"], True), (t["sort_descending"], False)],
-            bool(self.sort_ascending), self.set_sort_ascending,
+            bool(self.sort_ascending), self.set_sort_ascending, scale=container.scale,
         ))
 
         container.add_group_title(t["theme"])
         theme_keys = ["black", "dark_grey", "inkstone"]
         container.add_control(Segmented(
             [(t[key], key) for key in theme_keys],
-            self.theme if self.theme in theme_keys else "black", self.set_theme,
+            self.theme if self.theme in theme_keys else "black", self.set_theme, scale=container.scale,
         ))
 
         container.add_group_title(t["language"])
         container.add_control(Segmented(
             [("English", "en"), ("Español", "es")], self.current_language, self.set_language,
+            scale=container.scale,
         ))
         container.finish()
 
@@ -692,6 +696,7 @@ class PhotoViewer(QMainWindow):
         Opens a Help overlay with only the Shortcuts section.
         Closes any open settings overlay.
         """
+        S = ui_scale(self)
         # Close settings overlay if it is open
         if hasattr(self, "settings_overlay") and self.settings_overlay is not None:
             self.close_settings_overlay()
@@ -831,7 +836,7 @@ class PhotoViewer(QMainWindow):
         container = DraggableContainer(self.help_overlay)
         container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         container.setObjectName("HelpContainer")
-        container.setStyleSheet("""
+        container.setStyleSheet(scale_css("""
             QWidget#HelpContainer {
                 background-color: #17181a;
                 border-radius: 12px;
@@ -866,10 +871,10 @@ class PhotoViewer(QMainWindow):
             QTabBar::tab:selected {
                 background-color: #0056b3;
             }
-        """)
+        """, S))
 
         # Instead of forcing a fixed size, set an initial size and use size policies.
-        container.resize(1025, 1000)
+        container.resize(round(1025 * S), round(1000 * S))
         container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         container.show()
         container.adjustSize()
@@ -906,10 +911,10 @@ class PhotoViewer(QMainWindow):
         # --- Search Row ---
         search_row = QHBoxLayout()
         search_label = QLabel(t["help_search_label"])  # e.g., "🔍 Search Shortcuts:"
-        search_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-right: 1px;")
+        search_label.setStyleSheet(scale_css("font-size: 18px; font-weight: bold; margin-right: 1px;", S))
         self.shortcuts_search_line = QLineEdit()
         self.shortcuts_search_line.setPlaceholderText(t["help_search_placeholder"])
-        self.shortcuts_search_line.setStyleSheet("""
+        self.shortcuts_search_line.setStyleSheet(scale_css("""
             QLineEdit {
                 background-color: #1E1E1E;
                 color: #FFFFFF;
@@ -921,8 +926,9 @@ class PhotoViewer(QMainWindow):
             QLineEdit:focus {
                 border: 1px solid #666666;
             }
-        """)
-        self.shortcuts_search_line.setFixedHeight(36)
+        """, S))
+        self.shortcuts_search_line.setFixedHeight(round(36 * S))
+        add_clear_button(self.shortcuts_search_line, "Clear" if self.current_language == "en" else "Borrar")
         search_row.addWidget(search_label, 0, alignment=Qt.AlignmentFlag.AlignVCenter)
         search_row.addWidget(self.shortcuts_search_line, 1)
         shortcuts_tab_layout.addLayout(search_row)
@@ -931,7 +937,7 @@ class PhotoViewer(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
+        scroll_area.setStyleSheet(scale_css("""
             QScrollBar:vertical {
                 background: transparent;
                 width: 8px;
@@ -955,7 +961,7 @@ class PhotoViewer(QMainWindow):
             QScrollBar::sub-page:vertical {
                 background: none;
             }
-        """)
+        """, S))
         shortcuts_tab_layout.addWidget(scroll_area, 1)
 
         cat_container = QWidget()
@@ -969,25 +975,25 @@ class PhotoViewer(QMainWindow):
         # Build the categories.
         for category_name, items in SHORTCUT_CATEGORIES:
             cat_label = QLabel(category_name)
-            cat_label.setStyleSheet("""
+            cat_label.setStyleSheet(scale_css("""
                 font-size: 18px;
                 font-weight: bold;
                 color: #3399ff;
                 border-bottom: 1px solid #777;
                 margin-bottom: 4px;
                 padding-bottom: 8px;
-            """)
+            """, S))
             cat_layout.addWidget(cat_label)
             for (k, desc) in items:
                 row_widget = QWidget()
                 row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(0, 4, 0, 4)
+                row_layout.setContentsMargins(0, round(4 * S), 0, round(4 * S))
                 row_layout.setSpacing(12)
                 key_label = QLabel(k)
-                key_label.setStyleSheet("font-size: 17px; font-weight: bold;")
-                key_label.setFixedWidth(130)
+                key_label.setStyleSheet(scale_css("font-size: 17px; font-weight: bold;", S))
+                key_label.setFixedWidth(round(130 * S))
                 desc_label = QLabel(desc)
-                desc_label.setStyleSheet("font-size: 18px;")
+                desc_label.setStyleSheet(scale_css("font-size: 18px;", S))
                 desc_label.setWordWrap(False)
                 row_layout.addWidget(key_label, 0, alignment=Qt.AlignmentFlag.AlignLeft)
                 row_layout.addWidget(desc_label, 1, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -1010,7 +1016,7 @@ class PhotoViewer(QMainWindow):
 
         # --- Close Button ---
         close_button = QPushButton(t["close_label"], container)
-        close_button.setStyleSheet("""
+        close_button.setStyleSheet(scale_css("""
             QPushButton {
                 background-color: #DC3545;
                 color: white;
@@ -1021,7 +1027,7 @@ class PhotoViewer(QMainWindow):
             QPushButton:hover {
                 background-color: #B22222;
             }
-        """)
+        """, S))
         main_layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignCenter)
         close_button.clicked.connect(self.close_help_overlay)
 
@@ -1043,23 +1049,10 @@ class PhotoViewer(QMainWindow):
             return text_no_tags.replace('*', '').strip()
 
         def on_shortcuts_search_changed(text):
-            text = text.lower().strip()
             for row_info in self.shortcut_rows:
-                row_widget = row_info["row_widget"]
-                # Clean the key and description text
-                key_clean = strip_html_and_asterisk(row_info["key_orig"]).lower()
-                desc_clean = strip_html_and_asterisk(row_info["desc_orig"]).lower()
-                
-                if not text:
-                    row_widget.setVisible(True)
-                else:
-                    if len(text) == 1:
-                        # For a single character, show the row only if the key matches exactly.
-                        row_widget.setVisible(key_clean == text)
-                    else:
-                        # For longer search strings, check if the text is anywhere in the key or description.
-                        combined = key_clean + " " + desc_clean
-                        row_widget.setVisible(text in combined)
+                key_clean = strip_html_and_asterisk(row_info["key_orig"])
+                desc_clean = strip_html_and_asterisk(row_info["desc_orig"])
+                row_info["row_widget"].setVisible(shortcut_matches(text, key_clean, desc_clean))
 
         self.shortcuts_search_line.textChanged.connect(on_shortcuts_search_changed)
 
