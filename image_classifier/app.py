@@ -1,4 +1,5 @@
 import sys
+import time
 import traceback
 import datetime
 import os
@@ -29,6 +30,14 @@ from image_classifier.imaging import (
     WorkerSignals,
     sharpen_cv2,
 )
+from image_classifier.imaging.loader import (
+    PRIORITY_CURRENT,
+    PRIORITY_FULL_RESOLUTION,
+    PRIORITY_PRELOAD_AHEAD,
+    PRIORITY_PRELOAD_NEXT,
+    PRIORITY_PRELOAD_PREVIOUS,
+    preview_dimension_for,
+)
 from image_classifier.config import get_config_file
 from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.qtimage import qimage_to_rgba
@@ -39,6 +48,9 @@ from image_classifier.updates.controller import UpdateController
 from image_classifier.ui.update_banner import UpdateBanner
 from image_classifier.ui.whats_new import WhatsNewOverlay
 from image_classifier.ui.icons import IconFactory
+from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
+from image_classifier.ui.crop_overlay import CropOverlay
+from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
 from image_classifier.updates.notes import load_release_notes, notes_for_version, pick
 from image_classifier.ui import (
     IconFactory,
@@ -60,11 +72,6 @@ from image_classifier.ui import (
     FloatingMenu,
 )
 
-
-def _opengl():
-    from OpenGL import GL
-
-    return GL
 
 
 def exception_handler(exc_type, exc_value, exc_traceback):
@@ -114,7 +121,6 @@ fmt = QSurfaceFormat()
 fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
 fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
 fmt.setVersion(3, 3)
-fmt.setSamples(4)
 # Set sRGB color space for consistent color rendering in fullscreen and windowed mode
 fmt.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
 QSurfaceFormat.setDefaultFormat(fmt)
@@ -126,2270 +132,6 @@ try:
 except ImportError:
     translations = {"en": {}, "es": {}}
 
-class NearestViewport(QOpenGLWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # Ensure this widget uses sRGB color space for consistent rendering
-        fmt = QSurfaceFormat()
-        fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
-        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-        fmt.setVersion(3, 3)
-        fmt.setSamples(4)
-        fmt.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
-        self.setFormat(fmt)
-
-    def initializeGL(self):
-        super().initializeGL()
-        GL = _opengl()
-
-        # 1) Nearest-neighbor for all texture sampling
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
-
-        # 2) Enable multisampling (requires default format set globally)
-        GL.glEnable(GL.GL_MULTISAMPLE)
-
-        # 3) Enable blending so smoothed primitives composite correctly
-        GL.glEnable(GL.GL_BLEND)
-        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-
-        # 4) Line smoothing for divider/handles
-        GL.glEnable(GL.GL_LINE_SMOOTH)
-        GL.glHint(GL.GL_LINE_SMOOTH_HINT, GL.GL_NICEST)
-
-        # 5) Polygon smoothing for any 1-pixel quads
-        GL.glEnable(GL.GL_POLYGON_SMOOTH)
-        GL.glHint(GL.GL_POLYGON_SMOOTH_HINT, GL.GL_NICEST)
-
-        # 6) Alpha-to-coverage so MSAA respects your alpha edges perfectly
-        GL.glEnable(GL.GL_SAMPLE_ALPHA_TO_COVERAGE)
-        
-        # Note: sRGB color space is handled automatically by Qt when set on QSurfaceFormat
-        # No manual GL_FRAMEBUFFER_SRGB enable needed - Qt manages the conversion
-
-
-# ------------------------------------------------------------------------
-# AdvancedGraphicsImageViewer
-# ------------------------------------------------------------------------
-class AdvancedGraphicsImageViewer(QGraphicsView):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setFrameShadow(QFrame.Shadow.Plain)
-        self.bg_color = "#000000"
-        self.setStyleSheet(f"border: none; background-color: {self.bg_color};")
-        self.setRenderHint(QPainter.RenderHint.Antialiasing) 
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self.setViewport(NearestViewport())
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scene = QGraphicsScene(self)
-        self.setScene(self.scene)
-        self.pixmap_item = QGraphicsPixmapItem()
-        self.pixmap_item.setCacheMode(QGraphicsPixmapItem.CacheMode.NoCache)
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
-        self.scene.addItem(self.pixmap_item)
-        self.original_pixmap = None
-        self.rotation_angle = 0
-        self.brightness_factor = 1.0
-        self.auto_fit = True
-        self.zoom_factor = 1.0
-        self.fit_zoom_factor = 1.0
-        self.loader = None
-        self.loading_dialog = None
-        self.full_resolution_ready = False
-        self._brightness_timer = QTimer(self)
-        self._brightness_timer.setSingleShot(True)
-        self._brightness_timer.timeout.connect(self._apply_pending_brightness)
-        self._pending_brightness = 1.0
-        self._brightness_program = None
-
-    def setImage(self, image_path, reset_zoom=True, preserve_zoom=False):
-        import os
-        from PyQt6.QtCore import QThreadPool
-
-        # 0) Normalize here the same way the loader did:
-        norm = os.path.normcase(os.path.abspath(image_path))
-
-        # 1) Increment load counter & record path
-        self.load_counter     = getattr(self, "load_counter", 0) + 1
-        self.current_load_id  = self.load_counter
-        self.current_loading_image = norm
-        preview_dimension = max(
-            1024,
-            min(
-                4096,
-                max(self.viewport().width(), self.viewport().height()) * 2,
-            ),
-        )
-
-        # 2) Cache-first: if we’ve already decoded full-res, skip threading
-        pix = ImageLoaderRunnable.get_cached_pixmap(norm)
-        if pix is not None:
-            self.onImageLoaded(
-                pix,
-                reset_zoom,
-                preserve_zoom,
-                self.current_load_id,
-                full_resolution=True,
-            )
-            return
-
-        # 3) Otherwise cancel old loader and start a new one…
-        if getattr(self, "loader", None):
-            self.loader.cancel()
-            self.loader = None
-
-        window = self.window()
-        window.image_loading = True
-        cached_preview = ImageLoaderRunnable.get_cached_preview(
-            norm,
-            preview_dimension,
-        )
-        self._preview_shown_for_load_id = None
-        if cached_preview is not None:
-            self._preview_shown_for_load_id = self.current_load_id
-            self.onImageLoaded(
-                QPixmap.fromImage(cached_preview),
-                reset_zoom,
-                preserve_zoom,
-                self.current_load_id,
-                full_resolution=False,
-            )
-        worker = ImageLoaderRunnable(
-            image_path,
-            max_dimension=preview_dimension,
-            progressive=True,
-            load_full=True,
-        )
-        worker.signals.previewReady.connect(
-            lambda frame, id=self.current_load_id:
-                self.onImageFrameLoaded(
-                    frame,
-                    reset_zoom,
-                    preserve_zoom,
-                    id,
-                )
-        )
-        worker.signals.fullReady.connect(
-            lambda frame, id=self.current_load_id:
-                self.onImageFrameLoaded(
-                    frame,
-                    False,
-                    preserve_zoom,
-                    id,
-                )
-        )
-        # Show user-friendly error message instead of silent print
-        def handle_error(err, load_id=self.current_load_id):
-            if load_id != self.current_load_id:
-                return
-            window = self.window()
-            window.image_loading = False
-            self.loader = None
-            if hasattr(window, 'show_custom_dialog'):
-                lang = getattr(window, 'current_language', 'en')
-                if lang == 'es':
-                    msg = f"No se pudo cargar la imagen:\n{err}"
-                else:
-                    msg = f"Failed to load image:\n{err}"
-                window.show_custom_dialog(msg, icon_type="error", buttons="ok")
-            else:
-                # Fallback if dialog method not available
-                print(f"Error loading image: {err}")
-        worker.signals.error.connect(handle_error)
-        QThreadPool.globalInstance().start(worker)
-        self.loader = worker
-
-        # --- RESET BRIGHTNESS & COMPARE-MODE FOR NEW IMAGE ---
-        # Nuke any old GPU texture so we rebuild it fresh
-        self.cached_texture    = None
-        # Reset brightness back to neutral
-        self.brightness_factor = 1.0
-        # If you have a brightness slider widget, reset its UI
-        if hasattr(self, "brightness_slider"):
-            self.brightness_slider.setValue(0)
-        # Turn off split-view compare so no diagonal line
-        self.compare_enabled   = False
-
-    def onImageFrameLoaded(
-        self,
-        frame: ImageFrame,
-        reset_zoom: bool,
-        preserve_zoom: bool,
-        load_id: int,
-    ):
-        if load_id != self.current_load_id:
-            return
-        if (
-            not frame.full_resolution
-            and load_id == getattr(self, "_preview_shown_for_load_id", None)
-        ):
-            return
-        if frame.full_resolution:
-            self._preview_shown_for_load_id = None
-        self.onImageLoaded(
-            QPixmap.fromImage(frame.image),
-            reset_zoom,
-            preserve_zoom,
-            load_id,
-            full_resolution=frame.full_resolution,
-        )
-
-
-    def _cancel_loader(self):
-        """Safely cancel the image loader and close the overlay, if any."""
-        if getattr(self, "loader", None) is not None:
-            self.loader.cancel()
-            self.loader = None
-
-        if getattr(self, "loading_dialog", None) is not None:
-            self.loading_dialog.releaseKeyboard()
-            self.loading_dialog.hide()
-            self.loading_dialog.deleteLater()
-            self.loading_dialog = None
-
-        self.window().enable_all_shortcuts()
-        self.window().loading_in_progress = False
-
-    def _on_loader_finished(self):
-        """Called when the loader thread finishes; ensure the overlay is closed."""
-        if getattr(self, "loading_dialog", None) is not None:
-            self.loading_dialog.releaseKeyboard()
-            self.loading_dialog.hide()
-            self.loading_dialog.deleteLater()
-            self.loading_dialog = None
-        self.loader = None
-
-        self.window().enable_all_shortcuts()
-        self.window().loading_in_progress = False
-
-    def onImageLoaded(self,
-                      pixmap: QPixmap,
-                      reset_zoom: bool,
-                      preserve_zoom: bool,
-                      load_id: int,
-                      full_resolution: bool = True):
-        main_win = self.window()
-
-        # 1) Only update the UI if this load ID is still current.
-        if load_id != self.current_load_id:
-            return
-
-        # 2) Cleanup any loading dialogs or key-filters
-        if getattr(main_win, "loading_dialog", None):
-            main_win.loading_dialog.releaseKeyboard()
-            main_win.loading_dialog.close()
-            main_win.loading_dialog.deleteLater()
-            main_win.loading_dialog = None
-        if getattr(main_win, "loading_key_filter", None):
-            QApplication.instance().removeEventFilter(main_win.loading_key_filter)
-            main_win.loading_key_filter = None
-
-        # 3) Bail if nothing to show
-        if pixmap.isNull():
-            return
-
-        # QPixmap is implicitly shared. Avoid a full-frame copy on every load.
-        self.original_pixmap = pixmap
-        self.full_resolution_ready = full_resolution
-        self.cached_texture  = None
-
-        # 5) Pull through any pending rotation/brightness
-        if hasattr(self, "desired_rotation"):
-            self.rotation_angle = self.desired_rotation
-            del self.desired_rotation
-        if hasattr(self, "desired_brightness"):
-            self.brightness_factor = self.desired_brightness
-            del self.desired_brightness
-
-        # 6) Hide while we update
-        self.pixmap_item.setVisible(False)
-
-        # ─── Decide what to do with zoom on load ─────────────────────────────
-        if reset_zoom:
-            self.auto_fit    = True
-            self.zoom_factor = 1.0
-            self.resetTransform()
-        elif preserve_zoom and hasattr(self, "_saved_transform"):
-            self.auto_fit = False
-            self.setTransform(self._saved_transform)
-        else:
-            at_fit = abs(self.zoom_factor - self.fit_zoom_factor) < 0.01
-            self.auto_fit = at_fit
-        # ─────────────────────────────────────────────────────────────────────
-
-        # 7) Render the pixmap
-        if self.auto_fit:
-            self.adjustToFit()
-        else:
-            display_pix = self._pixmapWithRotationAndBrightness()
-            self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
-            self.pixmap_item.setPixmap(display_pix)
-            self.scene.setSceneRect(self.pixmap_item.boundingRect())
-
-        self.pixmap_item.setVisible(True)
-
-        # 8) Clear the busy-loading flag first
-        main_win.image_loading = False
-
-        # 9) Now that loading is done, refresh all controls (star will update)
-        if hasattr(main_win, "update_floating_controls"):
-            main_win.update_floating_controls()
-
-        # ─── Ensure rotation/brightness are GPU-baked even in manual-zoom mode ───
-        if not self.auto_fit:
-            self.updatePixmap()
-
-
-    def _pixmapWithRotationAndBrightness(self) -> QPixmap:
-        """
-        Bake rotation & brightness into a new QPixmap via the GPU
-        (we assume viewport() is always a QOpenGLWidget).
-        """
-        # 1) Rotate first (skip transform if angle==0 for a small perf win)
-        if self.rotation_angle != 0:
-            base = self.original_pixmap.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation
-            )
-        else:
-            base = self.original_pixmap
-
-        # 2) GPU brightness (only if non‐default)
-        if self.brightness_factor != 1.0:
-            vp = self.viewport()               # must be QOpenGLWidget
-            vp.makeCurrent()
-            out = self.applyBrightnessGPU(
-                base,
-                self.brightness_factor
-            )
-            vp.doneCurrent()
-        else:
-            out = base
-
-        # 3) preserve DPR on the result
-        out.setDevicePixelRatio(base.devicePixelRatio())
-        return out
-
-    def _display_source(self) -> QPixmap:
-        """Return a viewport-sized working frame for fit-mode rendering."""
-        source = self.original_pixmap
-        if source is None or source.isNull() or not self.auto_fit:
-            return source
-        max_dimension = max(
-            1024,
-            min(
-                4096,
-                max(self.viewport().width(), self.viewport().height()) * 2,
-            ),
-        )
-        if max(source.width(), source.height()) <= max_dimension:
-            return source
-        return source.scaled(
-            max_dimension,
-            max_dimension,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-
-    def renderFullResolution(self) -> QPixmap:
-        """Render current non-destructive adjustments at source resolution."""
-        if self.original_pixmap is None or self.original_pixmap.isNull():
-            return QPixmap()
-        if self.rotation_angle:
-            rendered = self.original_pixmap.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        else:
-            rendered = self.original_pixmap
-        if self.brightness_factor != 1.0:
-            viewport = self.viewport()
-            if isinstance(viewport, QOpenGLWidget):
-                viewport.makeCurrent()
-                rendered = self.applyBrightnessGPU(
-                    rendered,
-                    self.brightness_factor,
-                )
-                viewport.doneCurrent()
-            else:
-                rendered = self.applyBrightness(
-                    rendered,
-                    self.brightness_factor,
-                )
-        return rendered
-
-    def clear(self):
-        self.pixmap_item.setPixmap(QPixmap())
-
-    def adjustToFit(self):
-        """
-        Reset zoom, rotate + bake brightness into a pixmap,
-        then fit & center that result in the view (preserving DPR).
-        """
-        # 1) Bail if there’s nothing to fit
-        if not self.original_pixmap or not self.auto_fit:
-            return
-
-        # 2) Reset any prior zoom/transform
-        self.resetTransform()
-
-        # Avoid allocating a same-size frame when no rotation is active.
-        source = self._display_source()
-        if self.rotation_angle:
-            rotated = source.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation
-            )
-        else:
-            rotated = source
-
-        # 4) Bake brightness (GPU if possible, else CPU)
-        if self.brightness_factor != 1.0:
-            vp = self.viewport()
-            if isinstance(vp, QOpenGLWidget):
-                vp.makeCurrent()
-                baked = self.applyBrightnessGPU(rotated, self.brightness_factor)
-                vp.doneCurrent()
-            else:
-                baked = self.applyBrightness(rotated, self.brightness_factor)
-        else:
-            baked = rotated
-
-        # 5) Preserve the *original* image’s DPR tag
-        baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
-
-        # 6) Show the baked pixmap
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
-        self.pixmap_item.setPixmap(baked)
-
-        # 7) Fit that pixmap to the view & update scene bounds
-        rect = self.pixmap_item.sceneBoundingRect()
-        self.scene.setSceneRect(rect)
-        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
-
-        # 8) Record the new zoom factors
-        scale = self.transform().m11()
-        self.zoom_factor     = scale
-        self.fit_zoom_factor = scale
-
-        # 9) Center (unless explicitly skipped)
-        if not getattr(self, "skip_centering", False):
-            self.centerOn(rect.center())
-
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.auto_fit and self.original_pixmap:
-            self.adjustToFit()
-
-    def updatePixmap(self):
-        if not self.original_pixmap:
-            return
-        if self.auto_fit:
-            self.adjustToFit()
-            return
-
-        # 0) Save current view transform & anchor
-        saved_transform = self.transform()
-        saved_anchor    = self.transformationAnchor()
-
-        # 1) Anchor at center for the bake
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-
-        # 2) Rotate
-        if self.rotation_angle != 0:
-            base = self.original_pixmap.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation
-            )
-        else:
-            base = self.original_pixmap
-
-        # 3) Brightness (GPU vs CPU)
-        vp = self.viewport()
-        if self.brightness_factor != 1.0 and isinstance(vp, QOpenGLWidget):
-            vp.makeCurrent()
-            baked = self.applyBrightnessGPU(base, self.brightness_factor)
-            vp.doneCurrent()
-        elif self.brightness_factor != 1.0:
-            baked = self.applyBrightness(base, self.brightness_factor)
-        else:
-            baked = base
-
-        # 4) Tag with original DPR
-        baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
-
-        # 5) Nearest‐neighbor into item + update bounds
-        self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
-        self.pixmap_item.setPixmap(baked)
-        self.scene.setSceneRect(self.pixmap_item.boundingRect())
-
-        # 6) Restore transform & anchor so zoom/pan stay exactly where they were
-        self.setTransform(saved_transform)
-        self.setTransformationAnchor(saved_anchor)
-
-
-    def setBrightness(self, factor):
-        self.compare_enabled = False
-        self._pending_brightness = factor
-        if not self._brightness_timer.isActive():
-            self._brightness_timer.start(16)
-
-    def _apply_pending_brightness(self):
-        self.cached_texture = None
-        self.brightness_factor = self._pending_brightness
-        self.updatePixmap()
-
-    def wheelEvent(self, event: QWheelEvent):
-        if not self.original_pixmap:
-            return
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.auto_fit = False
-        old_scene_pos = self.mapToScene(event.position().toPoint())
-        let_in = event.angleDelta().y() > 0
-        factor = 1.1 if let_in else 0.9
-        current_zoom = self.transform().m11()
-        if current_zoom * factor < 0.1:
-            factor = 0.1 / current_zoom
-        elif current_zoom * factor > 3.0:
-            factor = 3.0 / current_zoom
-        self.scale(factor, factor)
-        self.zoom_factor = self.transform().m11()
-        new_scene_pos = self.mapToScene(event.position().toPoint())
-        delta = new_scene_pos - old_scene_pos
-        self.translate(delta.x(), delta.y())
-
-    def mouseDoubleClickEvent(self, event: QMouseEvent):
-        self.auto_fit = True
-        self.adjustToFit()
-        self.zoom_factor = self.transform().m11()
-        self.fit_zoom_factor = self.zoom_factor
-
-    def paintEvent(self, event):
-        gl_viewport = self.viewport()
-
-        # If we're using an OpenGL viewport, clear it properly
-        if isinstance(gl_viewport, QOpenGLWidget):
-            from OpenGL import GL
-            from PyQt6.QtGui import QColor
-
-            gl_viewport.makeCurrent()
-
-            # Convert self.bg_color ("#RRGGBB") to normalized floats
-            c = QColor(self.bg_color)
-            r, g, b, _ = c.getRgbF()
-            GL.glClearColor(r, g, b, 1.0)
-            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
-
-            super().paintEvent(event)
-            gl_viewport.doneCurrent()
-
-        else:
-            # Standard Qt painter fallback
-            from PyQt6.QtGui import QPainter, QColor
-
-            painter = QPainter(gl_viewport)
-            painter.fillRect(gl_viewport.rect(), QColor(self.bg_color))
-            painter.end()
-
-            super().paintEvent(event)
-
-
-    def zoom_in(self):
-        self._manual_zoom(zoom_in=True)
-
-    def zoom_out(self):
-        self._manual_zoom(zoom_in=False)
-
-    def _manual_zoom(self, zoom_in: bool):
-        if not self.original_pixmap:
-            return
-        viewport_center = self.viewport().rect().center()
-        scene_center = self.mapToScene(viewport_center)
-        factor = 1.1 if zoom_in else 0.9
-        current_zoom = self.transform().m11()
-        if current_zoom * factor < 0.1:
-            factor = 0.1 / current_zoom
-        elif current_zoom * factor > 3.0:
-            factor = 3.0 / current_zoom
-        self.scale(factor, factor)
-        self.zoom_factor = self.transform().m11()
-        self.centerOn(scene_center)
-
-    def rotate_clockwise(self):
-        self.rotation_angle = (self.rotation_angle + 90) % 360
-        
-        # Invalidate the cached texture so the GPU brightness code
-        # will recreate it with the correct size:
-        self.cached_texture = None
-
-        if self.auto_fit or abs(self.zoom_factor - 1.0) < 0.01:
-            self.auto_fit = True
-            self.adjustToFit()
-        else:
-            self.updatePixmap()
-            self.scene.setSceneRect(self.pixmap_item.boundingRect())
-            self.centerOn(self.scene.sceneRect().center())
-    
-    def contextMenuEvent(self, event: QMouseEvent):
-        # Get the main window (PhotoViewer) that contains this viewer.
-        photo_viewer = self.window()
-
-        # Create the overlay.
-        overlay = BaseOverlay(
-            parent=photo_viewer,
-            overlay_name="ContextMenuOverlay",
-            bg_color="rgba(0, 0, 0, 150)"
-        )
-        overlay.setObjectName("ContextMenuOverlay")
-        overlay.setGeometry(photo_viewer.rect())
-        overlay.show()
-        overlay.raise_()
-        photo_viewer.context_menu_overlay = overlay
-
-        # Allow closing the overlay when pressing ESC.
-        def overlay_key_press(ev):
-            if ev.key() == Qt.Key.Key_Escape:
-                overlay.close()
-            else:
-                ev.ignore()
-        overlay.keyPressEvent = overlay_key_press
-
-        # Create the container to hold all the menu buttons.
-        container = QWidget(overlay)
-        container.setObjectName("ContextMenuContainer")
-        container.setStyleSheet("""
-            QWidget#ContextMenuContainer {
-                background-color: rgba(0, 0, 0, 0.90);
-                border: 1px solid rgba(255, 255, 255, 30);
-                border-radius: 8px;
-            }
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-size: 16px;
-                text-align: left;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 50);
-            }
-            QFrame {
-                background-color: #666666;
-            }
-        """)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(0)
-        layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
-
-        # A helper function to add a horizontal separator.
-        def add_separator():
-            sep = QFrame(container)
-            sep.setFixedHeight(1)
-            sep.setStyleSheet("background-color: #666666; margin: 6px 0;")
-            layout.addWidget(sep)
-
-        # Get the translation dictionary.
-        lang = photo_viewer.current_language
-        t = translations.get(lang, translations["en"])
-
-        # Determine if an image is loaded.
-        has_image = (photo_viewer.image_files and
-                     0 <= photo_viewer.current_index < len(photo_viewer.image_files))
-        current_image = photo_viewer.image_files[photo_viewer.current_index] if has_image else None
-
-        has_favorites = bool(photo_viewer.favorites)
-        has_compare = bool(photo_viewer.compare_set)
-
-        # --- Standard Options: Favorite and Compare ---
-        if has_image:
-            fav_text = t["unfavorite_image"] if current_image in photo_viewer.favorites else t["favorite_image"]
-            btn_fav = QPushButton(fav_text)
-            btn_fav.clicked.connect(lambda: (photo_viewer.toggle_favorite(), overlay.close()))
-            layout.addWidget(btn_fav)
-
-            cmp_text = t["remove_from_compare"] if current_image in photo_viewer.compare_set else t["add_to_compare"]
-            btn_cmp = QPushButton(cmp_text)
-            btn_cmp.clicked.connect(lambda: (photo_viewer.toggle_compare(), overlay.close()))
-            layout.addWidget(btn_cmp)
-            add_separator()
-
-        # --- Undo/Redo Options: Grouped as Their Own Category ---
-        # look up the current image’s history instead of undo_stack/redo_stack
-        path     = photo_viewer._current_path
-        can_undo = False
-        can_redo = False
-        if path and path in photo_viewer._history:
-            hist     = photo_viewer._history[path]
-            can_undo = bool(hist["undo"])
-            can_redo = bool(hist["redo"])
-
-        if can_undo or can_redo:
-            add_separator()  # Separator above the undo/redo group
-
-            if can_undo:
-                btn_undo = QPushButton(t["undo"], container)
-                btn_undo.clicked.connect(lambda: (photo_viewer.undo_action(), overlay.close()))
-                layout.addWidget(btn_undo)
-
-            if can_redo:
-                btn_redo = QPushButton(t["redo"], container)
-                btn_redo.clicked.connect(lambda: (photo_viewer.redo_action(), overlay.close()))
-                layout.addWidget(btn_redo)
-
-            add_separator()  # Separator below the undo/redo group
-
-
-        # --- Saving Options (only add these if the image is modified) ---
-        # Get the image_modified flag.
-        image_modified_flag = getattr(photo_viewer, "image_modified", False)
-        # Define pristine solely based on brightness and rotation.
-        pristine = (self.brightness_factor == 1.0 and 
-                    self.rotation_angle == 0 and 
-                    not image_modified_flag)
-        if not pristine:
-            add_separator()
-            btn_save_modified = QPushButton(t["save_modified_file"])
-            btn_save_modified.clicked.connect(lambda: (overlay.close(), photo_viewer.saveModifiedImage(overwrite=True)))
-            layout.addWidget(btn_save_modified)
-
-            btn_save_copy = QPushButton(t["save_copy_modified_file"])
-            btn_save_copy.clicked.connect(lambda: (overlay.close(), photo_viewer.saveModifiedImage(overwrite=False)))
-            layout.addWidget(btn_save_copy)
-
-            add_separator()             
-
-        # --- File Operations ---
-        btn_open = QPushButton(t["open_in_explorer"])
-        btn_open.clicked.connect(lambda: (photo_viewer.open_image_in_path(), overlay.close()))
-        layout.addWidget(btn_open)
-
-        btn_delete = QPushButton(t["delete_image"])
-        btn_delete.clicked.connect(lambda: (overlay.close(), photo_viewer.delete_current_image()))
-        layout.addWidget(btn_delete)
-
-        btn_copy = QPushButton(t["copy_image"])
-        btn_copy.clicked.connect(lambda: (photo_viewer.copy_current_image(), overlay.close()))
-        layout.addWidget(btn_copy)
-
-        add_separator()
-
-        # --- Navigation Options ---
-        btn_first = QPushButton(t["go_to_first_image"])
-        btn_first.clicked.connect(lambda: (photo_viewer.go_to_first_image(), overlay.close()))
-        layout.addWidget(btn_first)
-
-        btn_last = QPushButton(t["go_to_last_image"])
-        btn_last.clicked.connect(lambda: (photo_viewer.go_to_last_image(), overlay.close()))
-        layout.addWidget(btn_last)
-
-        container.adjustSize()
-
-        # --- Advanced Options Submenu ---
-        submenu = QWidget(overlay)
-        submenu.setObjectName("SubMenuContainer")
-        submenu.setStyleSheet("""
-            QWidget#SubMenuContainer {
-                background-color: rgba(0, 0, 0, 0.95);
-                border: 1px solid rgba(255, 255, 255, 40);
-                border-radius: 6px;
-            }
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-size: 16px;
-                text-align: left;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 50);
-            }
-        """)
-        sub_layout = QVBoxLayout(submenu)
-        sub_layout.setContentsMargins(6, 6, 6, 6)
-        sub_layout.setSpacing(0)
-
-        if has_favorites:
-            btn_clear_fav = QPushButton(t["clear_favorites"], submenu)
-            btn_clear_fav.clicked.connect(lambda: (photo_viewer.clear_favorites(), overlay.close()))
-            sub_layout.addWidget(btn_clear_fav)
-
-        if has_compare:
-            btn_clear_cmp = QPushButton(t["clear_compare"], submenu)
-            btn_clear_cmp.clicked.connect(lambda: (photo_viewer.clear_compare(), overlay.close()))
-            sub_layout.addWidget(btn_clear_cmp)
-
-        all_images = photo_viewer.get_all_images()
-        if len(all_images) > len(photo_viewer.favorites):
-            btn_del_nonfav = QPushButton(t["delete_non_favorites"], submenu)
-            btn_del_nonfav.clicked.connect(lambda: (photo_viewer.delete_non_favorites_action(), overlay.close()))
-            sub_layout.addWidget(btn_del_nonfav)
-
-        if sub_layout.count() > 0:
-            add_separator()
-            bulk_label = "Advanced options" if lang == "en" else "Opciones avanzadas"
-            btn_bulk = QPushButton(bulk_label)
-            layout.addWidget(btn_bulk)
-            # Set up the submenu toggle.
-            submenu.hide()
-            def toggle_submenu():
-                if submenu.isVisible():
-                    submenu.hide()
-                else:
-                    submenu.adjustSize()
-                    container_top_left_global = container.mapToGlobal(QPoint(0, 0))
-                    sub_x = container_top_left_global.x() + container.width() - 1
-                    sub_y = container_top_left_global.y() + btn_bulk.pos().y()
-                    local_sub_pos = overlay.mapFromGlobal(QPoint(sub_x, sub_y))
-                    submenu.move(local_sub_pos)
-                    submenu.show()
-                    submenu.raise_()
-            btn_bulk.clicked.connect(toggle_submenu)
-
-        container.adjustSize()
-
-        # Position the container near the mouse click.
-        local_click = overlay.mapFromGlobal(event.globalPos())
-        x = local_click.x()
-        y = local_click.y()
-        if x + container.width() > overlay.width():
-            x = overlay.width() - container.width() - 10
-        if y + container.height() > overlay.height():
-            y = overlay.height() - container.height() - 10
-        container.move(x, y)
-        container.show()
-
-        # Close the overlay if clicking outside the container.
-        def overlay_mousePressEvent(ev):
-            if not container.geometry().contains(ev.pos()):
-                overlay.close()
-            else:
-                ev.ignore()
-        overlay.mousePressEvent = overlay_mousePressEvent
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            if not hasattr(self, "_drag_overlay") or self._drag_overlay is None:
-                self._drag_overlay = MyDragOverlay(self)
-            self._drag_overlay.show()
-            self._drag_overlay.raise_()
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragLeaveEvent(self, event):
-        if hasattr(self, "_drag_overlay") and self._drag_overlay:
-            self._drag_overlay.dragLeaveEvent(event)
-        else:
-            event.accept()
-
-    def dropEvent(self, event):
-        if hasattr(self, "_drag_overlay") and self._drag_overlay:
-            self._drag_overlay.dropEvent(event)
-            # Optionally, schedule deletion:
-            self._drag_overlay.deleteLater()
-            self._drag_overlay = None
-        else:
-            event.ignore()
-
-    def applyBrightnessGPU(self, pixmap: QPixmap, factor: float) -> QPixmap:
-        import ctypes
-
-        GL = _opengl()
-
-        # 1) Bake a fresh QOpenGLTexture from the pixmap each time
-        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-        tex = QOpenGLTexture(image)
-        tex.setMinificationFilter(QOpenGLTexture.Filter.Nearest)
-        tex.setMagnificationFilter(QOpenGLTexture.Filter.Nearest)
-        tex.setWrapMode(QOpenGLTexture.WrapMode.ClampToEdge)
-
-        # 2) Offscreen FBO of the same size
-        w, h = pixmap.width(), pixmap.height()
-        fbo = QOpenGLFramebufferObject(QSize(w, h))
-        fbo.bind()
-        GL.glDisable(GL.GL_DEPTH_TEST)
-        GL.glDisable(GL.GL_CULL_FACE)
-
-        GL.glViewport(0, 0, w, h)
-        GL.glClearColor(0, 0, 0, 0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        # 3) Compile once per GL context and reuse for every slider frame.
-        if self._brightness_program is None:
-            prog = QOpenGLShaderProgram()
-            vertex_src = """
-        #version 330 core
-        layout(location=0) in vec2 position;
-        layout(location=1) in vec2 texCoord;
-        out vec2 vTC;
-        void main() {
-            gl_Position = vec4(position, 0.0, 1.0);
-            vTC = texCoord;
-        }
-        """
-            fragment_src = """
-        #version 330 core
-        in vec2 vTC;
-        out vec4 outColor;
-        uniform sampler2D image;
-        uniform float brightness;
-        void main() {
-            vec4 c = texture(image, vTC);
-            vec3 adj = pow(c.rgb, vec3(brightness));
-            outColor = vec4(adj, c.a);
-        }
-        """
-            VERTEX_SHADER = 0x00000001
-            FRAGMENT_SHADER = 0x00000002
-            prog.addShaderFromSourceCode(
-                QOpenGLShader.ShaderTypeBit(VERTEX_SHADER),
-                vertex_src
-            )
-            prog.addShaderFromSourceCode(
-                QOpenGLShader.ShaderTypeBit(FRAGMENT_SHADER),
-                fragment_src
-            )
-            prog.link()
-            self._brightness_program = prog
-        prog = self._brightness_program
-        prog.bind()
-        prog.setUniformValue("brightness", factor)
-
-        GL.glActiveTexture(GL.GL_TEXTURE0)
-        tex.bind()
-        prog.setUniformValue("image", 0)
-
-        # 4) Draw one big triangle—no shared edge, no seam
-        verts = [
-            -1.0, -1.0,   0.0, 0.0,
-             3.0, -1.0,   2.0, 0.0,
-            -1.0,  3.0,   0.0, 2.0
-        ]
-        verts = (GL.GLfloat * len(verts))(*verts)
-        vao = GL.glGenVertexArrays(1)
-        vbo = GL.glGenBuffers(1)
-        GL.glBindVertexArray(vao)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, ctypes.sizeof(verts), verts, GL.GL_STATIC_DRAW)
-
-        stride = 4 * ctypes.sizeof(GL.GLfloat)
-        GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, GL.GL_FALSE,
-                              stride,
-                              ctypes.c_void_p(2 * ctypes.sizeof(GL.GLfloat)))
-        GL.glEnableVertexAttribArray(1)
-
-        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
-
-        # 5) Cleanup and read back
-        GL.glBindVertexArray(0)
-        GL.glDeleteBuffers(1, [vbo])
-        GL.glDeleteVertexArrays(1, [vao])
-        tex.release()
-        prog.release()
-        fbo.release()
-
-        result = fbo.toImage().mirrored(False, True)
-        return QPixmap.fromImage(result)
-
-    def applyBrightness(self, pixmap: QPixmap, factor: float) -> QPixmap:
-        """CPU fallback matching the gamma shader."""
-        import numpy as np
-
-        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-        pointer = image.bits()
-        pointer.setsize(image.sizeInBytes())
-        pixels = np.frombuffer(pointer, np.uint8).reshape(
-            image.height(),
-            image.bytesPerLine(),
-        )
-        rgba = pixels[:, : image.width() * 4].reshape(
-            image.height(),
-            image.width(),
-            4,
-        )
-        rgb = rgba[:, :, :3].astype(np.float32) / 255.0
-        rgba[:, :, :3] = np.clip(
-            np.power(rgb, factor) * 255.0,
-            0,
-            255,
-        ).astype(np.uint8)
-        return QPixmap.fromImage(image)
-
-
-    def applySharpenGPU(self, pixmap: QPixmap, radius: int, amount: float) -> QPixmap:
-        GL = _opengl()
-
-        # 1) Compile & link shader if needed
-        if self._sharpen_program is None:
-            ctx = QOpenGLContext.currentContext()
-            if not ctx:
-                raise RuntimeError("No current OpenGL context!")
-            prog = QOpenGLShaderProgram(ctx)
-
-            # vertex pass-through
-            prog.addShaderFromSourceCode(
-                QOpenGLShader.ShaderTypeBit.Vertex,
-                b"""
-                #version 330 core
-                layout(location = 0) in vec2 pos;
-                layout(location = 1) in vec2 uv;
-                out vec2 v_uv;
-                void main() {
-                    v_uv = uv;
-                    gl_Position = vec4(pos, 0.0, 1.0);
-                }
-                """
-            )
-            # unsharp‐mask fragment
-            prog.addShaderFromSourceCode(
-                QOpenGLShader.ShaderTypeBit.Fragment,
-                b"""
-                #version 330 core
-                in vec2 v_uv;
-                uniform sampler2D u_tex;
-                uniform float u_radius;
-                uniform float u_amount;
-                out vec4 fragColor;
-                void main() {
-                    vec2 texel = 1.0 / textureSize(u_tex, 0);
-                    vec3 c = texture(u_tex, v_uv).rgb;
-                    vec3 b = vec3(0.0);
-                    for(int x=-1; x<=1; ++x)
-                        for(int y=-1; y<=1; ++y)
-                            b += texture(u_tex, v_uv + texel * vec2(x,y) * u_radius).rgb;
-                    b /= 9.0;
-                    vec3 r = c + (c - b) * u_amount;
-                    fragColor = vec4(r, 1.0);
-                }
-                """
-            )
-            prog.link()
-            self._sharpen_program = prog
-
-        # 2) Prepare FBO
-        size = QSize(pixmap.width(), pixmap.height())
-        if self._sharpen_fbo is None or self._sharpen_fbo.size() != size:
-            if self._sharpen_fbo:
-                del self._sharpen_fbo
-            self._sharpen_fbo = QOpenGLFramebufferObject(size)
-
-        # 3) Render pass
-        self._sharpen_fbo.bind()
-        self._sharpen_program.bind()
-
-        # upload texture
-        tex = QOpenGLTexture(pixmap.toImage())
-        tex.setMinificationFilter(QOpenGLTexture.Filter.Nearest)
-        tex.setMagnificationFilter(QOpenGLTexture.Filter.Nearest)
-        tex.bind(0)
-
-        # set uniforms
-        self._sharpen_program.setUniformValue("u_tex", 0)
-        self._sharpen_program.setUniformValue("u_radius", float(radius))
-        self._sharpen_program.setUniformValue("u_amount", float(amount))
-
-        # draw full-screen quad via PyOpenGL
-        GL.glBegin(GL.GL_TRIANGLE_STRIP)
-        # bottom-left
-        GL.glTexCoord2f(0.0, 0.0);  GL.glVertex2f(-1.0, -1.0)
-        # top-left
-        GL.glTexCoord2f(0.0, 1.0);  GL.glVertex2f(-1.0,  1.0)
-        # bottom-right
-        GL.glTexCoord2f(1.0, 0.0);  GL.glVertex2f( 1.0, -1.0)
-        # top-right
-        GL.glTexCoord2f(1.0, 1.0);  GL.glVertex2f( 1.0,  1.0)
-        GL.glEnd()
-
-        self._sharpen_program.release()
-        self._sharpen_fbo.release()
-        tex.destroy()
-
-        # return the sharpened pixmap
-        return QPixmap.fromImage(self._sharpen_fbo.toImage())
-
-# Crop
-# ------------------------------------------------------------------------
-class CropOverlay(QWidget):
-    def __init__(self, parent, original_pixmap: QPixmap, current_language="en"):
-        super().__init__(parent)
-        self.setObjectName("CropOverlay")
-        # Make it cover the parent's entire area.
-        if parent:
-            self.setGeometry(parent.rect())
-        # Configure the window: frameless and always on top.
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        # Explicitly disable any translucent background.
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
-        # Enable auto-fill so that the background gets painted.
-        self.setAutoFillBackground(True)
-        palette = self.palette()
-        # Set our background (solid black) via the palette.
-        palette.setColor(self.backgroundRole(), Qt.GlobalColor.black)
-        self.setPalette(palette)
-        # Create the crop content (the handles, rotation slider, etc.).
-        self.crop_content = CropOverlayContent(self, original_pixmap, current_language)
-        self.crop_content.setGeometry(self.rect())
-        self.crop_content.cropAccepted.connect(self.onCropAccepted)
-        self.crop_content.cropCancelled.connect(self.onCropCancelled)
-        self.show()
-        QTimer.singleShot(0, self.crop_content.update)
-        QTimer.singleShot(50, lambda: QCursor.setPos(self.mapToGlobal(self.rect().center())))
-
-
-    def keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key.Key_Escape:
-            # exactly the same as pressing “Cancel”
-            self.onCropCancelled()
-        else:
-            super().keyPressEvent(event)
-
-    def handleParentResize(self):
-        # Delegate the resize handling to the crop content widget.
-        self.crop_content.handleParentResize()
-
-    def onCropAccepted(self, cropped_pix: QPixmap):
-        # 1) Tell the PhotoViewer to apply the crop result
-        if hasattr(self.parent(), "applyCropResult"):
-            self.parent().applyCropResult(cropped_pix)
-
-            # 2) Immediately snap the viewer to fit the new image
-            viewer = self.parent().image_viewer
-            viewer.auto_fit = True
-            viewer.adjustToFit()
-
-        # 3) Close the overlay
-        self.close()
-
-    def onCropCancelled(self):
-        self.close()
-
-    def closeEvent(self, event):
-        # If the parent is a PhotoViewer, re-enable shortcuts and the floating menu.
-        if hasattr(self.parent(), "enable_all_shortcuts"):
-            self.parent().enable_all_shortcuts()
-        if hasattr(self.parent(), "floating_menu") and self.parent().floating_menu:
-            self.parent().floating_menu.setEnabled(True)
-        super().closeEvent(event)
-
-
-class CropOverlayContent(QWidget):
-    cropAccepted = pyqtSignal(QPixmap)
-    cropCancelled = pyqtSignal()
-
-    def __init__(self, parent, original_pixmap: QPixmap, current_language="en"):
-        super().__init__(parent)
-        # Force this widget to have its own non-translucent background.
-        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        self.setAutoFillBackground(False)
-
-
-        # Continue with the original initialization.
-        self.original_pixmap = original_pixmap
-        preview_dimension = 2048
-        if max(original_pixmap.width(), original_pixmap.height()) > preview_dimension:
-            self.preview_pixmap = original_pixmap.scaled(
-                preview_dimension,
-                preview_dimension,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        else:
-            self.preview_pixmap = original_pixmap
-        self.current_language = current_language
-
-        # Create rotation slider (using your SmoothRotationSlider)
-        self.rotation = 0.0
-        t = translations.get(current_language, translations["en"])
-
-        # ─── NEW: compute the current image’s native aspect ratio ───
-        w = original_pixmap.width()
-        h = original_pixmap.height()
-        default_ratio = (w / h) if h else 1.0
-        # ─────────────────────────────────────────────────────────────
-
-        # Set up aspect ratio combo box.
-        self.ASPECT_RATIOS = [
-            (None,            t["crop_aspect_custom"]),    # Custom
-            (default_ratio,   t["crop_aspect_original"]),  # Original Aspect
-            (1.0,             t["crop_aspect_square"]),    # Square (1:1)
-            (16/9,            t["crop_aspect_sixteen_nine"]),  # Widescreen (16:9)
-            (4/3,             t["crop_aspect_four_three"]),    # Standard (4:3)
-        ]
-        self.aspect_ratio_combo = OverlayComboBox(self)
-        self.aspect_ratio_combo.setFixedWidth(180)
-        self.aspect_ratio_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #222;
-                color: white;
-                border: 1px solid #444;
-                border-radius: 6px;
-                padding: 6px 8px;
-                font-size: 14px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #333;
-                color: white;
-                selection-background-color: #555;
-                border: 1px solid #444;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-            }
-        """)
-        for ratio_value, label in self.ASPECT_RATIOS:
-            self.aspect_ratio_combo.addItem(label, userData=ratio_value)
-        self.aspect_ratio_combo.setCurrentIndex(0)
-        self.aspect_ratio = self.aspect_ratio_combo.itemData(0)
-        self.aspect_ratio_combo.currentIndexChanged.connect(self.on_aspect_ratio_changed)
-        self.aspect_ratio_combo.activated.connect(self.on_aspect_ratio_changed)
-
-
-        # Configure the rotation slider.
-        self.rotation_slider = SmoothRotationSlider(Qt.Orientation.Horizontal, self)
-        self.rotation_slider.keyPressEvent = self.slider_keyPressEvent
-        self.rotation_slider.floatValueChanged.connect(self.on_rotation_slider_changed)
-        self.rotation_slider.sliderReleased.connect(self.on_slider_released)
-        self.angle_label = QLabel(f"{t['angle']} 0.0°", self)
-        self.angle_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-
-        # OK and Cancel buttons.
-        self.ok_button = QPushButton(t["crop"], self)
-        self.ok_button.setFixedSize(120, 35)
-        self.ok_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007BFF;
-                color: white;
-                border-radius: 6px;
-                font-size: 15px;
-            }
-            QPushButton:hover { background-color: #0056b3; }
-        """)
-        self.cancel_button = QPushButton(t["cancel"], self)
-        self.cancel_button.setFixedSize(120, 35)
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #DC3545;
-                color: white;
-                border-radius: 6px;
-                font-size: 15px;
-            }
-            QPushButton:hover { background-color: #B22222; }
-        """)
-        self.ok_button.clicked.connect(self.handleAccept)
-        self.cancel_button.clicked.connect(self.handleCancel)
-
-        # Layout the controls.
-        bottom_layout = QHBoxLayout()
-        bottom_layout.addStretch()
-        bottom_layout.addWidget(self.aspect_ratio_combo)
-        bottom_layout.addSpacing(10)
-        bottom_layout.addWidget(self.rotation_slider)
-        bottom_layout.addWidget(self.angle_label)
-        bottom_layout.addSpacing(10)
-        bottom_layout.addWidget(self.ok_button)
-        bottom_layout.addWidget(self.cancel_button)
-        bottom_layout.addStretch()
-
-        main_layout = QVBoxLayout(self)
-        main_layout.addStretch()
-        main_layout.addLayout(bottom_layout)
-        self.setLayout(main_layout)
-
-        # Set initial focus on the rotation slider.
-        QTimer.singleShot(
-            0,
-            lambda: self.rotation_slider.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-        )
-
-        # Cropping and drawing variables.
-        self._scaled_pixmap = None
-        self._image_rect = QRectF()
-        self._scale_factor = 1.0
-        self.crop_rect = QRect(0, 0, 200, 200)
-        self.handles = {
-            k: QRect() for k in [
-                "top_left", "top_right", "bottom_left", "bottom_right",
-                "left_mid", "right_mid", "top_mid", "bottom_mid"
-            ]
-        }
-        self.handle_size = 14
-        self.active_handle = None
-        self.dragging = False
-        self.mouse_start_pos = QPoint()
-        self.initial_crop_rect = None
-        self.modified = False
-
-        # Resize to parent's size and initialize crop region.
-        self.resize(parent.size())
-        self.update_scaled_pixmap()
-        self.init_default_crop()
-
-    def on_aspect_ratio_changed(self, index):
-        self.aspect_ratio = self.aspect_ratio_combo.itemData(index)
-        self.init_default_crop()
-        self.update()
-
-    def slider_keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key.Key_Left:
-            new_val = self.rotation_slider.value() - 0.1
-            self.rotation_slider.setValue(new_val)
-            self.on_rotation_slider_changed(new_val)
-            event.accept()
-        elif event.key() == Qt.Key.Key_Right:
-            new_val = self.rotation_slider.value() + 0.1
-            self.rotation_slider.setValue(new_val)
-            self.on_rotation_slider_changed(new_val)
-            event.accept()
-        elif event.key() == Qt.Key.Key_Up:
-            new_val = self.rotation_slider.value() + 1.0
-            self.rotation_slider.setValue(new_val)
-            self.on_rotation_slider_changed(new_val)
-            event.accept()
-        elif event.key() == Qt.Key.Key_Down:
-            new_val = self.rotation_slider.value() - 1.0
-            self.rotation_slider.setValue(new_val)
-            self.on_rotation_slider_changed(new_val)
-            event.accept()
-        elif event.key() == Qt.Key.Key_0:
-            self.rotation_slider.setValue(0.0)
-            self.on_rotation_slider_changed(0.0)
-            event.accept()
-        else:
-            QSlider.keyPressEvent(self.rotation_slider, event)
-
-    def on_rotation_slider_changed(self, angle: float):
-        self.rotation = angle
-        t = translations.get(self.current_language, translations["en"])
-        self.angle_label.setText(f"{t['angle']} {angle:.1f}°")
-        self.update_scaled_pixmap()
-        self.update()
-
-    def on_slider_released(self):
-        threshold = 1
-        current_value = self.rotation_slider.value()
-        if abs(current_value) < threshold:
-            self.rotation_slider.setValue(0)
-            self.on_rotation_slider_changed(0)
-
-    def update_scaled_pixmap(self):
-        """
-        1) Rotate full-res around its center → self._rotated_full
-        2) Fit-to-screen scale via FBO → self._scaled_pixmap
-        3) Recompute self._image_rect & handles, then repaint
-        """
-        if self.original_pixmap.isNull():
-            return
-
-        # 1) Center-pivot rotate full-res
-        w = self.preview_pixmap.width()
-        h = self.preview_pixmap.height()
-        tf = QTransform()
-        tf.translate(w/2, h/2)
-        tf.rotate(self.rotation)
-        tf.translate(-w/2, -h/2)
-        self._rotated_full = self.preview_pixmap.transformed(
-            tf,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        # 2) Fit-to-screen scale exactly as before
-        avail_w = self.width()
-        avail_h = self.height() - 60
-        rw = self._rotated_full.width()
-        rh = self._rotated_full.height()
-        if rw == 0 or rh == 0:
-            return
-        self._scale_factor = min(avail_w / rw, avail_h / rh)
-        new_w = int(round(rw * self._scale_factor))
-        new_h = int(round(rh * self._scale_factor))
-
-        # 3) GPU-offscreen FBO → preview pixmap
-        self._scaled_pixmap = self._rotated_full.scaled(
-            new_w, new_h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-
-        # 4) Center & update handles, then repaint
-        x = int(round((avail_w - new_w) / 2))
-        y = 10
-        self._image_rect = QRectF(x, y, new_w, new_h)
-        self.update_handles()
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor(0, 0, 0))  # Black background
-
-        # Just draw the already-prepared preview
-        if not self._scaled_pixmap.isNull():
-            painter.drawPixmap(
-                int(self._image_rect.x()),
-                int(self._image_rect.y()),
-                self._scaled_pixmap
-            )
-
-        # Draw crop rectangle and handles
-        gray_pen  = QPen(QColor(128, 128, 128), 2)
-        white_pen = QPen(Qt.GlobalColor.white, 1)
-
-        painter.setPen(gray_pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(self.crop_rect)
-
-        painter.setPen(white_pen)
-        painter.drawRect(self.crop_rect)
-
-        for handle in self.handles.values():
-            painter.setPen(gray_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(handle)
-            painter.setPen(white_pen)
-            painter.setBrush(QColor("white"))
-            painter.drawRect(handle)
-
-        painter.end()
-
-    def get_final_cropped_pixmap(self) -> QPixmap:
-        # 1) rebuild the rotated_full
-        rotated_full = self.original_pixmap.transformed(
-            QTransform().rotate(self.rotation),
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        # 2) same scale & offset as in paintEvent
-        avail_w = self.width()
-        avail_h = self.height() - 60
-        scale = min(avail_w / rotated_full.width(),
-                    avail_h / rotated_full.height())
-        x_off = (avail_w - rotated_full.width() * scale) / 2
-        y_off = 10
-
-        # 3) invert only the translate+scale (not the rotation)
-        tf = QTransform()
-        tf.translate(x_off, y_off)
-        tf.scale(scale, scale)
-        inv, ok = tf.inverted()
-        if not ok:
-            return QPixmap()
-
-        # 4) map the top-left corner of the crop box
-        tl = inv.map(QPointF(self.crop_rect.left(), self.crop_rect.top()))
-
-        # 5) compute how big the box is in rotated_full coords
-        rw = int(round(self.crop_rect.width()  / scale))
-        rh = int(round(self.crop_rect.height() / scale))
-        ix = int(round(tl.x()))
-        iy = int(round(tl.y()))
-
-        # 6) clamp into the rotated_full bounds
-        r = QRect(ix, iy, rw, rh).intersected(rotated_full.rect())
-        if r.width() <= 0 or r.height() <= 0:
-            return QPixmap()
-
-        # 7) copy & return
-        return rotated_full.copy(r)
-
-
-    def init_default_crop(self):
-        iw, ih = self._image_rect.width(), self._image_rect.height()
-        if iw <= 0 or ih <= 0:
-            return
-        cw, ch = iw / 3, ih / 3
-        if self.aspect_ratio is not None:
-            # Force crop rectangle to maintain the given ratio.
-            ch = cw / self.aspect_ratio
-            if ch > ih / 3:
-                ch = ih / 3
-                cw = ch * self.aspect_ratio
-        cx = self._image_rect.x() + (iw - cw) / 2
-        cy = self._image_rect.y() + (ih - ch) / 2
-        self.crop_rect = QRect(int(cx), int(cy), int(cw), int(ch))
-        self.update_handles()
-
-    def update_handles(self):
-        """
-        Recompute the positions of the eight handles around self.crop_rect,
-        but if a fixed aspect ratio is active (i.e. self.aspect_ratio is not None),
-        the mid‐edge handles are cleared (set to zero‐sized) so they neither draw
-        nor respond to mouse events.
-        """
-        c = self.crop_rect
-        s = self.handle_size
-        half = s // 2
-
-        # Corner handles
-        self.handles["top_left"]     = QRect(c.left() - half,  c.top() - half,     s, s)
-        self.handles["top_right"]    = QRect(c.right() - half, c.top() - half,     s, s)
-        self.handles["bottom_left"]  = QRect(c.left() - half,  c.bottom() - half,  s, s)
-        self.handles["bottom_right"] = QRect(c.right() - half, c.bottom() - half,  s, s)
-
-        # Mid‐edge handles (computed for Custom mode, but then possibly cleared)
-        mid_x = (c.left() + c.right()) // 2
-        mid_y = (c.top()  + c.bottom()) // 2
-        mids = {
-            "left_mid":   QRect(c.left() - half,  mid_y - half, s, s),
-            "right_mid":  QRect(c.right() - half, mid_y - half, s, s),
-            "top_mid":    QRect(mid_x - half,     c.top() - half, s, s),
-            "bottom_mid": QRect(mid_x - half,     c.bottom() - half, s, s),
-        }
-        self.handles.update(mids)
-
-        # If we’re in a fixed‐ratio mode, disable the mid‐edge handles completely:
-        if self.aspect_ratio is not None:
-            for key in ("left_mid", "right_mid", "top_mid", "bottom_mid"):
-                # zero‐size rect => invisible & non‐interactive
-                self.handles[key] = QRect()
-
-    def mousePressEvent(self, event: QEvent):
-        if event.type() == QEvent.Type.MouseButtonPress and event.button()==Qt.MouseButton.LeftButton:
-            pos = event.pos()
-            self.initial_crop_rect = QRect(self.crop_rect)
-            for name, rect in self.handles.items():
-                if rect.contains(pos):
-                    self.active_handle = name
-                    self.dragging = True
-                    self.mouse_start_pos = pos
-                    break
-            else:
-                if self.crop_rect.contains(pos):
-                    self.active_handle = "move"
-                    self.dragging = True
-                    self.mouse_start_pos = pos
-            event.accept()
-        else:
-            event.ignore()
-
-    def mouseMoveEvent(self, event: QEvent):
-        if event.type() != QEvent.Type.MouseMove:
-            return
-        pos = event.pos()
-
-        # Update cursor when hovering, but do nothing if not actively dragging
-        if not self.dragging:
-            self.setCursor(self.cursor_for_handle(self.handle_at(pos)))
-            return
-
-        dx = pos.x() - self.mouse_start_pos.x()
-        dy = pos.y() - self.mouse_start_pos.y()
-        img = self._image_rect  # alias for image bounds
-
-        # If fixed ratio and dragged a mid-edge handle, ignore—only corners allowed
-        if (
-            self.aspect_ratio is not None
-            and self.active_handle in ("left_mid", "right_mid", "top_mid", "bottom_mid")
-        ):
-            return
-
-        # Start from current crop rectangle
-        new_rect = QRect(self.crop_rect)
-
-        if self.active_handle == "move":
-            # Move the crop rect
-            new_rect.translate(dx, dy)
-            # Clamp within image
-            if new_rect.left()   < img.left():   new_rect.moveLeft(int(img.left()))
-            if new_rect.right()  > img.right():  new_rect.moveRight(int(img.right()))
-            if new_rect.top()    < img.top():    new_rect.moveTop(int(img.top()))
-            if new_rect.bottom() > img.bottom(): new_rect.moveBottom(int(img.bottom()))
-
-        else:
-            # Corner-resize with fixed ratio?
-            if (
-                self.aspect_ratio is not None
-                and self.active_handle in ("top_left", "top_right", "bottom_left", "bottom_right")
-            ):
-                fixed = {
-                    "top_left":     self.initial_crop_rect.bottomRight(),
-                    "top_right":    self.initial_crop_rect.bottomLeft(),
-                    "bottom_left":  self.initial_crop_rect.topRight(),
-                    "bottom_right": self.initial_crop_rect.topLeft(),
-                }[self.active_handle]
-
-                # Compute new width/height preserving ratio
-                new_width  = abs(pos.x() - fixed.x())
-                new_height = new_width / self.aspect_ratio
-
-                if self.active_handle == "top_left":
-                    left   = fixed.x() - new_width
-                    top    = fixed.y() - new_height
-                    # clamp top/left
-                    if left < img.left():
-                        left = int(img.left())
-                        new_width = fixed.x() - left
-                        new_height = new_width / self.aspect_ratio
-                        top = fixed.y() - new_height
-                    if top < img.top():
-                        top = int(img.top())
-                        new_height = fixed.y() - top
-                        new_width = new_height * self.aspect_ratio
-                        left = fixed.x() - new_width
-                    new_rect = QRect(int(left), int(top), int(new_width), int(new_height))
-
-                elif self.active_handle == "top_right":
-                    right  = fixed.x() + new_width
-                    top    = fixed.y() - new_height
-                    if right > img.right():
-                        right = int(img.right())
-                        new_width = right - fixed.x()
-                        new_height = new_width / self.aspect_ratio
-                        top = fixed.y() - new_height
-                    if top < img.top():
-                        top = int(img.top())
-                        new_height = fixed.y() - top
-                        new_width = new_height * self.aspect_ratio
-                        right = fixed.x() + new_width
-                    new_rect = QRect(int(fixed.x()), int(top), int(new_width), int(new_height))
-
-                elif self.active_handle == "bottom_left":
-                    left   = fixed.x() - new_width
-                    bottom = fixed.y() + new_height
-                    if left < img.left():
-                        left = int(img.left())
-                        new_width = fixed.x() - left
-                        new_height = new_width / self.aspect_ratio
-                        bottom = fixed.y() + new_height
-                    if bottom > img.bottom():
-                        bottom = int(img.bottom())
-                        new_height = bottom - fixed.y()
-                        new_width = new_height * self.aspect_ratio
-                        left = fixed.x() - new_width
-                    new_rect = QRect(int(left), int(fixed.y()), int(new_width), int(new_height))
-
-                elif self.active_handle == "bottom_right":
-                    right  = fixed.x() + new_width
-                    bottom = fixed.y() + new_height
-                    if right > img.right():
-                        right = int(img.right())
-                        new_width = right - fixed.x()
-                        new_height = new_width / self.aspect_ratio
-                        bottom = fixed.y() + new_height
-                    if bottom > img.bottom():
-                        bottom = int(img.bottom())
-                        new_height = bottom - fixed.y()
-                        new_width = new_height * self.aspect_ratio
-                        right = fixed.x() + new_width
-                    new_rect = QRect(int(fixed.x()), int(fixed.y()), int(new_width), int(new_height))
-
-            else:
-                # Freeform edge drags (only when aspect_ratio is None)
-                if "left" in self.active_handle:
-                    left = max(int(img.left()), new_rect.left() + dx)
-                    left = min(left, new_rect.right() - 10)
-                    new_rect.setLeft(left)
-                if "right" in self.active_handle:
-                    right = min(int(img.right()), new_rect.right() + dx)
-                    right = max(right, new_rect.left() + 10)
-                    new_rect.setRight(right)
-                if "top" in self.active_handle:
-                    top = max(int(img.top()), new_rect.top() + dy)
-                    top = min(top, new_rect.bottom() - 10)
-                    new_rect.setTop(top)
-                if "bottom" in self.active_handle:
-                    bottom = min(int(img.bottom()), new_rect.bottom() + dy)
-                    bottom = max(bottom, new_rect.top() + 10)
-                    new_rect.setBottom(bottom)
-
-        # Final clamp for safety
-        if new_rect.left()   < img.left():   new_rect.moveLeft(int(img.left()))
-        if new_rect.right()  > img.right():  new_rect.moveRight(int(img.right()))
-        if new_rect.top()    < img.top():    new_rect.moveTop(int(img.top()))
-        if new_rect.bottom() > img.bottom(): new_rect.moveBottom(int(img.bottom()))
-
-        # Commit changes
-        self.crop_rect = new_rect
-        self.mouse_start_pos = pos
-        self.update_handles()
-        self.update()
-
-    def mouseReleaseEvent(self, event: QEvent):
-        if event.type()==QEvent.Type.MouseButtonRelease and event.button()==Qt.MouseButton.LeftButton:
-            self.dragging = False
-            self.active_handle = None
-            event.accept()
-        else:
-            event.ignore()
-
-    def handle_at(self, pt: QPoint) -> str:
-        for name, rect in self.handles.items():
-            if rect.contains(pt):
-                return name
-        return "move" if self.crop_rect.contains(pt) else ""
-
-    def cursor_for_handle(self, handle_name: str) -> Qt.CursorShape:
-        mapping = {
-            ("top_left","bottom_right"): Qt.CursorShape.SizeFDiagCursor,
-            ("top_right","bottom_left"): Qt.CursorShape.SizeBDiagCursor,
-            ("left_mid","right_mid"):     Qt.CursorShape.SizeHorCursor,
-            ("top_mid","bottom_mid"):     Qt.CursorShape.SizeVerCursor,
-            ("move",):                    Qt.CursorShape.SizeAllCursor,
-        }
-        for keys, cursor in mapping.items():
-            if handle_name in keys:
-                return cursor
-        return Qt.CursorShape.ArrowCursor
-
-    def get_final_crop(self) -> QPixmap:
-        return self.get_final_cropped_pixmap()
-
-    def accept(self):
-        if not self.get_final_cropped_pixmap().isNull():
-            self.modified = True
-        else:
-            self.modified = False
-        super().accept()
-
-    def handleAccept(self):
-        cropped_pix = self.get_final_cropped_pixmap()
-        self.cropAccepted.emit(cropped_pix)
-    
-    def handleCancel(self):
-        self.cropCancelled.emit()
-
-    def handleParentResize(self):
-        # Called by the parent when resized while this overlay is open.
-        self.setGeometry(self.parent().rect())
-        self.update_scaled_pixmap()
-        # Option A: Re-center the crop rect (loses any partial crop)
-        self.init_default_crop()
-        self.update()
-
-
-
-# ------------------------------------------------------------------------
-# Overlay Content: Split-view + 200px sliders + Apply/Cancel + mouse/keys
-# ------------------------------------------------------------------------
-class SharpnessOverlayContent(QWidget):
-    """
-    Split‐view preview of sharpen effect, with 200px sliders plus live
-    numeric readouts, Apply/Cancel buttons, mouse‐drag divider, mouse‐pan,
-    arrow keys, and mouse‐wheel zoom centered under the cursor.
-    """
-    def __init__(self, parent, original_pixmap: QPixmap, current_language="en"):
-        super().__init__(parent)
-        self.orig_pix     = original_pixmap
-        preview_dimension = 2048
-        if max(original_pixmap.width(), original_pixmap.height()) > preview_dimension:
-            self.preview_orig = original_pixmap.scaled(
-                preview_dimension,
-                preview_dimension,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        else:
-            self.preview_orig = original_pixmap
-        self.current = self.preview_orig
-        self.split_x      = 0.5
-        self.btn_h        = 35
-        self.ctrl_margin  = 20
-
-        # Divider vs pan
-        self._dragging_divider = False
-        self._panning_image    = False
-        self.pan_x = 0
-        self.pan_y = 0
-
-        # Zoom
-        self.zoom     = 1.0
-        self.min_zoom = 0.5
-        self.max_zoom = 4.0
-
-        # accept keys & wheel
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setMouseTracking(True)
-        QTimer.singleShot(0, lambda: self.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
-        self._preview_timer = QTimer(self)
-        self._preview_timer.setSingleShot(True)
-        self._preview_timer.timeout.connect(self._render_preview)
-
-        t = translations.get(current_language, translations["en"])
-
-        # ─── Radius slider + label ────────────────────────────────
-        lbl_r = QLabel(t["radius"], self)
-        self.sld_r = QSlider(Qt.Orientation.Horizontal, self)
-        self.sld_r.setRange(1, 50)
-        self.sld_r.setValue(1)
-        self.sld_r.setFixedWidth(200)
-        self.sld_r.valueChanged.connect(self._on_radius_changed)
-
-        # live readout (2-digit, monospaced width)
-        self.lbl_r_value = QLabel(f"{self.sld_r.value():2d}", self)
-        self.lbl_r_value.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
-        self.lbl_r_value.setFixedWidth(30)
-        self.lbl_r_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # ─── Amount slider + label ────────────────────────────────
-        lbl_a = QLabel(t["amount"], self)
-        self.sld_a = QSlider(Qt.Orientation.Horizontal, self)
-        self.sld_a.setRange(1, 300)
-        self.sld_a.setValue(100)
-        self.sld_a.setFixedWidth(200)
-        self.sld_a.valueChanged.connect(self._on_amount_changed)
-
-        # live readout (3-digit, monospaced width)
-        self.lbl_a_value = QLabel(f"{self.sld_a.value():3d}", self)
-        self.lbl_a_value.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
-        self.lbl_a_value.setFixedWidth(40)
-        self.lbl_a_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # ─── Apply / Cancel buttons ───────────────────────────────────
-        btn_apply  = QPushButton(t["apply"],  self)
-        btn_cancel = QPushButton(t["cancel"], self)
-        for btn, col in ((btn_apply, "#007BFF"), (btn_cancel, "#DC3545")):
-            btn.setFixedSize(120, self.btn_h)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {col};
-                    color: white;
-                    border-radius: 6px;
-                    font-size: 15px;
-                }}
-                QPushButton:hover {{
-                    background-color: {'#0056b3' if col=='#007BFF' else '#B22222'};
-                }}
-            """)
-        btn_apply.clicked.connect(lambda: parent.onAccepted(self))
-        btn_cancel.clicked.connect(lambda: parent.onCancelled())
-
-        # ─── Layout ───────────────────────────────────────────────────
-        main = QVBoxLayout(self)
-        main.setContentsMargins(0, 0, 0, self.ctrl_margin)
-        main.addStretch()
-
-        bottom = QHBoxLayout()
-        bottom.addStretch()
-        # Radius: label, slider, value
-        bottom.addWidget(lbl_r)
-        bottom.addWidget(self.sld_r, 2)
-        bottom.addWidget(self.lbl_r_value)
-        bottom.addSpacing(10)
-        # Amount: label, slider, value
-        bottom.addWidget(lbl_a)
-        bottom.addWidget(self.sld_a, 2)
-        bottom.addWidget(self.lbl_a_value)
-        bottom.addSpacing(20)
-        bottom.addWidget(btn_apply)
-        bottom.addSpacing(10)
-        bottom.addWidget(btn_cancel)
-        bottom.addStretch()
-        main.addLayout(bottom)
-
-
-        # initial preview render
-        self._update_preview()
-
-    def _on_radius_changed(self, v: int):
-        self.lbl_r_value.setText(str(v))
-        self._update_preview()
-
-    def _on_amount_changed(self, v: int):
-        # show as percentage
-        self.lbl_a_value.setText(str(v))
-        self._update_preview()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        # full-black background
-        painter.fillRect(self.rect(), QColor(0, 0, 0))
-
-        if self.current.isNull():
-            return
-
-        # leave room for controls + ctrl_margin
-        total_ctrl_h = self.btn_h + 10  # 10 px internal margin
-        W = self.width()
-        H = self.height() - total_ctrl_h - self.ctrl_margin
-
-        pw, ph     = self.current.width(), self.current.height()
-        base_scale = min(W / pw, H / ph)
-        scale      = base_scale * self.zoom
-        nw, nh     = int(pw * scale), int(ph * scale)
-
-        # center + pan
-        ox = (W - nw) // 2 + int(self.pan_x)
-        oy = (H - nh) // 2 + int(self.pan_y)
-        split_px = ox + int(self.split_x * nw)
-
-        # draw sharpened (left) half
-        painter.save()
-        painter.setClipRect(ox, oy, split_px - ox, nh)
-        painter.drawPixmap(ox, oy,
-            self.current.scaled(nw, nh,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-        )
-        painter.restore()
-
-        # draw original (right) half
-        painter.save()
-        painter.setClipRect(split_px, oy, ox + nw - split_px, nh)
-        painter.drawPixmap(ox, oy,
-            self.preview_orig.scaled(nw, nh,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-        )
-        painter.restore()
-
-        # draw the split‐line
-        pen = QPen(QColor("white"), 2)
-        painter.setPen(pen)
-        painter.drawLine(split_px, oy, split_px, oy + nh)
-
-        # draw black bar behind controls, lifted by ctrl_margin
-        bar_top = self.height() - (total_ctrl_h + self.ctrl_margin)
-        painter.fillRect(
-            0,
-            bar_top,
-            self.width(),
-            total_ctrl_h + self.ctrl_margin,
-            QColor(0, 0, 0)
-        )
-
-    def keyPressEvent(self, ev: QKeyEvent):
-        k = ev.key()
-        if k == Qt.Key.Key_Left:
-            self.split_x = max(0.0, self.split_x - 0.02)
-            self.update()
-        elif k == Qt.Key.Key_Right:
-            self.split_x = min(1.0, self.split_x + 0.02)
-            self.update()
-
-        # Up/Down adjust sharpen AMOUNT by 10 steps
-        elif k == Qt.Key.Key_Up:
-            self.sld_a.setValue(min(self.sld_a.maximum(), self.sld_a.value() + 10))
-        elif k == Qt.Key.Key_Down:
-            self.sld_a.setValue(max(self.sld_a.minimum(), self.sld_a.value() - 10))
-
-        # '0' resets *only* Radius & Amount sliders
-        elif k == Qt.Key.Key_0:
-            self.sld_r.setValue(1)
-            self.sld_a.setValue(100)
-            self._on_radius_changed(self.sld_r.value())
-            self._on_amount_changed(self.sld_a.value())
-
-        # Backspace resets *only* zoom/pan to fit
-        elif k == Qt.Key.Key_Backspace:
-            self.zoom  = 1.0
-            self.pan_x = 0
-            self.pan_y = 0
-            self.update()
-
-        # Escape cancels (same as Cancel button)
-        elif k == Qt.Key.Key_Escape:
-            self.parent().onCancelled()
-
-        else:
-            super().keyPressEvent(ev)
-
-
-    def mouseDoubleClickEvent(self, ev: QMouseEvent):
-        """
-        Reset only zoom/pan to initial state on double-click.
-        (Sliders and divider remain untouched.)
-        """
-        self.zoom  = 1.0
-        self.pan_x = 0
-        self.pan_y = 0
-        self.update()
-        ev.accept()
-
-
-    def wheelEvent(self, ev: QWheelEvent):
-        # Determine zoom factor
-        delta    = ev.angleDelta().y()
-        factor   = 1.1 if delta > 0 else 1 / 1.1
-        old_zoom = self.zoom
-        new_zoom = max(self.min_zoom, min(self.max_zoom, old_zoom * factor))
-        if new_zoom == old_zoom:
-            return
-
-        # Widget and image dimensions (leave controls + margin)
-        total_ctrl_h = self.btn_h + 10
-        W = self.width()
-        H = self.height() - total_ctrl_h - self.ctrl_margin
-        pw, ph = self.current.width(), self.current.height()
-        base   = min(W / pw, H / ph)
-
-        # Compute current scale and origin
-        old_scale = base * old_zoom
-        ox_old    = (W - pw * old_scale) / 2 + self.pan_x
-        oy_old    = (H - ph * old_scale) / 2 + self.pan_y
-
-        # Mouse position
-        mx, my = ev.position().x(), ev.position().y()
-
-        # Image-space under cursor
-        rel_x = (mx - ox_old) / old_scale
-        rel_y = (my - oy_old) / old_scale
-
-        # Apply zoom
-        self.zoom = new_zoom
-        new_scale = base * new_zoom
-
-        # Centered origin
-        ox_center = (W - pw * new_scale) / 2
-        oy_center = (H - ph * new_scale) / 2
-
-        # Recompute pan
-        self.pan_x = mx - (ox_center + rel_x * new_scale)
-        self.pan_y = my - (oy_center + rel_y * new_scale)
-
-        self.update()
-        ev.accept()
-
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.MouseButton.LeftButton:
-            total_ctrl_h = self.btn_h + 10
-            W = self.width()
-            H = self.height() - total_ctrl_h - self.ctrl_margin
-            pw, ph = self.current.width(), self.current.height()
-            base_scale = min(W / pw, H / ph) * self.zoom
-            nw = pw * base_scale
-            ox = (W - nw) / 2 + self.pan_x
-            split_px = ox + self.split_x * nw
-
-            x = ev.position().x()
-            if abs(x - split_px) <= 5:
-                self._dragging_divider = True
-                self._press_x = x
-                self._start_split = self.split_x
-            else:
-                self._panning_image = True
-                self._pan_start_x = x
-                self._pan_start_y = ev.position().y()
-                self._pan_orig_x  = self.pan_x
-                self._pan_orig_y  = self.pan_y
-
-            ev.accept()
-        else:
-            super().mousePressEvent(ev)
-
-    def mouseMoveEvent(self, ev: QMouseEvent):
-        # If over any interactive child (slider, button, label), show arrow
-        w = self.childAt(ev.position().toPoint())
-        if isinstance(w, (QSlider, QPushButton, QLabel)):
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            return super().mouseMoveEvent(ev)
-
-        # If over the bottom “menu” region, also show arrow
-        bottom_y = self.height() - (self.btn_h + self.ctrl_margin)
-        if ev.position().y() >= bottom_y:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            return super().mouseMoveEvent(ev)
-
-        # Otherwise, calculate split/pan and show the hand or resize cursor
-        total_ctrl_h = self.btn_h + 10
-        W = self.width()
-        H = self.height() - total_ctrl_h - self.ctrl_margin
-        pw, ph = self.current.width(), self.current.height()
-        scale  = min(W / pw, H / ph) * self.zoom
-        nw     = pw * scale
-        ox     = (W - nw) / 2 + self.pan_x
-        split_px = ox + self.split_x * nw
-
-        if not self._dragging_divider and not self._panning_image:
-            mx = ev.position().x()
-            if abs(mx - split_px) <= 5:
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
-            else:
-                self.setCursor(Qt.CursorShape.OpenHandCursor)
-
-        # Now handle actual dragging/panning
-        if self._dragging_divider:
-            dx = ev.position().x() - self._press_x
-            self.split_x = max(0.0, min(1.0, self._start_split + dx / nw))
-            self.update()
-            ev.accept()
-        elif self._panning_image and (ev.buttons() & Qt.MouseButton.LeftButton):
-            dx = ev.position().x() - self._pan_start_x
-            dy = ev.position().y() - self._pan_start_y
-            self.pan_x = self._pan_orig_x + dx
-            self.pan_y = self._pan_orig_y + dy
-            self.update()
-            ev.accept()
-        else:
-            super().mouseMoveEvent(ev)
-
-
-    def leaveEvent(self, ev):
-        self.unsetCursor()
-        super().leaveEvent(ev)
-
-    def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.MouseButton.LeftButton:
-            if self._dragging_divider:
-                self._dragging_divider = False
-                ev.accept()
-            elif self._panning_image:
-                self._panning_image = False
-                ev.accept()
-            else:
-                super().mouseReleaseEvent(ev)
-        else:
-            super().mouseReleaseEvent(ev)
-
-    def mouseDoubleClickEvent(self, ev: QMouseEvent):
-        """
-        Reset only zoom/pan to initial state on double-click.
-        (Sliders and divider remain untouched.)
-        """
-        self.zoom  = 1.0
-        self.pan_x = 0
-        self.pan_y = 0
-        self.update()
-        ev.accept()
-
-    def _update_preview(self):
-        self._preview_timer.start(60)
-
-    def _render_preview(self):
-        r = self.sld_r.value()
-        a = self.sld_a.value() / 100.0
-        self.current = sharpen_cv2(self.preview_orig, r, a)
-        self.update()
-
-# ------------------------------------------------------------------------
-# Full-Screen Sharpness Overlay tying it all together
-# ------------------------------------------------------------------------
-class SharpnessOverlay(QWidget):
-    def __init__(self, owner, original_pixmap: QPixmap, current_language="en"):
-        super().__init__(owner)
-        self._viewer = owner
-        self.orig_pix = original_pixmap
-        self._processing = False
-        self.setObjectName("SharpnessOverlay")
-
-        # 1) Cover the owner's area
-        if owner:
-            self.setGeometry(owner.rect())
-
-        # 2) Frameless, always-on-top, solid black
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground,   False)
-        self.setAutoFillBackground(True)
-        pal = self.palette()
-        pal.setColor(self.backgroundRole(), Qt.GlobalColor.black)
-        self.setPalette(pal)
-
-        # 3) Disable the viewer’s shortcuts & floating menu
-        if hasattr(owner, "disable_all_shortcuts"):
-            owner.disable_all_shortcuts()
-        if getattr(owner, "floating_menu", None):
-            owner.floating_menu.setEnabled(False)
-
-        # 4) Grab the keyboard so no child can steal it
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.grabKeyboard()
-
-        # 5) Embed the content
-        self.content = SharpnessOverlayContent(self, original_pixmap, current_language)
-        self.content.setGeometry(self.rect())
-
-        # 6) Show
-        self.show()
-
-    def keyPressEvent(self, ev: QKeyEvent):
-        key = ev.key()
-
-        # 1) Escape closes the overlay
-        if key == Qt.Key.Key_Escape:
-            self.onCancelled()
-            ev.accept()
-
-        # 2) All of these should go to the content:
-        #    arrows, '0', and Backspace
-        elif key in (
-            Qt.Key.Key_Left, Qt.Key.Key_Right,
-            Qt.Key.Key_Up,   Qt.Key.Key_Down,
-            Qt.Key.Key_0,    Qt.Key.Key_Backspace
-        ):
-            self.content.keyPressEvent(ev)
-
-        # 3) Anything else: default behavior
-        else:
-            super().keyPressEvent(ev)
-
-    def onAccepted(self, content: SharpnessOverlayContent):
-        """
-        Called when the user clicks 'Apply' in the sharpness content.
-        Snap an undo, apply the sharpen, then close.
-        """
-        # 1) Read slider values
-        r = content.sld_r.value()
-        a = content.sld_a.value() / 100.0
-
-        # 2) Snapshot undo now
-        self._viewer.push_undo_state(from_crop=False)
-
-        # 3) Run the full-resolution commit away from the GUI thread.
-        worker = SharpenThread(self.orig_pix, r, a, self._viewer)
-        self._viewer.sharpen_thread = worker
-        self._processing = True
-        self.content.setEnabled(False)
-
-        def apply_result(image):
-            self._viewer.applySharpenResult(QPixmap.fromImage(image))
-            worker.deleteLater()
-            self._viewer.sharpen_thread = None
-            self._processing = False
-            self.releaseKeyboard()
-            self.close()
-
-        def show_error(message):
-            self._viewer.show_custom_dialog(
-                message,
-                icon_type="error",
-                buttons="ok",
-            )
-            worker.deleteLater()
-            self._viewer.sharpen_thread = None
-            self._processing = False
-            self.releaseKeyboard()
-            self.close()
-
-        worker.finished.connect(apply_result)
-        worker.errorOccurred.connect(show_error)
-        worker.start()
-
-    def onCancelled(self):
-        if self._processing:
-            return
-        # release the grab and close, just like crop
-        self.releaseKeyboard()
-        self.close()
-
-    def closeEvent(self, ev):
-        if self._processing:
-            ev.ignore()
-            return
-        # restore shortcuts & menu on the viewer
-        owner = self.parent()
-        if hasattr(owner, "enable_all_shortcuts"):
-            owner.enable_all_shortcuts()
-        if getattr(owner, "floating_menu", None):
-            owner.floating_menu.setEnabled(True)
-        super().closeEvent(ev)
 
 
 # ------------------------------------------------------------------------
@@ -2434,7 +176,12 @@ class PhotoViewer(QMainWindow):
         self.image_rotations = {}
         self.norm_to_original = {}
         self._directory_cache = {}
-        self._preload_inflight = set()
+        # path -> (token, loader) for neighbour preloads currently queued or decoding
+        self._preload_inflight = {}
+        self._preload_token = 0
+        self._nav_direction = 1
+        self._last_nav_attempt = 0.0
+        self._last_nav_advance = 0.0
         self._marked_save_timer = QTimer(self)
         self._marked_save_timer.setSingleShot(True)
         self._marked_save_timer.setInterval(250)
@@ -4699,6 +2446,7 @@ class PhotoViewer(QMainWindow):
             # Save the currently displayed image as the "previous"
             self.previous_image = self.image_files[self.current_index]
             self.current_index = 0
+            self._nav_direction = 1
             self.show_image()
 
     def go_to_last_image(self):
@@ -4706,6 +2454,7 @@ class PhotoViewer(QMainWindow):
             # Save the currently displayed image as the "previous"
             self.previous_image = self.image_files[self.current_index]
             self.current_index = len(self.image_files) - 1
+            self._nav_direction = -1
             self.show_image()
         
 
@@ -4810,7 +2559,7 @@ class PhotoViewer(QMainWindow):
         self._history.clear()
         self._modified.clear()
         self._current_path = None
-        self._preload_inflight.clear()
+        self._cancel_preloads()
         # ————————————————————————————————————————————————————————
 
         # Unsaved‐crop check (unchanged)
@@ -4897,65 +2646,82 @@ class PhotoViewer(QMainWindow):
         self.image_loading = True
 
         # ——— Phase 2: display current image before scheduling speculative work ———
-        viewer = self.image_viewer
-        pix = ImageLoaderRunnable.get_cached_pixmap(path)
-        if pix is not None:
-            viewer.load_counter = getattr(viewer, "load_counter", 0) + 1
-            viewer.current_load_id = viewer.load_counter
-            viewer.onImageLoaded(
-                pix,
-                reset_zoom,
-                preserve_zoom,
-                viewer.current_load_id,
-                full_resolution=True,
-            )
-        else:
-            viewer.setImage(path, reset_zoom, preserve_zoom)
+        self.image_viewer.setImage(path, reset_zoom, preserve_zoom)
 
-        # ——— Phase 3: preload display-sized neighbors, forward first ———
-        from PyQt6.QtCore import QThreadPool
-        preview_dimension = max(
-            1024,
-            min(
-                4096,
-                max(viewer.viewport().width(), viewer.viewport().height()) * 2,
-            ),
-        )
-        for neighbor_index in (self.current_index + 1, self.current_index - 1):
-            if not (0 <= neighbor_index < len(self.image_files)):
-                continue
-            neighbor_path = self.image_files[neighbor_index]
-            if (
-                ImageLoaderRunnable.get_cached_preview(
-                    neighbor_path,
-                    preview_dimension,
-                )
-                is not None
-            ):
-                continue
-            if neighbor_path in self._preload_inflight:
-                continue
-            loader = ImageLoaderRunnable(
-                neighbor_path,
-                max_dimension=preview_dimension,
-                progressive=True,
-                load_full=False,
-            )
-            self._preload_inflight.add(neighbor_path)
-            loader.signals.previewReady.connect(
-                lambda _frame, path=neighbor_path:
-                    self._preload_inflight.discard(path)
-            )
-            loader.signals.error.connect(
-                lambda _err, path=neighbor_path:
-                    self._preload_inflight.discard(path)
-            )
-            QThreadPool.globalInstance().start(loader)
+        # ——— Phase 3: preload screen-sized neighbours in the direction of travel ———
+        self._schedule_preloads()
 
         # ——— Phase 4: refresh controls ———
         self.update_floating_controls()
 
 
+
+    def _cancel_preloads(self):
+        for _token, loader in self._preload_inflight.values():
+            loader.cancel()
+        self._preload_inflight.clear()
+
+    def _preload_finished(self, path, token):
+        entry = self._preload_inflight.get(path)
+        if entry is not None and entry[0] == token:
+            self._preload_inflight.pop(path, None)
+
+    def _schedule_preloads(self):
+        """Keep the next two photos (travel direction) and the previous one decoded.
+
+        Preloads that fell out of that window are cancelled, so holding an arrow
+        key never leaves a backlog of decodes for photos already skipped past.
+        """
+        total = len(self.image_files)
+        if total <= 1 or not (0 <= self.current_index < total):
+            self._cancel_preloads()
+            return
+        step = -1 if self._nav_direction < 0 else 1
+        plan = (
+            (step, PRIORITY_PRELOAD_NEXT),
+            (-step, PRIORITY_PRELOAD_PREVIOUS),
+            (2 * step, PRIORITY_PRELOAD_AHEAD),
+        )
+        current_path = self.image_files[self.current_index]
+        targets = []
+        for offset, priority in plan:
+            index = self.current_index + offset
+            if self.loop_navigation:
+                index %= total
+            elif not (0 <= index < total):
+                continue
+            path = self.image_files[index]
+            if path != current_path and path not in (p for p, _ in targets):
+                targets.append((path, priority))
+
+        wanted = {path for path, _ in targets}
+        for path in list(self._preload_inflight):
+            if path not in wanted:
+                self._preload_inflight.pop(path)[1].cancel()
+
+        dimension = self.image_viewer.preview_dimension()
+        for path, priority in targets:
+            if path in self._preload_inflight:
+                continue
+            if (
+                ImageLoaderRunnable.get_cached_preview(path, dimension) is not None
+                or ImageLoaderRunnable.get_cached_image(path) is not None
+            ):
+                continue
+            self._preload_token += 1
+            token = self._preload_token
+            loader = ImageLoaderRunnable(
+                path,
+                max_dimension=dimension,
+                progressive=True,
+                load_full=False,
+            )
+            done = lambda *_args, p=path, t=token: self._preload_finished(p, t)
+            loader.signals.previewReady.connect(done)
+            loader.signals.fullReady.connect(done)
+            loader.signals.error.connect(done)
+            self._preload_inflight[path] = (token, loader)
+            loader.start(priority)
 
     def update_window_title_and_label(self, image_path):
         t = translations[self.current_language]
@@ -4972,7 +2738,30 @@ class PhotoViewer(QMainWindow):
         else:
             self.filename_label.hide()
 
+    # Held arrow key: a repeat only advances once the current photo is on screen,
+    # at most ~14 photos/s, so every photo passed is actually drawn.
+    NAV_REPEAT_GAP = 0.12       # key events closer than this count as a held key
+    NAV_MIN_INTERVAL = 0.07
+    NAV_STUCK_TIMEOUT = 1.5     # never block longer than this if a load never finishes
+
+    def _nav_step_allowed(self):
+        now = time.monotonic()
+        repeating = now - self._last_nav_attempt < self.NAV_REPEAT_GAP
+        self._last_nav_attempt = now
+        if repeating:
+            since_advance = now - self._last_nav_advance
+            viewer = self.image_viewer
+            shown = viewer._shown_load_id == viewer.current_load_id
+            if since_advance < self.NAV_MIN_INTERVAL:
+                return False
+            if not shown and since_advance < self.NAV_STUCK_TIMEOUT:
+                return False
+        self._last_nav_advance = now
+        return True
+
     def show_next_image(self):
+        if not self._nav_step_allowed():
+            return
         if self.unsaved_crop is not None:
             # If there are unsaved crop modifications, warn the user.
             if not self.prompt_unsaved_crop_warning():
@@ -4989,9 +2778,12 @@ class PhotoViewer(QMainWindow):
             self.current_index += 1
         elif self.loop_navigation:
             self.current_index = 0
+        self._nav_direction = 1
         self.show_image()
         
     def show_previous_image(self):
+        if not self._nav_step_allowed():
+            return
         if self.unsaved_crop is not None:
             if not self.prompt_unsaved_crop_warning():
                 return
@@ -5007,6 +2799,7 @@ class PhotoViewer(QMainWindow):
             self.current_index -= 1
         elif self.loop_navigation:
             self.current_index = len(self.image_files) - 1
+        self._nav_direction = -1
         self.show_image()
 
     def toggle_favorite(self):
@@ -5193,7 +2986,7 @@ class PhotoViewer(QMainWindow):
             # 1) Move to trash
             send2trash.send2trash(os.path.abspath(current_image))
             ImageLoaderRunnable.drop_cached_pixmap(current_image)
-            self._preload_inflight.discard(current_image)
+            self._preload_inflight.pop(current_image, None)
             self._invalidate_directory_cache(self.current_directory)
 
             # 2) Remove from the filtered list in memory
@@ -5471,6 +3264,7 @@ class PhotoViewer(QMainWindow):
 
     def open_brightness_overlay(self):
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,
@@ -5549,7 +3343,8 @@ class PhotoViewer(QMainWindow):
 
         # 8) Capture the initial state for undo (but do NOT push yet)
         self._brightness_initial_state = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6069,6 +3864,7 @@ class PhotoViewer(QMainWindow):
         if not self.image_files or self.current_index < 0:
             return
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             t = translations.get(self.current_language, translations["en"])
             self.show_ephemeral_message(
                 t.get(
@@ -6268,7 +4064,7 @@ class PhotoViewer(QMainWindow):
             for deleted_image in non_favorites:
                 if not os.path.exists(deleted_image):
                     ImageLoaderRunnable.drop_cached_pixmap(deleted_image)
-                    self._preload_inflight.discard(deleted_image)
+                    self._preload_inflight.pop(deleted_image, None)
             self._invalidate_directory_cache(self.current_directory)
 
             # Remove deleted files from the current list
@@ -6313,6 +4109,7 @@ class PhotoViewer(QMainWindow):
             return
         t = translations.get(self.current_language, translations["en"])
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(t.get("full_resolution_loading", "Full-resolution image is still loading."))
             return
         pixmap = self.image_viewer.original_pixmap
@@ -6362,6 +4159,7 @@ class PhotoViewer(QMainWindow):
 
     def open_crop_overlay(self):
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,
@@ -6488,7 +4286,8 @@ class PhotoViewer(QMainWindow):
 
         # ==== BEGIN ORIGINAL push_undo_state BODY ====
         state = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6500,6 +4299,29 @@ class PhotoViewer(QMainWindow):
         # ==== END ORIGINAL BODY ====
 
         after = len(hist["undo"])
+
+    def _restore_snapshot_resolution(self, state):
+        """Keep ``full_resolution_ready`` truthful after restoring an undo/redo snapshot.
+
+        A snapshot taken before the full-resolution frame arrived holds the screen
+        preview. Pixel edits (crop, sharpen, editor) require full resolution, so such a
+        snapshot is always the unedited file: restore the full frame instead when it is
+        cached, otherwise mark the view as preview-only (save/edit stay blocked) and
+        fetch it. Without this, saving after an undo could write the downscaled preview.
+        """
+        viewer = self.image_viewer
+        viewer._display_cache = None
+        if state.get("full_res", True):
+            viewer.full_resolution_ready = True
+            return
+        path = getattr(self, "_current_path", None)
+        full = ImageLoaderRunnable.get_cached_image(path) if path else None
+        if full is not None:
+            viewer.original_pixmap = QPixmap.fromImage(full)
+            viewer.full_resolution_ready = True
+        else:
+            viewer.full_resolution_ready = False
+            viewer.request_full_resolution()
 
     def undo_action(self):
         """
@@ -6518,7 +4340,8 @@ class PhotoViewer(QMainWindow):
 
         # 2) Push current into redo
         curr = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6528,6 +4351,7 @@ class PhotoViewer(QMainWindow):
 
         # 3) Apply popped state
         self.image_viewer.original_pixmap   = state["pixmap"]
+        self._restore_snapshot_resolution(state)
         self.image_viewer.rotation_angle    = state["rotation"]
         self.image_viewer.brightness_factor = state["brightness"]
         # clear out any old GPU cache so we rebuild on next paint
@@ -6584,7 +4408,8 @@ class PhotoViewer(QMainWindow):
 
         # 2) Push current into undo
         curr = {
-            "pixmap":          self.image_viewer.original_pixmap.copy(),
+            "pixmap":          self.image_viewer.original_pixmap,
+            "full_res":        self.image_viewer.full_resolution_ready,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -6594,6 +4419,7 @@ class PhotoViewer(QMainWindow):
 
         # 3) Apply popped state
         self.image_viewer.original_pixmap   = state["pixmap"]
+        self._restore_snapshot_resolution(state)
         self.image_viewer.rotation_angle    = state["rotation"]
         self.image_viewer.brightness_factor = state["brightness"]
         # clear any old GPU texture cache
@@ -6761,6 +4587,7 @@ class PhotoViewer(QMainWindow):
         We only snapshot when the user actually applies the change.
         """
         if not self.image_viewer.full_resolution_ready:
+            self.image_viewer.request_full_resolution()
             self.show_ephemeral_message(
                 translations.get(
                     self.current_language,
