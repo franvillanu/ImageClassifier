@@ -7,7 +7,7 @@ import math
 class SlideshowSettings:
     duration: float = 10
     strength: float = 100
-    shuffle: bool = True
+    shuffle: bool = False
     repeat: bool = True
     fullscreen: bool = True
     maximized: bool = False
@@ -17,9 +17,9 @@ class SlideshowSettings:
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
                 object.__setattr__(self, key, default)
-        for key in ("shuffle", "repeat", "fullscreen"):
+        for key, default in (("shuffle", False), ("repeat", True), ("fullscreen", True)):
             if not isinstance(getattr(self, key), bool):
-                object.__setattr__(self, key, True)
+                object.__setattr__(self, key, default)
         if not isinstance(self.maximized, bool) or self.fullscreen:
             object.__setattr__(self, "maximized", False)
 
