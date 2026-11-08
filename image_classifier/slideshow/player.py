@@ -1,5 +1,6 @@
 """Modal viewing window and localized slideshow preferences."""
 import ctypes
+from dataclasses import replace
 import os
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPalette, QShortcut
@@ -281,7 +282,11 @@ class PlayerWindow(QDialog):
         was_playing = self.controller.playing
         self._editing_settings = True
         self.controller.pause()
-        dialog = SettingsDialog(self.controller.settings, self.language, self, playback=True)
+        # Show where the window really is now (F11, double-click or the button may have changed it).
+        fullscreen = self.isFullScreen()
+        current = replace(self.controller.settings, fullscreen=fullscreen,
+                          maximized=self.isMaximized() and not fullscreen)
+        dialog = SettingsDialog(current, self.language, self, playback=True)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.controller.set_settings(dialog.settings())
             self._apply_mode(self.controller.settings)
