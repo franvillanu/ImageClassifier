@@ -1,7 +1,7 @@
 """Slideshow preferences dialog: sliders, switches and visual window-mode tiles."""
 from PyQt6.QtCore import QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                             QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.ui.settings_panel import ToggleSwitch
@@ -18,6 +18,9 @@ STYLE = f"""
     QLabel#title {{ color: #f4f6fa; font-size: 22px; font-weight: 600; }}
     QLabel#value {{ color: #f4f6fa; font-size: 15px; font-weight: 600; }}
     QLabel#hint {{ color: #aeb6c3; font-size: 12px; }}
+    QLabel#key {{ color: #f4f6fa; background: #2a2f38; border: 1px solid #3b414c;
+        border-bottom: 2px solid #3b414c; border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 600; }}
+    QLabel#keyText {{ color: #c5ccd6; font-size: 13px; }}
     QLabel#section {{ color: #aeb6c3; font-size: 13px; }}
     QFrame#card {{ background: #20242b; border: 1px solid #2f3540; border-radius: 14px; }}
     QFrame#rule {{ background: #2f3540; border: none; }}
@@ -90,21 +93,21 @@ class SettingsDialog(QDialog):
     def __init__(self, settings, language="en", parent=None, *, playback=False):
         super().__init__(parent)
         t = translations.get(language, translations["en"])
-        self.setWindowTitle(t["slideshow_title"])
-        self.setMinimumWidth(480)
+        self.setWindowTitle(t["slideshow_settings_title"])
+        self.setMinimumWidth(560)
         self.setStyleSheet(STYLE)
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 24)
-        root.setSpacing(18)
-        title = QLabel(t["slideshow_title"])
+        root.setContentsMargins(26, 20, 26, 20)
+        root.setSpacing(12)
+        title = QLabel(t["slideshow_settings_title"])
         title.setObjectName("title")
         root.addWidget(title)
 
         card = QFrame()
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 16, 20, 16)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(20, 12, 20, 12)
+        card_layout.setSpacing(10)
         duration = max(3, min(600, int(round(settings.duration))))
         self.duration_slider = self._slider(card_layout, t["slideshow_duration"], 3, max(120, duration),
                                             duration, lambda v: f"{v} s")
@@ -129,7 +132,7 @@ class SettingsDialog(QDialog):
                 rule.setFixedHeight(1)
                 toggles_layout.addWidget(rule)
             row = QHBoxLayout()
-            row.setContentsMargins(0, 12, 0, 12)
+            row.setContentsMargins(0, 8, 0, 8)
             row.addWidget(QLabel(t["slideshow_" + key]), 1)
             switch = ToggleSwitch(scale=1.15)
             switch.setChecked(getattr(settings, key))
@@ -157,6 +160,7 @@ class SettingsDialog(QDialog):
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         root.addWidget(hint)
+        root.addWidget(self._shortcuts(t))
         if playback:
             note = QLabel(t["slideshow_next_settings"])
             note.setObjectName("hint")
@@ -178,6 +182,44 @@ class SettingsDialog(QDialog):
             buttons.addWidget(button)
         root.addSpacing(4)
         root.addLayout(buttons)
+
+    def _shortcuts(self, t):
+        """A compact two-column cheat sheet of the keys that work while the slideshow plays."""
+        card = QFrame()
+        card.setObjectName("card")
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(20, 12, 20, 14)
+        outer.setSpacing(10)
+        heading = QLabel(t["slideshow_shortcuts"])
+        heading.setObjectName("section")
+        outer.addWidget(heading)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(10)
+        entries = (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
+                   (("←", "→"), t["slideshow_key_steps"]),
+                   (("↑", "↓"), t["slideshow_key_speed"]),
+                   (("F11",), t["slideshow_fullscreen"]),
+                   (("Esc",), t["slideshow_close"]),
+                   ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))
+        for index, (keys, text) in enumerate(entries):
+            cell = QHBoxLayout()
+            cell.setSpacing(6)
+            for key in keys:
+                chip = QLabel(key)
+                chip.setObjectName("key")
+                chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                chip.setMinimumWidth(28)
+                cell.addWidget(chip)
+            label = QLabel(text)
+            label.setObjectName("keyText")
+            cell.addSpacing(4)
+            cell.addWidget(label, 1)
+            grid.addLayout(cell, index % 3, index // 3)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        outer.addLayout(grid)
+        return card
 
     def _slider(self, layout, text, low, high, value, fmt):
         head = QHBoxLayout()
