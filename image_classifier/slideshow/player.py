@@ -3,7 +3,7 @@ import ctypes
 import os
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox,
+from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox,
                             QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
@@ -12,68 +12,8 @@ from image_classifier.ui.icons import IconFactory
 from .controller import SlideshowController
 from .loading import SlideLoader
 from .settings import SlideshowSettings
+from .settings_dialog import SettingsDialog
 from .surface import SlideSurface
-
-
-class SettingsDialog(QDialog):
-    def __init__(self, settings, language="en", parent=None, *, playback=False):
-        super().__init__(parent)
-        t = translations.get(language, translations["en"])
-        self.setWindowTitle(t["slideshow_title"])
-        self.setMinimumWidth(420)
-        self.setStyleSheet("""
-            QDialog { background: #191c21; }
-            QLabel, QCheckBox { color: #d8dde5; background: transparent; font-size: 13px; }
-            QAbstractSpinBox { background: #242830; color: #f3f5f8; border: 1px solid #3b414c;
-                border-radius: 8px; padding: 9px 12px; min-width: 115px; }
-            QAbstractSpinBox:focus { border-color: #9aadc9; }
-            QCheckBox { spacing: 10px; padding: 4px 0; }
-            QDialogButtonBox { background: transparent; }
-            QPushButton { color: #c5ccd6; background: transparent; border: 1px solid #414752;
-                border-radius: 9px; padding: 10px 20px; min-width: 64px; }
-            QPushButton:hover { color: white; background: #2c313a; }
-            QPushButton:focus { border-color: #aabbd3; }
-            QPushButton#slideshowStart { color: #171a20; background: #edf1f7;
-                border-color: #edf1f7; font-weight: 600; }
-            QPushButton#slideshowStart:hover { background: white; }
-        """)
-        layout = QFormLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setHorizontalSpacing(24)
-        layout.setVerticalSpacing(16)
-        heading = QLabel(t["slideshow_title"])
-        heading.setStyleSheet("color: #f4f6fa; font-size: 22px; font-weight: 600; padding-bottom: 10px;")
-        layout.addRow(heading)
-        self.duration = QDoubleSpinBox()
-        self.duration.setRange(3,600)
-        self.duration.setValue(settings.duration)
-        layout.addRow(t["slideshow_duration"], self.duration)
-        self.strength = QSpinBox()
-        self.strength.setRange(0,100)
-        self.strength.setSuffix("%")
-        self.strength.setValue(int(settings.strength))
-        layout.addRow(t["slideshow_strength"], self.strength)
-        self.checks = {}
-        for key in ("shuffle", "repeat", "fullscreen"):
-            check = QCheckBox(t["slideshow_start_fullscreen" if key == "fullscreen" else "slideshow_"+key])
-            check.setChecked(getattr(settings, key))
-            self.checks[key] = check
-            layout.addRow(check)
-        if playback:
-            layout.addRow(QLabel(t["slideshow_next_settings"]))
-        buttons = QDialogButtonBox()
-        start = buttons.addButton(t["slideshow_apply" if playback else "slideshow_start"], QDialogButtonBox.ButtonRole.AcceptRole)
-        start.setObjectName("slideshowStart")
-        buttons.addButton(t["slideshow_cancel"], QDialogButtonBox.ButtonRole.RejectRole)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        for button in buttons.buttons():
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addRow(buttons)
-
-    def settings(self):
-        return SlideshowSettings(self.duration.value(), self.strength.value(),
-                                 **{key: check.isChecked() for key, check in self.checks.items()})
 
 
 class PlayerWindow(QDialog):
@@ -112,7 +52,7 @@ class PlayerWindow(QDialog):
         self._last_presented = None
         self._frozen_progress = 0
         self._frozen_strength = settings.strength
-        self._applied_fullscreen_preference = settings.fullscreen
+        self._applied_mode = (settings.fullscreen, settings.maximized)
         self._notice = ""
         self._status = self.t["slideshow_loading"]
         self.surface = SlideSurface(self, raster=raster)
@@ -130,6 +70,15 @@ class PlayerWindow(QDialog):
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
         controls_layout.addWidget(self.message, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.toast = QLabel(self)
+        self.toast.setObjectName("slideshowCaption")
+        self.toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.toast.setStyleSheet("font-size: 15px; padding: 8px 16px;")
+        self.toast.hide()
+        self.toast_timer = QTimer(self)
+        self.toast_timer.setSingleShot(True)
+        self.toast_timer.setInterval(1500)
+        self.toast_timer.timeout.connect(self.toast.hide)
         self.control_bar = QFrame(self.controls)
         self.control_bar.setObjectName("slideshowBar")
         row = QHBoxLayout(self.control_bar)
@@ -189,7 +138,10 @@ class PlayerWindow(QDialog):
         self.notice_timer.setSingleShot(True)
         self.notice_timer.setInterval(5000)
         self.notice_timer.timeout.connect(self._clear_notice)
-        for key, callback in (("Space", self.toggle_pause), ("Left", self.previous), ("Right", self.next),
+        for key, callback in (("Space", self.toggle_pause), ("Left", lambda: self.previous(reveal=False)),
+                              ("Right", lambda: self.next(reveal=False)),
+                              ("Up", lambda: self.change_speed(faster=True)),
+                              ("Down", lambda: self.change_speed(faster=False)),
                               ("F11", self.toggle_fullscreen), ("Escape", self.close)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -207,8 +159,7 @@ class PlayerWindow(QDialog):
     def _start(self):
         if self._closing:
             return
-        if self.controller.settings.fullscreen:
-            self.showFullScreen()
+        self._apply_mode(self.controller.settings)
         self._update_decode_size()
         self.controller.start()
         self.setFocus()
@@ -231,11 +182,6 @@ class PlayerWindow(QDialog):
             self.controller.refresh_image()
 
     def _present(self, entry, frame):
-        preference = self.controller.active_settings.fullscreen
-        if preference != self._applied_fullscreen_preference:
-            self._applied_fullscreen_preference = preference
-            if self.isFullScreen() != preference:
-                self.toggle_fullscreen()
         self._last_presented = entry
         self.surface.present(entry, frame)
         self._message(os.path.basename(entry.path))
@@ -288,13 +234,29 @@ class PlayerWindow(QDialog):
         self.reveal_controls()
         self.controller.pause() if self.controller.playing else self.controller.resume()
 
-    def next(self):
-        self.reveal_controls()
+    def next(self, reveal=True):
+        if reveal:
+            self.reveal_controls()
         self.controller.next()
 
-    def previous(self):
-        self.reveal_controls()
+    def previous(self, reveal=True):
+        if reveal:
+            self.reveal_controls()
         self.controller.previous()
+
+    def change_speed(self, faster):
+        """Up = faster (fewer seconds per photo), Down = slower; ~20% per press, at least 1 s."""
+        current = self.controller.active_settings.duration
+        step = max(1, round(current * 0.2))
+        duration = self.controller.set_duration(current - step if faster else current + step)
+        self.settingsChanged.emit(self.controller.settings)
+        seconds = f"{duration:g}"
+        self.toast.setText(self.t["slideshow_speed_notice"].format(seconds=seconds))
+        self.toast.adjustSize()
+        self.toast.move((self.width() - self.toast.width()) // 2, 24)
+        self.toast.show()
+        self.toast.raise_()
+        self.toast_timer.start()
 
     def open_settings(self):
         was_playing = self.controller.playing
@@ -303,10 +265,24 @@ class PlayerWindow(QDialog):
         dialog = SettingsDialog(self.controller.settings, self.language, self, playback=True)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.controller.set_settings(dialog.settings())
+            self._apply_mode(self.controller.settings)
             self.settingsChanged.emit(self.controller.settings)
         self._editing_settings = False
         if was_playing:
             self.controller.resume()
+
+    def _apply_mode(self, settings):
+        self._applied_mode = (settings.fullscreen, settings.maximized)
+        self._fullscreen_change = True
+        if settings.fullscreen:
+            self.showFullScreen()
+        elif settings.maximized:
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self._fullscreen_change = False
+        self._update_decode_size()
+        self._update_fullscreen_control()
 
     def toggle_fullscreen(self):
         self._fullscreen_change = True
@@ -314,6 +290,11 @@ class PlayerWindow(QDialog):
         self._fullscreen_change = False
         self._update_decode_size()
         self._update_fullscreen_control()
+
+    def _set_idle_cursor(self, hidden):
+        shape = Qt.CursorShape.BlankCursor if hidden else Qt.CursorShape.ArrowCursor
+        for widget in (self, self.surface, self.surface.canvas):
+            widget.setCursor(shape)
 
     def _update_fullscreen_control(self):
         icon = "slideshow_restore" if self.isFullScreen() else "slideshow_fullscreen"
@@ -334,6 +315,7 @@ class PlayerWindow(QDialog):
     def reveal_controls(self):
         if self._closing:
             return
+        self._set_idle_cursor(False)
         self.controls.show()
         self.controls.raise_()
         self._position_controls()
@@ -347,6 +329,8 @@ class PlayerWindow(QDialog):
         if self.controller.playing and not focused:
             self.controls.hide()
             self.buttons["close"].hide()
+            if self.isFullScreen() or self.isMaximized():
+                self._set_idle_cursor(True)
         else:
             self.hide_timer.start()
 
@@ -395,6 +379,7 @@ class PlayerWindow(QDialog):
         self.hide_timer.stop()
         self.decode_refresh_timer.stop()
         self.notice_timer.stop()
+        self.toast_timer.stop()
         self.controller.close()
         self.surface.release()
         self._prevent_sleep(False)

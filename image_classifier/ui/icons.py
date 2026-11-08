@@ -6,6 +6,19 @@ from PyQt6.QtSvg import QSvgRenderer
 
 class IconFactory:
     _svg_strings = {
+        "slideshow": """
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none"
+                 xmlns="http://www.w3.org/2000/svg">
+              <g stroke="black" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="6" width="36" height="27" rx="3"/>
+                <path d="M21 13L31 19.5L21 26Z M24 33V39 M17 43L24 39L31 43"/>
+              </g>
+              <g stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="6" width="36" height="27" rx="3"/>
+                <path d="M21 13L31 19.5L21 26Z M24 33V39 M17 43L24 39L31 43"/>
+              </g>
+            </svg>
+        """,
         "slideshow_play": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="none" stroke="white" stroke-width="1.7" stroke-linejoin="round"/></svg>',
         "slideshow_play_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="#171a20" stroke="#171a20" stroke-width="1.4" stroke-linejoin="round"/></svg>',
         "slideshow_pause_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="#171a20" stroke-width="2.6" stroke-linecap="round"/></svg>',

@@ -10,6 +10,7 @@ class SlideshowSettings:
     shuffle: bool = True
     repeat: bool = True
     fullscreen: bool = True
+    maximized: bool = False
 
     def __post_init__(self):
         for key, lo, hi, default in (("duration", 3, 600, 35), ("strength", 0, 100, 100)):
@@ -19,6 +20,8 @@ class SlideshowSettings:
         for key in ("shuffle", "repeat", "fullscreen"):
             if not isinstance(getattr(self, key), bool):
                 object.__setattr__(self, key, True)
+        if not isinstance(self.maximized, bool) or self.fullscreen:
+            object.__setattr__(self, "maximized", False)
 
     @classmethod
     def from_dict(cls, values):

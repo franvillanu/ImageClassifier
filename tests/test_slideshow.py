@@ -277,3 +277,13 @@ def test_real_missing_and_corrupt_files_stop_without_repeating(qapp,tmp_path):
     assert c.state == 'stopped'
     c.close()
 
+
+
+def test_speed_change_keeps_position_and_clamps():
+    c,loader,now=controller()
+    present(c,loader)
+    now[0]=5;c.tick()
+    assert c.progress == 0.5
+    assert c.set_duration(20) == 20
+    assert c.progress == 0.5 and c.settings.duration == 20 and c.active_settings.duration == 20
+    assert c.set_duration(1) == 3 and c.set_duration(9999) == 600

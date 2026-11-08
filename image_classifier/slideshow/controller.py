@@ -1,5 +1,5 @@
 """Monotonic playback, reproducible selection, history and loading coordination."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import random
 import time
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -87,6 +87,21 @@ class SlideshowController(QObject):
             path = self._cycle.pop(0)
             if path not in self._failed:
                 self.history.append(SlideEntry(path, self.rng.choice(tuple(EFFECTS)), self._cycle_id))
+
+    def set_duration(self, duration):
+        """Change seconds per photo live, keeping the current photo's pan/zoom position."""
+        duration = float(max(3, min(600, duration)))
+        old = self.active_settings.duration
+        if duration == old:
+            return duration
+        scaled = self.elapsed * duration / old
+        self._elapsed = scaled
+        if self._origin is not None:
+            self._origin = self.clock()
+        self.settings = replace(self.settings, duration=duration)
+        self.active_settings = replace(self.active_settings, duration=duration)
+        self.updated.emit()
+        return duration
 
     def set_settings(self, settings):
         """Keep visited history; reschedule unvisited entries for new preferences."""
