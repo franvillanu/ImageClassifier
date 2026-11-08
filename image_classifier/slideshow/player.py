@@ -140,8 +140,8 @@ class PlayerWindow(QDialog):
         self.notice_timer.timeout.connect(self._clear_notice)
         for key, callback in (("Space", self.toggle_pause), ("Left", lambda: self.previous(reveal=False)),
                               ("Right", lambda: self.next(reveal=False)),
-                              ("Up", lambda: self.change_speed(faster=True)),
-                              ("Down", lambda: self.change_speed(faster=False)),
+                              ("Up", lambda: self.change_speed(longer=True)),
+                              ("Down", lambda: self.change_speed(longer=False)),
                               ("F11", self.toggle_fullscreen), ("Escape", self.close)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -244,11 +244,11 @@ class PlayerWindow(QDialog):
             self.reveal_controls()
         self.controller.previous()
 
-    def change_speed(self, faster):
-        """Up = faster (fewer seconds per photo), Down = slower; ~20% per press, at least 1 s."""
+    def change_speed(self, longer):
+        """Up = more seconds per photo (slower), Down = fewer (faster); ~20% per press, at least 1 s."""
         current = self.controller.active_settings.duration
         step = max(1, round(current * 0.2))
-        duration = self.controller.set_duration(current - step if faster else current + step)
+        duration = self.controller.set_duration(current + step if longer else current - step)
         self.settingsChanged.emit(self.controller.settings)
         seconds = f"{duration:g}"
         self.toast.setText(self.t["slideshow_speed_notice"].format(seconds=seconds))
