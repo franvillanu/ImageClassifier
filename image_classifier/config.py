@@ -21,6 +21,7 @@ def get_config_file() -> str:
 
 
 DEFAULT_CONFIG = {
+    "slideshow": {"duration": 35, "strength": 100, "shuffle": True, "repeat": True, "fullscreen": True},
     "load_last_folder": False,
     "last_directory": None,
     "show_all_images": True,
