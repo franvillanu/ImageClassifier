@@ -2,7 +2,7 @@
 import ctypes
 import os
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox,
                             QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
@@ -60,7 +60,16 @@ class PlayerWindow(QDialog):
         self._applied_mode = (settings.fullscreen, settings.maximized)
         self._notice = ""
         self._status = self.t["slideshow_loading"]
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("black"))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
         self.surface = SlideSurface(self, raster=raster)
+        # Never show the native window's white before the first frame: stay invisible until
+        # the surface has painted (black or a photo), with a safety net if nothing paints.
+        self.setWindowOpacity(0.0)
+        self.surface.framePainted.connect(self._first_frame)
+        QTimer.singleShot(700, self._first_frame)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0,0,0,0)
         layout.addWidget(self.surface)
@@ -155,6 +164,11 @@ class PlayerWindow(QDialog):
         self._install_tracking()
         QApplication.instance().aboutToQuit.connect(self._shutdown)
         QTimer.singleShot(0, self._start)
+
+    def _first_frame(self):
+        if self._closing or self.windowOpacity() >= 1.0:
+            return
+        QTimer.singleShot(0, lambda: None if self._closing else self.setWindowOpacity(1.0))
 
     def _install_tracking(self):
         for widget in (self, *self.findChildren(QWidget)):
