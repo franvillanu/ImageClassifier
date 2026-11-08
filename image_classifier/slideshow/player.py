@@ -30,6 +30,11 @@ class PlayerWindow(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setMinimumSize(480,320)
         self.resize(1000,700)
+        # Start directly in the wanted state so the window never flashes at normal size first.
+        if settings.fullscreen:
+            self.setWindowState(Qt.WindowState.WindowFullScreen)
+        elif settings.maximized:
+            self.setWindowState(Qt.WindowState.WindowMaximized)
         self.setStyleSheet("""
             QDialog#slideshowPlayer { background: black; }
             QWidget#slideshowOverlay { background: transparent; }
@@ -273,14 +278,23 @@ class PlayerWindow(QDialog):
 
     def _apply_mode(self, settings):
         self._applied_mode = (settings.fullscreen, settings.maximized)
+        wanted = (Qt.WindowState.WindowFullScreen if settings.fullscreen
+                  else Qt.WindowState.WindowMaximized if settings.maximized
+                  else Qt.WindowState.WindowNoState)
+        current = self.windowState() & (Qt.WindowState.WindowFullScreen | Qt.WindowState.WindowMaximized)
+        if current == wanted:
+            self._update_fullscreen_control()
+            return
         self._fullscreen_change = True
-        if settings.fullscreen:
-            self.showFullScreen()
-        elif settings.maximized:
-            self.showMaximized()
-        else:
-            self.showNormal()
-        self._fullscreen_change = False
+        self.setUpdatesEnabled(False)  # no half-resized frames while the window changes state
+        try:
+            if current & Qt.WindowState.WindowFullScreen and wanted == Qt.WindowState.WindowMaximized:
+                self.showNormal()  # Qt drops a direct fullscreen -> maximized change
+            self.setWindowState((self.windowState() & ~(Qt.WindowState.WindowFullScreen | Qt.WindowState.WindowMaximized)) | wanted)
+            self.show()
+        finally:
+            self.setUpdatesEnabled(True)
+            self._fullscreen_change = False
         self._update_decode_size()
         self._update_fullscreen_control()
 

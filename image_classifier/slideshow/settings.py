@@ -5,7 +5,7 @@ import math
 
 @dataclass(frozen=True)
 class SlideshowSettings:
-    duration: float = 35
+    duration: float = 10
     strength: float = 100
     shuffle: bool = True
     repeat: bool = True
@@ -13,7 +13,7 @@ class SlideshowSettings:
     maximized: bool = False
 
     def __post_init__(self):
-        for key, lo, hi, default in (("duration", 3, 600, 35), ("strength", 0, 100, 100)):
+        for key, lo, hi, default in (("duration", 3, 600, 10), ("strength", 0, 100, 100)):
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
                 object.__setattr__(self, key, default)
