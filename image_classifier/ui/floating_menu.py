@@ -101,7 +101,9 @@ class FloatingMenu(QWidget):
         self.settings_button.setIconSize(QSize(36, 36))
         self.settings_button.setFixedSize(50, 50)
 
-        self.slideshow_button = QPushButton("▷")
+        self.slideshow_button = QPushButton()
+        self.slideshow_button.setIcon(IconFactory.get_icon("slideshow_play", 36))
+        self.slideshow_button.setIconSize(QSize(36, 36))
         self.slideshow_button.setAccessibleName(t["slideshow"])
         self._set_tooltip(self.slideshow_button, t, "slideshow")
         self.slideshow_button.setFixedSize(50, 50)

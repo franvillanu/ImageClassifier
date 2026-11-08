@@ -3,6 +3,7 @@
 translations = {
     "en": {
         "slideshow": "Slideshow… (F5)",
+        "slideshow_title": "Slideshow",
         "slideshow_duration": "Slide duration (seconds)",
         "slideshow_strength": "Motion strength",
         "slideshow_shuffle": "Shuffle",
@@ -434,6 +435,7 @@ translations = {
     },
     "es": {
         "slideshow": "Presentación… (F5)",
+        "slideshow_title": "Presentación",
         "slideshow_duration": "Duración por foto (segundos)",
         "slideshow_strength": "Intensidad del movimiento",
         "slideshow_shuffle": "Orden aleatorio",

@@ -1,13 +1,14 @@
 """Modal viewing window and localized slideshow preferences."""
 import ctypes
 import os
-from PyQt6.QtCore import QEvent, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox,
-                            QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel,
+                            QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.loader import preview_dimension_for
+from image_classifier.ui.icons import IconFactory
 from .controller import SlideshowController
 from .loading import SlideLoader
 from .settings import SlideshowSettings
@@ -18,10 +19,31 @@ class SettingsDialog(QDialog):
     def __init__(self, settings, language="en", parent=None, *, playback=False):
         super().__init__(parent)
         t = translations.get(language, translations["en"])
-        self.setWindowTitle(t["slideshow"])
-        self.setMinimumWidth(360)
-        self.setStyleSheet("QWidget { color: white; background: #252525; } QAbstractSpinBox, QPushButton { padding: 7px; }")
+        self.setWindowTitle(t["slideshow_title"])
+        self.setMinimumWidth(420)
+        self.setStyleSheet("""
+            QDialog { background: #191c21; }
+            QLabel, QCheckBox { color: #d8dde5; background: transparent; font-size: 13px; }
+            QAbstractSpinBox { background: #242830; color: #f3f5f8; border: 1px solid #3b414c;
+                border-radius: 8px; padding: 9px 12px; min-width: 115px; }
+            QAbstractSpinBox:focus { border-color: #9aadc9; }
+            QCheckBox { spacing: 10px; padding: 4px 0; }
+            QDialogButtonBox { background: transparent; }
+            QPushButton { color: #c5ccd6; background: transparent; border: 1px solid #414752;
+                border-radius: 9px; padding: 10px 20px; min-width: 64px; }
+            QPushButton:hover { color: white; background: #2c313a; }
+            QPushButton:focus { border-color: #aabbd3; }
+            QPushButton#slideshowStart { color: #171a20; background: #edf1f7;
+                border-color: #edf1f7; font-weight: 600; }
+            QPushButton#slideshowStart:hover { background: white; }
+        """)
         layout = QFormLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setHorizontalSpacing(24)
+        layout.setVerticalSpacing(16)
+        heading = QLabel(t["slideshow_title"])
+        heading.setStyleSheet("color: #f4f6fa; font-size: 22px; font-weight: 600; padding-bottom: 10px;")
+        layout.addRow(heading)
         self.duration = QDoubleSpinBox()
         self.duration.setRange(3,600)
         self.duration.setValue(settings.duration)
@@ -40,10 +62,13 @@ class SettingsDialog(QDialog):
         if playback:
             layout.addRow(QLabel(t["slideshow_next_settings"]))
         buttons = QDialogButtonBox()
-        buttons.addButton(t["slideshow_apply" if playback else "slideshow_start"], QDialogButtonBox.ButtonRole.AcceptRole)
+        start = buttons.addButton(t["slideshow_apply" if playback else "slideshow_start"], QDialogButtonBox.ButtonRole.AcceptRole)
+        start.setObjectName("slideshowStart")
         buttons.addButton(t["slideshow_cancel"], QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        for button in buttons.buttons():
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addRow(buttons)
 
     def settings(self):
@@ -58,13 +83,28 @@ class PlayerWindow(QDialog):
         super().__init__(parent)
         self.language = language
         self.t = translations.get(language, translations["en"])
-        self.setWindowTitle(self.t["slideshow"])
+        self.setWindowTitle(self.t["slideshow_title"])
+        self.setObjectName("slideshowPlayer")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setMinimumSize(480,320)
         self.resize(1000,700)
-        self.setStyleSheet("QWidget { background: black; color: white; } QPushButton { padding: 9px; background: #292929; border: 1px solid #666; } QPushButton:focus { border: 1px solid white; }")
+        self.setStyleSheet("""
+            QDialog#slideshowPlayer { background: black; }
+            QWidget#slideshowOverlay { background: transparent; }
+            QFrame#slideshowBar { background: rgba(24, 27, 33, 230);
+                border: 1px solid rgba(213, 224, 242, 38); border-radius: 18px; }
+            QLabel#slideshowCaption { color: #d4dae4; font-size: 12px;
+                background: rgba(14, 16, 20, 190); border-radius: 8px; padding: 5px 10px; }
+            QPushButton { background: transparent; border: 1px solid transparent; border-radius: 10px; }
+            QPushButton:hover { background: rgba(255, 255, 255, 22); }
+            QPushButton:pressed { background: rgba(255, 255, 255, 36); }
+            QPushButton:focus { border-color: #b9c9df; }
+            QPushButton#slideshowPlay { background: #edf1f7; border-radius: 22px; }
+            QPushButton#slideshowPlay:hover { background: white; }
+            QPushButton#slideshowClose { background: rgba(24, 27, 33, 210); border-radius: 18px; }
+        """)
         self._closing = False
         self._editing_settings = False
         self._fullscreen_change = False
@@ -80,20 +120,51 @@ class PlayerWindow(QDialog):
         layout.setContentsMargins(0,0,0,0)
         layout.addWidget(self.surface)
         self.controls = QWidget(self)
+        self.controls.setObjectName("slideshowOverlay")
         controls_layout = QVBoxLayout(self.controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(10)
         self.message = QLabel(self.t["slideshow_loading"])
+        self.message.setObjectName("slideshowCaption")
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message.setWordWrap(True)
-        controls_layout.addWidget(self.message)
-        row = QHBoxLayout()
-        controls_layout.addLayout(row)
+        self.message.setTextFormat(Qt.TextFormat.PlainText)
+        controls_layout.addWidget(self.message, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.control_bar = QFrame(self.controls)
+        self.control_bar.setObjectName("slideshowBar")
+        row = QHBoxLayout(self.control_bar)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(4)
+        controls_layout.addWidget(self.control_bar, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.buttons = {}
         for key, action in (("previous", self.previous), ("play", self.toggle_pause),
                             ("next", self.next), ("settings", self.open_settings),
                             ("fullscreen", self.toggle_fullscreen), ("close", self.close)):
-            button = QPushButton(self.t["slideshow_"+key])
+            button = QPushButton(self if key == "close" else self.control_bar)
+            button.setAccessibleName(self.t["slideshow_"+key])
+            hint = {"previous": "←", "play": "␣", "next": "→", "fullscreen": "F11", "close": "Esc"}.get(key, "")
+            button.setToolTip(self.t["slideshow_"+key] + ("  " + hint if hint else ""))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedSize(44, 44) if key == "play" else button.setFixedSize(36, 36)
+            button.setIconSize(QSize(22, 22))
+            icon = "play_dark" if key == "play" else key
+            button.setIcon(IconFactory.get_icon("slideshow_" + icon, 48))
             button.clicked.connect(action)
             self.buttons[key] = button
-            row.addWidget(button)
+            if key == "play":
+                button.setObjectName("slideshowPlay")
+            elif key == "settings":
+                divider = QFrame(self.control_bar)
+                divider.setFixedSize(1, 22)
+                divider.setStyleSheet("background: rgba(213, 224, 242, 38); border: none;")
+                row.addSpacing(8)
+                row.addWidget(divider)
+                row.addSpacing(8)
+            if key == "close":
+                button.setObjectName("slideshowClose")
+            else:
+                row.addWidget(button)
+        self.control_bar.setFixedSize(self.control_bar.sizeHint())
         self.loader = SlideLoader(self)
         self.controller = SlideshowController(tuple(playlist), starting_image, settings, self.loader, parent=self)
         self.controller.presented.connect(self._present)
@@ -171,7 +242,11 @@ class PlayerWindow(QDialog):
 
     def _message(self, text):
         self._status = text
-        self.message.setText(self._notice+"\n"+text if self._notice else text)
+        width = min(480, max(200, self.width()-40))
+        caption = self._notice+"\n"+text if self._notice else self.message.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle, width-24)
+        self.message.setText(caption)
+        self.message.setToolTip(text)
+        self._position_controls()
 
     def _show_notice(self, text, *, persistent=False):
         self._notice = text
@@ -194,7 +269,10 @@ class PlayerWindow(QDialog):
             self.surface.refresh(self._frozen_progress, self._frozen_strength)
 
     def _state_changed(self, state):
-        self.buttons["play"].setText(self.t["slideshow_pause" if self.controller.playing else "slideshow_play"])
+        label = self.t["slideshow_pause" if self.controller.playing else "slideshow_play"]
+        self.buttons["play"].setAccessibleName(label)
+        self.buttons["play"].setToolTip(label + "  ␣")
+        self.buttons["play"].setIcon(IconFactory.get_icon("slideshow_pause_dark" if self.controller.playing else "slideshow_play_dark", 48))
         self._prevent_sleep(self.controller.playing)
         if state == "loading":
             self._message(self.t["slideshow_loading"])
@@ -235,18 +313,40 @@ class PlayerWindow(QDialog):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
         self._fullscreen_change = False
         self._update_decode_size()
+        self._update_fullscreen_control()
+
+    def _update_fullscreen_control(self):
+        icon = "slideshow_restore" if self.isFullScreen() else "slideshow_fullscreen"
+        self.buttons["fullscreen"].setIcon(IconFactory.get_icon(icon, 48))
+        self.buttons["close"].setVisible(self.isFullScreen() and not self.controls.isHidden())
+        self.buttons["close"].raise_()
+
+    def _position_controls(self):
+        width = min(480, max(200, self.width()-40))
+        self.controls.setFixedWidth(width)
+        self.message.setMaximumWidth(width)
+        height = self.controls.layout().totalHeightForWidth(width)
+        if height < 0:
+            height = self.controls.sizeHint().height()
+        self.controls.setGeometry((self.width()-width)//2, max(12, self.height()-height-24), width, height)
+        self.buttons["close"].move(self.width()-56, 20)
 
     def reveal_controls(self):
         if self._closing:
             return
         self.controls.show()
         self.controls.raise_()
+        self._position_controls()
+        self._update_fullscreen_control()
+        self.buttons["close"].raise_()
         self.hide_timer.start()
 
     def _hide_controls(self):
         focus = QApplication.focusWidget()
-        if self.controller.playing and not (focus and (focus is self.controls or self.controls.isAncestorOf(focus))):
+        focused = focus and (focus is self.controls or self.controls.isAncestorOf(focus) or focus is self.buttons["close"])
+        if self.controller.playing and not focused:
             self.controls.hide()
+            self.buttons["close"].hide()
         else:
             self.hide_timer.start()
 
@@ -268,8 +368,8 @@ class PlayerWindow(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "controls"):
-            self.controls.setGeometry(12, max(0, self.height()-138), max(1,self.width()-24), 126)
+        if hasattr(self, "buttons") and "close" in self.buttons:
+            self._position_controls()
         if hasattr(self, "loader"):
             self._update_decode_size()
 

@@ -21,6 +21,8 @@ Twelve repeated open/close cycles release player frames and cancel its requests.
 
 The packaged app was launched in a separate QA configuration with three synthetic photos. Windows UI checks passed for Spanish settings/defaults, F5, Start, Space pause/resume, Left/Right navigation while paused, F11, double-click fullscreen, automatic control hiding and Escape back to the unchanged classifier selection. English/Spanish translation key parity passes. Settings cancellation and playback-settings pause restoration also pass automated integration tests.
 
+The player UI was subsequently refined to a compact floating icon bar, a fullscreen corner close control and a consistent settings dialog. The refined UI was checked in a native Windows preview; all 274 regression tests still pass. The motion engine is unchanged.
+
 ## Performance on this machine
 
 Windows 11 build 26300; Intel Core i7-10700K; NVIDIA GeForce RTX 3060 Ti, driver 32.0.16.1088; one display, 150% scaling. Measurements are intervals between completed QPainter paints, excluding loading and the first second of each slide. They are not display scanout/photodiode measurements.

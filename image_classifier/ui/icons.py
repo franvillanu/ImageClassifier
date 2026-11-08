@@ -6,6 +6,15 @@ from PyQt6.QtSvg import QSvgRenderer
 
 class IconFactory:
     _svg_strings = {
+        "slideshow_play": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="none" stroke="white" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+        "slideshow_play_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="#171a20" stroke="#171a20" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+        "slideshow_pause_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="#171a20" stroke-width="2.6" stroke-linecap="round"/></svg>',
+        "slideshow_previous": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 6v12m13-12-9 6 9 6Z" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        "slideshow_next": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6v12M6 6l9 6-9 6Z" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        "slideshow_settings": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16" stroke="white" stroke-width="1.5" stroke-linecap="round"/><g fill="#202329" stroke="white" stroke-width="1.5"><rect x="2.5" y="7" width="5" height="4" rx="1.5"/><rect x="9.5" y="14" width="5" height="4" rx="1.5"/><rect x="16.5" y="6" width="5" height="4" rx="1.5"/></g></svg>',
+        "slideshow_fullscreen": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        "slideshow_restore": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 9h5V4m6 0v5h5M9 20v-5H4m16 0h-5v5" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        "slideshow_close": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg>',
         "folder": """
             <svg width="48" height="48" viewBox="0 0 48 48"
                  preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
