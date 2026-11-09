@@ -373,45 +373,25 @@ class OverlayProgressDialog(QWidget):
 # ------------------------------------------------------------------------
 # EphemeralPopup
 # ------------------------------------------------------------------------
-class EphemeralPopup(BaseOverlay):
+class EphemeralPopup(QLabel):
+    """Transient message sized to its text. No fade or position animation (SPEC-001 EP-1/EP-2):
+    over a GL viewport every animation frame recomposites the whole window."""
+
     def __init__(self, message, parent=None):
-        super().__init__(parent, overlay_name="EphemeralPopup", bg_color="transparent")
+        super().__init__(message, parent)
+        self.setObjectName("EphemeralPopup")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.opacity_effect.setOpacity(0.0)
-        self.container = QWidget(self)
-        self.container.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 150);
-            border-radius: 8px;
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("""
+            QLabel#EphemeralPopup {
+                background-color: rgba(0, 0, 0, 150);
+                color: white;
+                border-radius: 8px;
+                font-size: 22px;
+                padding: 10px 20px;
+            }
         """)
-        label = QLabel(message, self.container)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: white; font-size: 22px; padding: 10px 20px;")
-        layout = QHBoxLayout(self.container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(label)
-        self.container.adjustSize()
-        self.moveContainerToCenter()
-        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity", self)
-        self.fade_anim.setDuration(500)
-        self.fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.container = self  # kept for callers that lay messages out through ``container``
+        self.adjustSize()
 
-    def moveContainerToCenter(self):
-        overlay_rect = self.rect()
-        container_rect = self.container.rect()
-        new_pos = overlay_rect.center() - container_rect.center()
-        self.container.move(new_pos)
-
-    def fadeIn(self):
-        self.fade_anim.stop()
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.start()
-
-    def fadeOut(self):
-        self.fade_anim.stop()
-        self.fade_anim.setStartValue(self.opacity_effect.opacity())
-        self.fade_anim.setEndValue(0.0)
-        self.fade_anim.start()
