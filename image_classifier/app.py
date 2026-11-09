@@ -765,7 +765,6 @@ class PhotoViewer(QMainWindow):
                     (t["shortcut_slideshow_pause_key"], t["shortcut_slideshow_pause_desc"]),
                     (t["shortcut_slideshow_steps_key"], t["shortcut_slideshow_steps_desc"]),
                     (t["shortcut_slideshow_speed_key"], t["shortcut_slideshow_speed_desc"]),
-                    (t["shortcut_slideshow_rotate_key"], t["shortcut_slideshow_rotate_desc"]),
                 ],
             ),
             (

@@ -53,7 +53,6 @@ class PlayerWindow(QDialog):
             QPushButton#slideshowClose { background: rgba(24, 27, 33, 210); border-radius: 18px; }
         """)
         self._closing = False
-        self._rotations = {}  # path -> degrees clockwise, this slideshow only (SPEC-002 SR-2)
         self._cursor_hidden = False
         self._fs_icon_state = None
         self._editing_settings = False
@@ -136,7 +135,7 @@ class PlayerWindow(QDialog):
         self.loader = SlideLoader(self)
         self.controller = SlideshowController(tuple(playlist), starting_image, settings, self.loader, parent=self)
         self.controller.presented.connect(self._present)
-        self.controller.frameUpdated.connect(self._frame_updated)
+        self.controller.frameUpdated.connect(lambda frame:self.surface.present(self.controller.entry,frame))
         self.controller.stateChanged.connect(self._state_changed)
         self.controller.updated.connect(self._refresh)
         self.controller.skipped.connect(lambda p: self._show_notice(self.t["slideshow_skipped"].format(path=os.path.basename(p))))
@@ -161,8 +160,7 @@ class PlayerWindow(QDialog):
                               ("Right", lambda: self.next(reveal=False)),
                               ("Up", lambda: self.change_speed(longer=True)),
                               ("Down", lambda: self.change_speed(longer=False)),
-                              ("F11", self.toggle_fullscreen), ("Escape", self.close),
-                              ("R", self.rotate_current)):
+                              ("F11", self.toggle_fullscreen), ("Escape", self.close)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
@@ -210,29 +208,8 @@ class PlayerWindow(QDialog):
 
     def _present(self, entry, frame):
         self._last_presented = entry
-        self.surface.present(entry, frame, self._rotations.get(entry.path, 0))
+        self.surface.present(entry, frame)
         self._message(os.path.basename(entry.path))
-
-    def _frame_updated(self, frame):
-        # Full-resolution frame for the current photo: keep its temporary rotation (SR-3)
-        entry = self.controller.entry
-        if entry is not None:
-            self.surface.present(entry, frame, self._rotations.get(entry.path, 0))
-
-    def rotate_current(self):
-        """R: turn the photo on screen 90° to the right, for this slideshow only (SPEC-002 SR-1/SR-2).
-
-        Uses the photo the surface is showing, not ``controller.entry``: the controller moves on
-        before the next photo has loaded, and R in that gap must turn what the user sees."""
-        entry = self.surface.entry
-        if entry is None or self._closing:
-            return
-        angle = (self._rotations.get(entry.path, 0) + 90) % 360
-        if angle:
-            self._rotations[entry.path] = angle
-        else:
-            self._rotations.pop(entry.path, None)
-        self.surface.set_rotation(angle)
 
     def _message(self, text):
         self._status = text

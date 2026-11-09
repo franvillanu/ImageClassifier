@@ -1,6 +1,6 @@
 """OpenGL and raster surfaces sharing a single smooth QPainter composition."""
 from PyQt6.QtCore import QRectF, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QPainter, QPixmap, QTransform
+from PyQt6.QtGui import QPainter, QPixmap
 from PyQt6.QtWidgets import QWidget, QStackedLayout
 try:
     from PyQt6.QtOpenGLWidgets import QOpenGLWidget
@@ -41,8 +41,6 @@ class SlideSurface(QWidget):
     def __init__(self, parent=None, *, raster=False):
         super().__init__(parent)
         self.pixmap = None
-        self._source = None
-        self.rotation = 0
         self.entry = None
         self.progress = 0
         self.strength = 100
@@ -83,25 +81,10 @@ class SlideSurface(QWidget):
             old.deleteLater()
             self.fallbackActivated.emit()
 
-    def present(self, entry, frame, rotation=0):
+    def present(self, entry, frame):
         self.entry = entry
-        self._source = QPixmap.fromImage(frame.image)
-        self.rotation = rotation % 360
-        self.pixmap = self._rotated(self._source)
+        self.pixmap = QPixmap.fromImage(frame.image)
         self.canvas.update()
-
-    def set_rotation(self, rotation):
-        """Display-only rotation in degrees clockwise (SPEC-002 SR-1/SR-3): the motion fits the
-        rotated pixmap, so a turned landscape photo is fitted as portrait."""
-        self.rotation = rotation % 360
-        if self._source is not None:
-            self.pixmap = self._rotated(self._source)
-            self.canvas.update()
-
-    def _rotated(self, pixmap):
-        if not self.rotation:
-            return pixmap
-        return pixmap.transformed(QTransform().rotate(self.rotation), Qt.TransformationMode.SmoothTransformation)
 
     def refresh(self, progress, strength):
         self.progress, self.strength = progress, strength
@@ -109,5 +92,4 @@ class SlideSurface(QWidget):
 
     def release(self):
         self.pixmap = None
-        self._source = None
         self.entry = None
