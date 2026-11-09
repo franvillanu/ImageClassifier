@@ -167,7 +167,8 @@ class PlayerWindow(QDialog):
                               ("Up", lambda: self.change_speed(longer=True)),
                               ("Down", lambda: self.change_speed(longer=False)),
                               ("F11", self.toggle_fullscreen), ("Escape", self.close),
-                              ("R", self.rotate_current)):
+                              ("R", self.rotate_current),
+                              ("Backspace", self.reset_view), ("0", self.reset_view)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
@@ -340,6 +341,16 @@ class PlayerWindow(QDialog):
             return
         self.surface.set_zoom(zc)
         self.surface.set_pan((cx, cy))
+
+    def reset_view(self):
+        """Backspace / 0: glide back to the motion's own framing, zoom 1x and no pan (SPEC-002 SV-4)."""
+        if self._closing or self.surface.entry is None:
+            return
+        self._pan_held.clear()
+        self._end_drag()
+        self._pan_target = (0.0, 0.0)
+        self._zoom_target = 1.0
+        self._start_view_animation()
 
     def _stop_pan_keys(self):
         self._pan_held.clear()

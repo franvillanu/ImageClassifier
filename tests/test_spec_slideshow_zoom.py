@@ -14,7 +14,7 @@ from image_classifier.slideshow.player import PlayerWindow
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.surface import panned_bounds
 
-REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5"]
+REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -146,3 +146,33 @@ def test_sz5_wheel_listed_in_sheet_and_help_both_languages():
         assert t["shortcut_slideshow_zoom_key"] and t["shortcut_slideshow_zoom_desc"]
     assert "slideshow_key_zoom" in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
     assert "shortcut_slideshow_zoom_key" in inspect.getsource(app_module.PhotoViewer.open_help_overlay)
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Backspace, Qt.Key.Key_0])
+def test_sv4_backspace_or_zero_glides_back_to_normal_view(player, qapp, key):
+    """SV-4: after zoom and pan, Backspace / 0 returns to zoom 1x and no pan over several frames, still playing."""
+    _wheel(player, 3, at=QPointF(700, 200))
+    QTest.keyClick(player, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+    _settled(qapp, player)
+    assert player.surface.zoom > 1.5 and player.surface.pan != (0.0, 0.0)
+    steps = []
+    original = player.surface.set_zoom
+    player.surface.set_zoom = lambda z: (steps.append(z), original(z))
+    QTest.keyClick(player, key)
+    _settled(qapp, player)
+    assert player.surface.zoom == 1.0 and player.surface.pan == (0.0, 0.0)
+    assert len(steps) >= 5  # glide, not a jump
+    assert player.controller.playing
+
+
+def test_sv4_reset_listed_in_sheet_and_help_both_languages():
+    """SV-4: the sheet and Help list the reset keys, EN and ES."""
+    from image_classifier.i18n.translations import translations
+    from image_classifier.slideshow import settings_dialog
+    import image_classifier.app as app_module
+
+    for lang in ("en", "es"):
+        t = translations[lang]
+        assert t["slideshow_key_reset_view"] and "0" in t["shortcut_slideshow_reset_view_key"]
+    assert "slideshow_key_reset_view" in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
+    assert "shortcut_slideshow_reset_view_key" in inspect.getsource(app_module.PhotoViewer.open_help_overlay)
