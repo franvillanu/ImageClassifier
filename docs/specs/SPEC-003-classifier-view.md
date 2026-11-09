@@ -8,6 +8,7 @@ Tests: `tests/test_spec_classifier_view.py`
 | ID | Requirement | Why |
 |---|---|---|
 | CV-1 | In the classifier, Backspace or 0 brings the photo back to its initial view: fitted to the window, centred, zoom reset. Help lists both keys (EN/ES). | User request: 0 snaps back in the slideshow (SPEC-002 SV-4) and should do the same in the classifier; Backspace already did it. |
+| CV-2 | In the classifier `+` / `−` (main keyboard or numpad, with or without Ctrl; `=` counts as `+`) zoom in / out like ↑ / ↓, and Ctrl+0 fits like 0 and Backspace. ↑ / ↓ keep working. Help lists the keys (EN/ES). | Same keys as the slideshow (SPEC-002 SZ-6) and the editor. |
 
 ## Decision log
 

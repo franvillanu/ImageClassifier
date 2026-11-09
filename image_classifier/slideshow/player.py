@@ -168,7 +168,7 @@ class PlayerWindow(QDialog):
                               ("Down", lambda: self.change_speed(longer=False)),
                               ("F11", self.toggle_fullscreen), ("Escape", self.close),
                               ("R", self.rotate_current),
-                              ("Backspace", self.reset_view), ("0", self.reset_view)):
+                              ("Backspace", self.reset_view), ("0", self.reset_view), ("Ctrl+0", self.reset_view)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
@@ -287,14 +287,35 @@ class PlayerWindow(QDialog):
         if z1 == z0:
             return True
         point = self.surface.mapFromGlobal(event.globalPosition().toPoint())
-        mx = point.x() - self.surface.width() / 2
-        my = point.y() - self.surface.height() / 2
+        self._zoom_to(z1, point.x() - self.surface.width() / 2, point.y() - self.surface.height() / 2)
+        return True
+
+    def _zoom_to(self, z1, mx=0.0, my=0.0):
+        """Animate to zoom ``z1`` keeping the photo point at offset (mx, my) from the centre in place."""
+        z0 = self._zoom_target
         px, py = self._pan_target
         ratio = z1 / z0
-        # keep the photo point under the pointer where it is: p1 = m - (m - p0) * z1 / z0
+        # keep the photo point under the anchor where it is: p1 = m - (m - p0) * z1 / z0
         self._zoom_target = z1
         self._pan_target = self._clamp_pan(mx - (mx - px) * ratio, my - (my - py) * ratio, z1)
         self._start_view_animation()
+
+    _ZOOM_KEYS = {Qt.Key.Key_Plus: 1, Qt.Key.Key_Equal: 1, Qt.Key.Key_Minus: -1, Qt.Key.Key_Underscore: -1}
+
+    def _handle_zoom_key(self, event):
+        """+ / - (also Ctrl, numpad): zoom toward the screen centre (SZ-6). True when consumed."""
+        direction = self._ZOOM_KEYS.get(event.key())
+        if direction is None:
+            return False
+        allowed = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+                   | Qt.KeyboardModifier.KeypadModifier)
+        if event.modifiers() & ~allowed:
+            return False
+        if self._closing or self.surface.entry is None:
+            return True
+        z1 = max(1.0, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
+        if z1 != self._zoom_target:
+            self._zoom_to(z1)
         return True
 
     def _handle_pan_key(self, event, pressed):
@@ -563,6 +584,8 @@ class PlayerWindow(QDialog):
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             if self._handle_pan_key(event, event.type() == QEvent.Type.KeyPress):
+                return True
+            if event.type() == QEvent.Type.KeyPress and self._handle_zoom_key(event):
                 return True
         elif event.type() == QEvent.Type.Wheel:
             return self._handle_wheel(event)
