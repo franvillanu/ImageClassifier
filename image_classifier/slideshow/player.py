@@ -265,7 +265,8 @@ class PlayerWindow(QDialog):
         direction = self._PAN_KEYS.get(event.key())
         if direction is None:
             return False
-        if pressed and not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        pan_modifiers = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier  # SP-5
+        if pressed and not event.modifiers() & pan_modifiers:
             return False
         if not pressed and direction not in self._pan_held:
             return False
