@@ -22,6 +22,7 @@ from PyQt6.QtCore import (
 )    
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen, handle_frame_message, refresh_frame
+from image_classifier.ui.window_placement import get_normal_rect, set_normal_rect, work_area_rect
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 # Windows Shell (COM + open in Explorer); imaging (sharpen, loader); config; workers; UI
 from image_classifier.shell_win import open_folder_and_select_item
@@ -316,6 +317,12 @@ class PhotoViewer(QMainWindow):
                 self._fs_was_maximized = self.isMaximized()
                 if not self._fs_was_maximized:
                     self.stored_geometry = self.geometry()
+                else:
+                    # While still maximized (invisible): make the normal placement the work area, so
+                    # Qt's pass-through "normal" step on the way back has the maximized size (FS-9).
+                    hwnd = int(self.winId())
+                    self._fs_saved_normal_rect = get_normal_rect(hwnd)
+                    set_normal_rect(hwnd, work_area_rect(hwnd))
 
                 # Try to disable Windows color management for consistent colors in fullscreen
                 try:
@@ -342,7 +349,12 @@ class PhotoViewer(QMainWindow):
             else:
                 # ---- EXIT ---- one state change back to where we came from (no normal->geometry double resize)
                 if getattr(self, "_fs_was_maximized", False):
+                    # The user's own normal size comes back in changeEvent, once the window really is
+                    # maximized (Qt reports it asynchronously), so it stays invisible (FS-9).
+                    self._fs_restore_normal_rect = getattr(self, "_fs_saved_normal_rect", None)
+                    self._fs_saved_normal_rect = None
                     super().showMaximized()
+                    self._restore_normal_rect_if_maximized()
                 else:
                     super().showNormal()
                     if hasattr(self, "stored_geometry"):
@@ -358,6 +370,17 @@ class PhotoViewer(QMainWindow):
             self.update_floating_controls()
         finally:
             self.setUpdatesEnabled(True)
+
+    def _restore_normal_rect_if_maximized(self):
+        saved = getattr(self, "_fs_restore_normal_rect", None)
+        if saved is not None and self.isMaximized():
+            set_normal_rect(int(self.winId()), saved)
+            self._fs_restore_normal_rect = None
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._restore_normal_rect_if_maximized()
 
     def nativeEvent(self, event_type, message):
         # Fullscreen frame painted in the viewer background instead of Windows grey (SPEC-001 FS-8)

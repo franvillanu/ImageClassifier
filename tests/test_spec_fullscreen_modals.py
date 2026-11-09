@@ -17,7 +17,7 @@ if sys.platform != "win32":
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
 
 
 @pytest.fixture
@@ -392,3 +392,42 @@ def test_fs8_both_windows_route_native_events_through_the_frame_handler(window, 
     assert window.nativeEvent(b"windows_generic_MSG", 0) == (True, 0)
     assert player_module.PlayerWindow.nativeEvent(window, b"windows_generic_MSG", 0) == (True, 0)
     assert ("main", window.image_viewer.bg_color) in seen and ("player", "#000000") in seen
+
+
+def test_fs9_exit_to_maximized_uses_work_area_then_restores_normal_rect(window, qapp, monkeypatch):
+    """FS-9: entering from maximized sets the normal placement to the work area; once maximized
+    again, the user's own normal rectangle is put back."""
+    import image_classifier.app as app_module
+
+    calls = []
+    monkeypatch.setattr(app_module, "get_normal_rect", lambda hwnd: (100, 100, 1124, 868))
+    monkeypatch.setattr(app_module, "work_area_rect", lambda hwnd: (0, 0, 3840, 2088))
+    monkeypatch.setattr(app_module, "set_normal_rect", lambda hwnd, rect: calls.append(rect) or True)
+    window.showMaximized()
+    qapp.processEvents()
+    window.toggle_fullscreen()
+    qapp.processEvents()
+    assert calls == [(0, 0, 3840, 2088)]
+    window.toggle_fullscreen()
+    for _ in range(20):
+        qapp.processEvents()
+    assert window.isMaximized()
+    assert calls == [(0, 0, 3840, 2088), (100, 100, 1124, 868)]
+    assert window._fs_restore_normal_rect is None
+
+
+def test_fs9_normal_rect_restore_waits_until_really_maximized(window, qapp, monkeypatch):
+    """FS-9: the restore does not run while the window is not maximized yet (Qt reports it late)."""
+    import image_classifier.app as app_module
+
+    calls = []
+    monkeypatch.setattr(app_module, "set_normal_rect", lambda hwnd, rect: calls.append(rect) or True)
+    window.showNormal()
+    qapp.processEvents()
+    window._fs_restore_normal_rect = (1, 2, 3, 4)
+    window._restore_normal_rect_if_maximized()
+    assert calls == [] and window._fs_restore_normal_rect == (1, 2, 3, 4)
+    window.showMaximized()
+    for _ in range(10):
+        qapp.processEvents()
+    assert calls == [(1, 2, 3, 4)]
