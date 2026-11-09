@@ -1,6 +1,6 @@
 {
   "name": "image-classifier",
-  "version": "2.0.21",
+  "version": "2.0.22",
   "description": "Image Classifier - Desktop app for organizing photos and choosing favorites",
   "private": true,
   "scripts": {
