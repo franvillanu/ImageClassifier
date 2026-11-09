@@ -22,7 +22,7 @@ STYLE = f"""
     QLabel#value {{ color: #f4f6fa; font-size: 15px; font-weight: 600; }}
     QLabel#hint {{ color: #aeb6c3; font-size: 12px; }}
     QLabel#key {{ color: #f4f6fa; background: #1f232b; border: 1px solid #323843;
-        border-bottom: 2px solid #323843; border-radius: 7px; padding: 5px 13px; font-size: 12px; font-weight: 600; }}
+        border-bottom: 2px solid #323843; border-radius: 7px; padding: 0 13px; font-size: 12px; font-weight: 600; }}
     QLabel#keyText {{ color: #c5ccd6; font-size: 13px; }}
     QLabel#section {{ color: #aeb6c3; font-size: 13px; }}
     QFrame#card {{ background: #20242b; border: 1px solid #2f3540; border-radius: 14px; }}
@@ -336,17 +336,10 @@ class SettingsDialog(QDialog):
                     (("⌫", "0"), t["slideshow_key_reset_view"]))))
         for (heading, entries), color in zip(groups, (CATEGORY_COLORS[0], CATEGORY_COLORS[2])):
             layout.addSpacing(10)
-            head_row = QHBoxLayout()  # dot + title in the Help panel's category colours
-            head_row.setSpacing(8)
-            dot = QLabel()
-            dot.setFixedSize(10, 10)
-            dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
-            group = QLabel(heading)
+            group = QLabel(heading)  # title in the Help panel's category colour
             group.setObjectName("group")
             group.setStyleSheet(f"color: {color};")
-            head_row.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
-            head_row.addWidget(group, 1)
-            layout.addLayout(head_row)
+            layout.addWidget(group)
             for keys, text in entries:
                 row = QHBoxLayout()
                 row.setContentsMargins(0, 0, 0, 0)
@@ -359,7 +352,8 @@ class SettingsDialog(QDialog):
                     chip.setObjectName("key")
                     chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     chip.setMinimumWidth(34)
-                    row.addWidget(chip)
+                    chip.setFixedHeight(28)  # the row is tall for breathing room; the keycap itself stays slim
+                    row.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
                 holder = QWidget()
                 holder.setFixedHeight(48)
                 holder.setLayout(row)
