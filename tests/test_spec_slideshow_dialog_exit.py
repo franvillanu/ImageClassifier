@@ -1,18 +1,18 @@
 """Executable form of docs/specs/SPEC-002-slideshow-controls.md: exit handover (SX-3) and the
-collapsible shortcut sheet (SD-1 .. SD-3)."""
+shortcuts side panel (SD-1 .. SD-3, SD-5 .. SD-7)."""
 import json
 import time
 
 import pytest
 from PIL import Image
-from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtCore import QRect, QStandardPaths, Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QDialog, QLabel
 
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.settings_dialog import SettingsDialog
 
-REQUIRES = ["SX-3", "SD-1", "SD-2", "SD-3"]
+REQUIRES = ["SX-3", "SD-1", "SD-2", "SD-3", "SD-5", "SD-6", "SD-7"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -136,36 +136,118 @@ def dialog(qapp):
     d.close()
 
 
-def test_sd1_shortcuts_collapsed_by_default_and_dialog_shorter(dialog, qapp):
-    """SD-1: the sheet starts hidden behind a 'Keyboard shortcuts' row; expanding makes the dialog taller."""
+def test_sd1_shortcuts_hidden_by_default_and_dialog_compact(dialog, qapp):
+    """SD-1: the panel starts hidden behind a 'Keyboard shortcuts' row; the dialog opens compact."""
     assert not dialog.shortcuts_card.isVisible()
     assert not dialog.shortcuts_toggle.isChecked()
     assert dialog.shortcuts_toggle.text() == "Keyboard shortcuts"
-    collapsed = dialog.height()
-    dialog.shortcuts_toggle.click()
-    _settle(qapp, dialog)
-    assert dialog.shortcuts_card.isVisible()
-    assert dialog.height() > collapsed + 80
+    assert dialog.width() < 700
 
 
-def test_sd2_height_animates_and_settles_at_natural_size_and_back(dialog, qapp):
-    """SD-2: intermediate heights during the animation, natural height when open, hidden when closed."""
-    heights = []
-    dialog._shortcuts_anim.valueChanged.connect(lambda value: heights.append(value))
+def test_sd2_panel_opens_to_the_right_animated_without_changing_height(dialog, qapp):
+    """SD-2: width animates, dialog grows sideways only, settles at natural width, chevron half turn, and back."""
+    widths = []
+    dialog._shortcuts_anim.valueChanged.connect(lambda value: widths.append(value))
+    compact_width, compact_height = dialog.width(), dialog.height()
     dialog.shortcuts_toggle.click()
     _settle(qapp, dialog)
-    natural = dialog.shortcuts_card.sizeHint().height()
-    assert len(set(heights)) > 3 and heights[-1] == natural
-    # limit released at the end (the offscreen test screen is only 800x600, so the real height can be capped)
-    assert dialog.shortcuts_card.maximumHeight() == 16777215
+    natural = dialog.shortcuts_card.sizeHint().width()
+    assert len(set(widths)) > 3 and widths[-1] == natural
+    assert dialog.shortcuts_card.maximumWidth() == 16777215  # limit released at the end
     assert dialog._shortcuts_anim.duration() == 180
-    assert dialog.shortcuts_toggle._angle == pytest.approx(90, abs=1)
-    open_height = dialog.height()
+    assert dialog.shortcuts_toggle._angle == pytest.approx(180, abs=1)
+    assert dialog.shortcuts_card.isVisible()
+    assert dialog.width() >= compact_width + natural - 2
+    assert dialog.height() == compact_height
     dialog.shortcuts_toggle.click()
     _settle(qapp, dialog)
     assert not dialog.shortcuts_card.isVisible()
-    assert dialog.height() < open_height
+    assert dialog.width() == compact_width and dialog.height() == compact_height
     assert _wait(qapp, lambda: abs(dialog.shortcuts_toggle._angle) < 1)
+
+
+def test_sd5_one_column_grouped_in_english_and_spanish(dialog, qapp):
+    """SD-5: every shortcut in one aligned column under two headings, action left and keycaps right."""
+    dialog.shortcuts_toggle.click()
+    _settle(qapp, dialog)
+
+    def rows(d):
+        panel = d.shortcuts_card
+        texts = panel.findChildren(QLabel, "keyText")
+        chips = panel.findChildren(QLabel, "key")
+        heads = [label.text() for label in panel.findChildren(QLabel, "group")]
+        return texts, chips, heads
+
+    texts, chips, heads = rows(dialog)
+    assert heads == ["Viewer", "Photo"]
+    colours = [label.styleSheet() for label in dialog.shortcuts_card.findChildren(QLabel, "group")]
+    assert colours[0] != colours[1] and all("color: #" in c for c in colours)
+    assert len(texts) == 11
+    assert {label.text() for label in texts} >= {"Pause / resume", "Show controls", "Close", "Fullscreen"}
+    assert len({label.mapTo(dialog, label.rect().topLeft()).x() for label in texts}) == 1
+    # keycaps are right-aligned: the last chip of each row ends at the same x
+    ends = {}
+    for chip in chips:
+        y = chip.mapTo(dialog, chip.rect().center()).y()
+        near = [known for known in ends if abs(known - y) < 6]
+        key = near[0] if near else y
+        ends[key] = max(ends.get(key, 0), chip.mapTo(dialog, chip.rect().topRight()).x())
+    assert len(ends) == 11 and max(ends.values()) - min(ends.values()) <= 1
+    spanish = SettingsDialog(SlideshowSettings(), "es")
+    spanish.show()
+    spanish.shortcuts_toggle.click()
+    assert _wait(qapp, lambda: spanish._shortcuts_anim.state() == spanish._shortcuts_anim.State.Stopped)
+    s_texts, _chips, s_heads = rows(spanish)
+    assert s_heads == ["Visor", "Foto"] and len(s_texts) == 11
+    assert "Pausar / reanudar" in {label.text() for label in s_texts}
+    spanish.close()
+
+
+def test_sd6_stays_on_screen_and_returns_home(dialog, qapp):
+    """SD-6: near the right edge the dialog shifts left just enough; closing puts it back."""
+    area = QRect(0, 0, 1200, 800)
+    dialog._available = lambda: area
+    home_x = area.right() + 1 - dialog.frameGeometry().width() - 10
+    dialog.move(home_x, 10)
+    qapp.processEvents()
+    dialog.shortcuts_toggle.click()
+    _settle(qapp, dialog)
+    assert dialog.frameGeometry().right() <= area.right()
+    assert dialog.frameGeometry().right() >= area.right() - 1  # shifted only as far as needed
+    assert dialog.x() < home_x
+    dialog.shortcuts_toggle.click()
+    _settle(qapp, dialog)
+    assert dialog.x() == home_x
+
+
+def test_sd6_settings_stay_put_when_there_is_room(qapp):
+    """SD-6: with room on the right the settings column does not move."""
+    d = SettingsDialog(SlideshowSettings(), "en")
+    d._available = lambda: QRect(0, 0, 3000, 1500)
+    d.show()
+    d.move(100, 10)
+    qapp.processEvents()
+    d.shortcuts_toggle.click()
+    assert _wait(qapp, lambda: d._shortcuts_anim.state() == d._shortcuts_anim.State.Stopped)
+    assert d.x() == 100
+    d.close()
+
+
+def test_sd7_panel_close_button_and_escape(dialog, qapp):
+    """SD-7: the panel's own close button closes it; Esc closes the dialog (EN/ES accessible name)."""
+    dialog.shortcuts_toggle.click()
+    _settle(qapp, dialog)
+    assert dialog.shortcuts_close.accessibleName() == "Close panel"
+    dialog.shortcuts_close.click()
+    _settle(qapp, dialog)
+    assert not dialog.shortcuts_toggle.isChecked() and not dialog.shortcuts_card.isVisible()
+    dialog.shortcuts_toggle.click()
+    _settle(qapp, dialog)
+    QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible() and dialog.result() == QDialog.DialogCode.Rejected
+    spanish = SettingsDialog(SlideshowSettings(), "es")
+    assert spanish.shortcuts_close.accessibleName() == "Cerrar panel"
+    spanish.close()
 
 
 def test_sd3_toggle_is_keyboard_operable_and_named(dialog, qapp):

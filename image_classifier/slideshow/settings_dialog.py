@@ -5,11 +5,13 @@ from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QGr
                             QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.ui.icons import IconFactory
+from image_classifier.ui.help_panel import CATEGORY_COLORS
 from image_classifier.ui.settings_panel import ToggleSwitch
 from .settings import SlideshowSettings
 
 ACCENT = "#9db8e6"
 RED = "#DC3545"
+PANEL_WIDTH = 360
 
 STYLE = f"""
     QDialog {{ background: #191c21; }}
@@ -19,12 +21,18 @@ STYLE = f"""
     QLabel#title {{ color: #f4f6fa; font-size: 22px; font-weight: 600; }}
     QLabel#value {{ color: #f4f6fa; font-size: 15px; font-weight: 600; }}
     QLabel#hint {{ color: #aeb6c3; font-size: 12px; }}
-    QLabel#key {{ color: #f4f6fa; background: #2a2f38; border: 1px solid #3b414c;
-        border-bottom: 2px solid #3b414c; border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 600; }}
+    QLabel#key {{ color: #f4f6fa; background: #1f232b; border: 1px solid #323843;
+        border-bottom: 2px solid #323843; border-radius: 7px; padding: 0 13px; font-size: 12px; font-weight: 600; }}
     QLabel#keyText {{ color: #c5ccd6; font-size: 13px; }}
     QLabel#section {{ color: #aeb6c3; font-size: 13px; }}
     QFrame#card {{ background: #20242b; border: 1px solid #2f3540; border-radius: 14px; }}
     QFrame#rule {{ background: #2f3540; border: none; }}
+    QFrame#sidepanel {{ background: #15181f; border: none; border-left: 1px solid #2f3540; }}
+    QLabel#panelTitle {{ color: #f4f6fa; font-size: 15px; font-weight: 700; }}
+    QLabel#group {{ color: #aeb6c3; font-size: 12px; font-weight: 600; }}
+    QPushButton#panelClose {{ background: #242833; color: #e8eaed; border: none; border-radius: 8px;
+        padding: 0; font-size: 14px; }}
+    QPushButton#panelClose:hover {{ background: #2f3540; }}
     QSlider::groove:horizontal {{ height: 6px; background: #3a4150; border-radius: 3px; }}
     QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
     QSlider::handle:horizontal {{ width: 20px; height: 20px; margin: -7px 0; border-radius: 10px;
@@ -91,7 +99,8 @@ class ModeTile(QAbstractButton):
 
 
 class DisclosureRow(QAbstractButton):
-    """Quiet, checkable row: icon, label and a chevron that turns as the section opens (SPEC-002 SD-1/SD-3)."""
+    """Quiet, checkable row: icon, label and a chevron that turns half a turn as the side panel opens
+    (SPEC-002 SD-1/SD-2/SD-3)."""
 
     def __init__(self, icon, text, parent=None):
         super().__init__(parent)
@@ -120,7 +129,7 @@ class DisclosureRow(QAbstractButton):
     def _animate_chevron(self, checked):
         self._turn.stop()
         self._turn.setStartValue(self._angle)
-        self._turn.setEndValue(90.0 if checked else 0.0)
+        self._turn.setEndValue(180.0 if checked else 0.0)
         self._turn.start()
 
     def paintEvent(self, _event):
@@ -150,9 +159,15 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         t = translations.get(language, translations["en"])
         self.setWindowTitle(t["slideshow_settings_title"])
-        self.setMinimumWidth(540)
         self.setStyleSheet(STYLE)
-        root = QVBoxLayout(self)
+        self._home_x = None
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        main = QWidget()
+        main.setMinimumWidth(540)
+        outer.addWidget(main, 1)
+        root = QVBoxLayout(main)
         root.setContentsMargins(26, 20, 26, 20)
         root.setSpacing(12)
         title = QLabel(t["slideshow_settings_title"])
@@ -212,19 +227,21 @@ class SettingsDialog(QDialog):
             self.mode_group.addButton(tile)
             tiles.addWidget(tile)
         root.addLayout(tiles)
-        # Shortcut sheet collapsed by default behind a quiet row (SPEC-002 SD-1); animated (SD-2)
+        # Shortcuts live in a side panel to the right, hidden by default behind a quiet row (SPEC-002 SD-1);
+        # its width animates and the dialog follows (SD-2)
         self.shortcuts_toggle = DisclosureRow(IconFactory.get_icon("keyboard", 48), t["slideshow_shortcuts_toggle"])
         self.shortcuts_card = self._shortcuts(t)
-        self.shortcuts_card.setMaximumHeight(0)
+        self.shortcuts_card.setMaximumWidth(0)
         self.shortcuts_card.hide()
         root.addWidget(self.shortcuts_toggle)
-        root.addWidget(self.shortcuts_card)
-        self._shortcuts_anim = QPropertyAnimation(self.shortcuts_card, b"maximumHeight", self)
+        outer.addWidget(self.shortcuts_card)
+        self._shortcuts_anim = QPropertyAnimation(self.shortcuts_card, b"maximumWidth", self)
         self._shortcuts_anim.setDuration(180)
         self._shortcuts_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._shortcuts_anim.valueChanged.connect(lambda _value: self.adjustSize())
+        self._shortcuts_anim.valueChanged.connect(lambda _value: self._fit_to_panel())
         self._shortcuts_anim.finished.connect(self._shortcuts_settled)
         self.shortcuts_toggle.toggled.connect(self._set_shortcuts_expanded)
+        self.shortcuts_close.clicked.connect(lambda: self.shortcuts_toggle.setChecked(False))
 
         buttons = QHBoxLayout()
         buttons.setSpacing(12)
@@ -242,71 +259,107 @@ class SettingsDialog(QDialog):
         root.addSpacing(4)
         root.addLayout(buttons)
 
+    def _available(self):
+        return self.screen().availableGeometry()
+
     def _set_shortcuts_expanded(self, expanded):
         card = self.shortcuts_card
-        start = card.maximumHeight() if card.isVisible() else 0
-        if start > card.sizeHint().height():
-            start = card.height()
+        start = card.maximumWidth() if card.isVisible() else 0
+        if start > card.sizeHint().width():
+            start = card.width()
         if expanded:
-            card.setMaximumHeight(start)
+            if self._home_x is None:
+                self._home_x = self.x()  # where the settings sit; they stay here when there is room (SD-6)
+            card.setMaximumWidth(start)
             card.show()
         self._shortcuts_anim.stop()
         self._shortcuts_anim.setStartValue(start)
-        self._shortcuts_anim.setEndValue(card.sizeHint().height() if expanded else 0)
+        self._shortcuts_anim.setEndValue(card.sizeHint().width() if expanded else 0)
         self._shortcuts_anim.start()
+
+    def _fit_to_panel(self):
+        """Follow the panel's width; keep the settings in place unless the dialog would leave the screen (SD-6)."""
+        self.adjustSize()
+        if self._home_x is None:
+            return
+        area = self._available()
+        x = min(self._home_x, area.right() + 1 - self.frameGeometry().width())
+        self.move(max(x, area.left()), self.y())
 
     def _shortcuts_settled(self):
         card = self.shortcuts_card
         if self.shortcuts_toggle.isChecked():
-            card.setMaximumHeight(16777215)  # natural height again (QWIDGETSIZE_MAX)
+            card.setMaximumWidth(16777215)  # natural width again (QWIDGETSIZE_MAX)
+            self._fit_to_panel()
         else:
             card.hide()
-        self.adjustSize()
+            self._fit_to_panel()
+            self._home_x = None
 
     def _shortcuts(self, t):
-        """Compact cheat sheet: three columns, each keycap row above its small label."""
-        card = QFrame()
-        card.setObjectName("card")
-        outer = QHBoxLayout(card)
-        outer.setContentsMargins(18, 12, 18, 12)
-        outer.setSpacing(14)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(12)
-        outer.addLayout(grid, 1)
-        entries = (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
-                   (("←", "→"), t["slideshow_key_steps"]),
-                   (("↑", "↓"), t["slideshow_key_speed"]),
-                   (("R",), t["slideshow_key_rotate"]),
-                   (("Ctrl / Shift", "←↑↓→"), t["slideshow_key_pan"]),
-                   ((t["slideshow_key_wheel"], "+", "−"), t["slideshow_key_zoom"]),
-                   ((t["slideshow_key_drag"],), t["slideshow_key_pan"]),
-                   (("⌫", "0"), t["slideshow_key_reset_view"]),
-                   (("F11",), t["slideshow_fullscreen"]),
-                   (("Esc",), t["slideshow_close"]),
-                   ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))
-        for index, (keys, text) in enumerate(entries):
-            cell = QVBoxLayout()
-            cell.setSpacing(6)
-            row = QHBoxLayout()
-            row.setSpacing(4)
-            for key in keys:
-                chip = QLabel(key)
-                chip.setObjectName("key")
-                chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                chip.setMinimumWidth(28)
-                row.addWidget(chip)
-            row.addStretch(1)
-            cell.addLayout(row)
-            label = QLabel(text)
-            label.setObjectName("hint")
-            label.setWordWrap(True)
-            label.setMinimumWidth(60)
-            cell.addWidget(label)
-            grid.addLayout(cell, index // 3, index % 3)
-        for column in range(3):
-            grid.setColumnStretch(column, 1)
-        return card
+        """Side panel: one column, grouped; the action on the left, its keycaps on the right (SPEC-002 SD-5)."""
+        panel = QFrame()
+        panel.setObjectName("sidepanel")
+        panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
+        shell = QVBoxLayout(panel)
+        shell.setContentsMargins(0, 0, 0, 0)
+        content = QWidget()
+        content.setFixedWidth(PANEL_WIDTH)  # fixed so the panel reveals like a slide instead of squeezing its rows
+        shell.addWidget(content, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(2)
+        head = QHBoxLayout()
+        title = QLabel(t["slideshow_shortcuts_toggle"])
+        title.setObjectName("panelTitle")
+        head.addWidget(title, 1)
+        self.shortcuts_close = QPushButton("✕")
+        self.shortcuts_close.setObjectName("panelClose")
+        self.shortcuts_close.setAccessibleName(t["slideshow_shortcuts_close"])
+        self.shortcuts_close.setToolTip(t["slideshow_shortcuts_close"])
+        self.shortcuts_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shortcuts_close.setFixedSize(32, 32)
+        head.addWidget(self.shortcuts_close)
+        layout.addLayout(head)
+        groups = ((t["slideshow_shortcuts_group_viewer"],
+                   (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
+                    (("←", "→"), t["slideshow_key_steps"]),
+                    (("↑", "↓"), t["slideshow_key_speed"]),
+                    (("F11",), t["slideshow_fullscreen"]),
+                    (("Esc",), t["slideshow_close"]),
+                    ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))),
+                  (t["slideshow_shortcuts_group_photo"],
+                   ((("R",), t["slideshow_key_rotate"]),
+                    (("Ctrl / Shift", "←↑↓→"), t["slideshow_key_pan"]),
+                    ((t["slideshow_key_wheel"], "+", "−"), t["slideshow_key_zoom"]),
+                    ((t["slideshow_key_drag"],), t["slideshow_key_pan"]),
+                    (("⌫", "0"), t["slideshow_key_reset_view"]))))
+        for (heading, entries), color in zip(groups, (CATEGORY_COLORS[0], CATEGORY_COLORS[2])):
+            layout.addSpacing(10)
+            group = QLabel(heading)  # title in the Help panel's category colour
+            group.setObjectName("group")
+            group.setStyleSheet(f"color: {color};")
+            layout.addWidget(group)
+            for keys, text in entries:
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(10)
+                label = QLabel(text)
+                label.setObjectName("keyText")
+                row.addWidget(label, 1)
+                for key in keys:
+                    chip = QLabel(key)
+                    chip.setObjectName("key")
+                    chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    chip.setMinimumWidth(34)
+                    chip.setFixedHeight(28)  # the row is tall for breathing room; the keycap itself stays slim
+                    row.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+                holder = QWidget()
+                holder.setFixedHeight(48)
+                holder.setLayout(row)
+                layout.addWidget(holder)
+        layout.addStretch(1)
+        return panel
 
     def _slider(self, layout, text, low, high, value, fmt):
         head = QHBoxLayout()
