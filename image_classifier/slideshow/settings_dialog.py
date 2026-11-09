@@ -34,8 +34,8 @@ STYLE = f"""
     QPushButton {{ height: 46px; padding: 0 26px; border-radius: 12px; font-size: 14px; font-weight: 600; }}
     QPushButton#cancel {{ background: {RED}; color: white; border: none; }}
     QPushButton#cancel:hover {{ background: #e4505f; }}
-    QPushButton#start {{ background: #edf1f7; color: #12151a; border: none; }}
-    QPushButton#start:hover {{ background: white; }}
+    QPushButton#start {{ background: #3498db; color: white; border: none; }}
+    QPushButton#start:hover {{ background: #4aa8e8; }}
     QPushButton:focus {{ border: 2px solid #b9c9df; }}
 """
 
@@ -194,11 +194,9 @@ class SettingsDialog(QDialog):
         icon.setPixmap(IconFactory.get_icon("keyboard", 48).pixmap(24, 24))
         title = QLabel(t["slideshow_shortcuts"])
         title.setObjectName("hint")
-        title.setWordWrap(True)
-        side.addWidget(icon)
-        side.addWidget(title)
+        side.addWidget(icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        side.addWidget(title, 0, Qt.AlignmentFlag.AlignHCenter)
         side_box = QWidget()
-        side_box.setFixedWidth(74)
         side_box.setLayout(side)
         outer.addWidget(side_box, 0, Qt.AlignmentFlag.AlignTop)
         divider = QFrame()
