@@ -1908,6 +1908,9 @@ class PhotoViewer(QMainWindow):
         player = PlayerWindow(snapshot, selected, self.slideshow_settings, self, language=self.current_language)
         self._slideshow_player = player
         player.settingsChanged.connect(self._save_slideshow_settings)
+        self._slideshow_start_path = selected
+        self._slideshow_exit_path = None
+        player.closedOnPhoto.connect(lambda path: setattr(self, "_slideshow_exit_path", path))
         player.finished.connect(self._slideshow_closed)
         player.show()
 
@@ -1917,6 +1920,13 @@ class PhotoViewer(QMainWindow):
 
     def _slideshow_closed(self, result):
         self._slideshow_player = None
+        # Land on the photo that was on screen (SPEC-002 SX-1); same photo or none: untouched (SX-2)
+        exit_path = getattr(self, "_slideshow_exit_path", None)
+        if exit_path and exit_path != getattr(self, "_slideshow_start_path", None) and exit_path in self.image_files:
+            self.current_index = self.image_files.index(exit_path)
+            self._nav_direction = 1
+            self.show_image()
+        self._slideshow_exit_path = None
         self.activateWindow()
         self.setFocus()
 

@@ -20,6 +20,7 @@ from .surface import SlideSurface
 
 class PlayerWindow(QDialog):
     settingsChanged = pyqtSignal(object)
+    closedOnPhoto = pyqtSignal(str)  # photo on screen when the slideshow closed (SPEC-002 SX-1)
 
     def __init__(self, playlist, starting_image, settings, parent=None, *, language="en", raster=False):
         super().__init__(parent)
@@ -455,6 +456,9 @@ class PlayerWindow(QDialog):
         if self._closing:
             return
         self._closing = True
+        shown = self.surface.entry
+        if shown is not None:
+            self.closedOnPhoto.emit(shown.path)
         self.timer.stop()
         self.hide_timer.stop()
         self.decode_refresh_timer.stop()

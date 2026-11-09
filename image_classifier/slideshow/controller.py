@@ -150,6 +150,8 @@ class SlideshowController(QObject):
     def _navigate(self, index):
         self.loader.cancel_pending()
         self._token += 1
+        if index <= self._furthest and getattr(self.settings, "new_motion_on_revisit", False):
+            self._new_motion(index)  # SPEC-002 SV-2
         self.index = index
         self._furthest = max(self._furthest, index)
         self.entry = self.history[index]
@@ -159,6 +161,12 @@ class SlideshowController(QObject):
         self._waiting = True
         self._state("loading" if self.playing else "paused")
         self.loader.request(self.entry.path, self._token)
+
+    def _new_motion(self, index):
+        """Revisit with a different motion effect; same photo, same place in the order (SV-2)."""
+        entry = self.history[index]
+        choices = tuple(e for e in EFFECTS if e != entry.effect_id) or tuple(EFFECTS)
+        self.history[index] = replace(entry, effect_id=self.rng.choice(choices))
 
     def next(self):
         if self._closed or self.index < 0:

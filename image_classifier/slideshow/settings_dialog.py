@@ -126,7 +126,7 @@ class SettingsDialog(QDialog):
         toggles_layout = QVBoxLayout(toggles)
         toggles_layout.setContentsMargins(20, 6, 20, 6)
         toggles_layout.setSpacing(0)
-        for index, key in enumerate(("shuffle", "repeat")):
+        for index, key in enumerate(("shuffle", "repeat", "new_motion_on_revisit")):
             if index:
                 rule = QFrame()
                 rule.setObjectName("rule")
