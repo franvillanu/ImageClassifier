@@ -2770,14 +2770,14 @@ class PhotoViewer(QMainWindow):
         button_layout = QHBoxLayout()
         main_layout.addLayout(button_layout)
         export_text = f"{t['export_favorites']} ({len(self.favorites)})"
-        ok_button = QPushButton(export_text, container)
-        ok_button.setObjectName("exportBtn")
-        ok_button.setFixedHeight(38)
-        button_layout.addWidget(ok_button)
         cancel_button = QPushButton(t["cancel"], container)
         cancel_button.setObjectName("cancelBtn")
         cancel_button.setFixedHeight(38)
         button_layout.addWidget(cancel_button)
+        ok_button = QPushButton(export_text, container)
+        ok_button.setObjectName("exportBtn")
+        ok_button.setFixedHeight(38)
+        button_layout.addWidget(ok_button)
         ok_button.setDefault(True)
         ok_button.setAutoDefault(True)
         def is_valid_folder_name(name: str) -> bool:

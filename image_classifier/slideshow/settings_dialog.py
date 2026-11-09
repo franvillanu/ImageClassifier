@@ -34,8 +34,8 @@ STYLE = f"""
     QPushButton {{ height: 46px; padding: 0 26px; border-radius: 12px; font-size: 14px; font-weight: 600; }}
     QPushButton#cancel {{ background: {RED}; color: white; border: none; }}
     QPushButton#cancel:hover {{ background: #e4505f; }}
-    QPushButton#start {{ background: #3498db; color: white; border: none; }}
-    QPushButton#start:hover {{ background: #4aa8e8; }}
+    QPushButton#start {{ background: #007BFF; color: white; border: none; }}
+    QPushButton#start:hover {{ background: #0056b3; }}
     QPushButton:focus {{ border: 2px solid #b9c9df; }}
 """
 
@@ -95,7 +95,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         t = translations.get(language, translations["en"])
         self.setWindowTitle(t["slideshow_settings_title"])
-        self.setMinimumWidth(600)
+        self.setMinimumWidth(540)
         self.setStyleSheet(STYLE)
         root = QVBoxLayout(self)
         root.setContentsMargins(26, 20, 26, 20)
@@ -228,6 +228,8 @@ class SettingsDialog(QDialog):
             cell.addLayout(row)
             label = QLabel(text)
             label.setObjectName("hint")
+            label.setWordWrap(True)
+            label.setMinimumWidth(60)
             cell.addWidget(label)
             grid.addLayout(cell, index // 3, index % 3)
         for column in range(3):
