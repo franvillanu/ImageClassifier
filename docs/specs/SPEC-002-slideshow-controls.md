@@ -1,6 +1,6 @@
 # SPEC-002 — Slideshow floating controls
 
-Status: active · Code: `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`)
+Status: active · Code: `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`, `rotate_current`), `slideshow/surface.py`
 Tests: `tests/test_spec_slideshow_controls.py`
 
 ## Problem (observed)
@@ -15,6 +15,16 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SC-2 | The first movement after the controls were hidden shows them once (bar, close button in fullscreen, cursor) and starts the auto-hide timer. | The reveal itself is the one legitimate change. |
 | SC-3 | The fullscreen/restore icon and the close button are only touched when the window mode actually changes. | `setIcon` and `raise_` repaint even when nothing changed. |
 | SC-4 | After auto-hide, the next movement reveals again (SC-2 path is not skipped by the fast path of SC-1). | Guards the optimisation against leaving the controls stuck hidden. |
+
+| SR-1 | Pressing R during the slideshow rotates the photo on screen 90° clockwise (to the right); each press adds 90° (0, 90, 180, 270, back to 0). Playback state and the photo's progress are unchanged. | User request: fix sideways photos while watching without stopping the show. |
+| SR-2 | The rotation is temporary: it belongs to that photo for the current slideshow only (it comes back rotated if the photo is shown again in the same run) and is never written to the file, to the classifier's per-photo rotation or to the config. A new slideshow starts unrotated. | "Temporarily": watching must never modify the user's photos. |
+| SR-3 | A rotated photo is fitted with its rotated proportions (a landscape photo turned 90° is fitted as portrait), and the rotation survives the switch from preview to full-resolution frame. | Otherwise the pan/zoom would fit the unrotated size and crop or letterbox wrongly, or the rotation would be lost when the sharper frame arrives. |
+| SR-4 | R appears in the slideshow settings shortcut sheet and in the Help shortcut list, in English and Spanish. | A shortcut nobody can discover does not exist for the user. |
+| SV-1 | A slideshow setting "New zoom and pan when going back to a photo" (off by default, saved with the other slideshow settings, older configs load with it off) controls revisits. | User request: see the same photo with different zooms and panning when going back and forth. Off by default keeps the existing behaviour. |
+| SV-2 | With the setting on, going back or forward to a photo already shown in this slideshow plays it with a different motion effect than last time; the photo itself, its rotation (SR-2) and the order are unchanged. | A revisit that repeats the same effect would not show anything new. |
+| SV-3 | With the setting off, a revisited photo replays the motion it had (previous behaviour). | No change for users who do not opt in. |
+| SX-1 | Closing the slideshow (Esc, the close button, the window's close) on a photo other than the one it started on selects and shows that photo in the classifier. | User request: exit on photo X lands on X, not on the photo the slideshow was launched from. Replaces the earlier rule "Escape returns to the unchanged classifier selection". |
+| SX-2 | Closing on the same photo it started on, or before any photo was shown, leaves the classifier exactly as it was (selection, zoom, pan). | Nothing to move to; reloading would throw away the user's zoom. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
@@ -43,6 +53,8 @@ these extra repaints are pure overhead on top of it.
 | Dialog Apply with window-mode change | 13 | 2 | 3 resizes, 4 `Expose`; **open item** |
 
 ## Decision log
+
+- 2026-11-09 — Exit lands on the photo being watched (SX-1). The previous verification note "Escape back to the unchanged classifier selection" is superseded by user request; the classifier state is still untouched when the slideshow ends on its starting photo (SX-2).
 
 - 2026-11-09 — Fast path in `reveal_controls()` instead of throttling mouse moves: with nothing to change,
   doing nothing is cheaper and has no timing side effects.

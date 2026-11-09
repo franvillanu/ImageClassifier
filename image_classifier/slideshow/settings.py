@@ -11,13 +11,14 @@ class SlideshowSettings:
     repeat: bool = True
     fullscreen: bool = True
     maximized: bool = False
+    new_motion_on_revisit: bool = False  # SPEC-002 SV-1
 
     def __post_init__(self):
         for key, lo, hi, default in (("duration", 3, 600, 10), ("strength", 0, 100, 100)):
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
                 object.__setattr__(self, key, default)
-        for key, default in (("shuffle", False), ("repeat", True), ("fullscreen", True)):
+        for key, default in (("shuffle", False), ("repeat", True), ("fullscreen", True), ("new_motion_on_revisit", False)):
             if not isinstance(getattr(self, key), bool):
                 object.__setattr__(self, key, default)
         if not isinstance(self.maximized, bool) or self.fullscreen:
