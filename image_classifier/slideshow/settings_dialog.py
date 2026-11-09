@@ -156,10 +156,6 @@ class SettingsDialog(QDialog):
             self.mode_group.addButton(tile)
             tiles.addWidget(tile)
         root.addLayout(tiles)
-        hint = QLabel(t["slideshow_mode_hint"])
-        hint.setObjectName("hint")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
         root.addWidget(self._shortcuts(t))
         if playback:
             note = QLabel(t["slideshow_next_settings"])
