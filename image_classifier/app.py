@@ -767,6 +767,9 @@ class PhotoViewer(QMainWindow):
                     (t["shortcut_slideshow_speed_key"], t["shortcut_slideshow_speed_desc"]),
                     (t["shortcut_slideshow_rotate_key"], t["shortcut_slideshow_rotate_desc"]),
                     (t["shortcut_slideshow_pan_key"], t["shortcut_slideshow_pan_desc"]),
+                    (t["shortcut_slideshow_zoom_key"], t["shortcut_slideshow_zoom_desc"]),
+                    (t["shortcut_slideshow_drag_key"], t["shortcut_slideshow_drag_desc"]),
+                    (t["shortcut_slideshow_reset_view_key"], t["shortcut_slideshow_reset_view_desc"]),
                 ],
             ),
             (
@@ -2042,6 +2045,7 @@ class PhotoViewer(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_F11), self, self.toggle_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.exit_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, self.backspace_toggle_fit)
+        QShortcut(QKeySequence(Qt.Key.Key_0), self, self.backspace_toggle_fit)  # same as Backspace (SPEC-003 CV-1)
         QShortcut(QKeySequence("B"), self, lambda: self.open_editor("adjust"))
         QShortcut(QKeySequence("Ctrl+E"), self, lambda: self.open_editor("crop"))
         QShortcut(QKeySequence("C"), self, self.toggle_compare)

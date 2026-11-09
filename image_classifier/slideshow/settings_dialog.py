@@ -278,7 +278,10 @@ class SettingsDialog(QDialog):
                    (("←", "→"), t["slideshow_key_steps"]),
                    (("↑", "↓"), t["slideshow_key_speed"]),
                    (("R",), t["slideshow_key_rotate"]),
-                   (("Ctrl", "←↑↓→"), t["slideshow_key_pan"]),
+                   (("Ctrl / Shift", "←↑↓→"), t["slideshow_key_pan"]),
+                   ((t["slideshow_key_wheel"],), t["slideshow_key_zoom"]),
+                   ((t["slideshow_key_drag"],), t["slideshow_key_pan"]),
+                   (("⌫", "0"), t["slideshow_key_reset_view"]),
                    (("F11",), t["slideshow_fullscreen"]),
                    (("Esc",), t["slideshow_close"]),
                    ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))

@@ -9,9 +9,13 @@ except ImportError:
 from .motion import EFFECTS
 
 
-def panned_bounds(bounds, pan):
-    """Shift the motion's bounds by the user's pan, never more than half the drawn size (SPEC-002 SP-2)."""
+def panned_bounds(bounds, pan, zoom=1.0, viewport=(0, 0)):
+    """The motion's bounds with the user's view on top: zoom about the window centre (SPEC-002
+    SZ-1), then pan, never more than half the drawn (zoomed) size (SP-2, SZ-4)."""
     x, y, w, h = bounds
+    if zoom != 1.0:
+        cx, cy = viewport[0] / 2, viewport[1] / 2
+        x, y, w, h = cx + (x - cx) * zoom, cy + (y - cy) * zoom, w * zoom, h * zoom
     dx = max(-w / 2, min(w / 2, pan[0]))
     dy = max(-h / 2, min(h / 2, pan[1]))
     return x + dx, y + dy, w, h
@@ -27,7 +31,8 @@ def paint_slide(widget):
             (widget.width(), widget.height()), surface.strength)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setOpacity(frame.opacity)
-        painter.drawPixmap(QRectF(*panned_bounds(frame.bounds, surface.pan)), surface.pixmap, QRectF(surface.pixmap.rect()))
+        bounds = panned_bounds(frame.bounds, surface.pan, surface.zoom, (widget.width(), widget.height()))
+        painter.drawPixmap(QRectF(*bounds), surface.pixmap, QRectF(surface.pixmap.rect()))
     painter.end()
     surface.framePainted.emit()
 
@@ -52,6 +57,7 @@ class SlideSurface(QWidget):
         self._source = None
         self.rotation = 0
         self.pan = (0.0, 0.0)
+        self.zoom = 1.0
         self.entry = None
         self.progress = 0
         self.strength = 100
@@ -113,8 +119,15 @@ class SlideSurface(QWidget):
             self.pan = pan
             self.canvas.update()
 
+    def set_zoom(self, zoom):
+        """User zoom on top of the motion; the player animates it (SZ-1)."""
+        if zoom != self.zoom:
+            self.zoom = zoom
+            self.canvas.update()
+
     def reset_pan(self):
         self.pan = (0.0, 0.0)
+        self.zoom = 1.0
 
     def _rotated(self, pixmap):
         if not self.rotation:
