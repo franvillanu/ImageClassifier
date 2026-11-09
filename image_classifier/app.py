@@ -21,6 +21,7 @@ from PyQt6.QtCore import (
     QThread, QCoreApplication, QRect, QRectF, QRunnable, pyqtSlot, QThreadPool, QStandardPaths, QBuffer, QIODevice
 )    
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 # Windows Shell (COM + open in Explorer); imaging (sharpen, loader); config; workers; UI
 from image_classifier.shell_win import open_folder_and_select_item
@@ -209,6 +210,8 @@ class PhotoViewer(QMainWindow):
         self.setup_shortcuts()
         self.floating_menu.settings_button.clicked.connect(self.open_settings_overlay)
         self.floating_menu.brightness_button.clicked.connect(lambda: self.open_editor("adjust"))
+        # Before the first show: fullscreen keeps a 1px border so Windows never blacks out the screen (SPEC-001 FS-7)
+        enable_border_in_fullscreen(self)
         self.show()
         QTimer.singleShot(0, self.initialize_viewer)
         self.updateLanguage()
@@ -297,17 +300,15 @@ class PhotoViewer(QMainWindow):
         self.save_config()
 
     def toggle_fullscreen(self, *, make_cover: bool = True):
-        """Enter/leave fullscreen with as few repaints as possible and never an empty frame.
+        """Enter/leave fullscreen with as few repaints as possible.
 
-        ``make_cover`` is kept for older callers and ignored. A copy of the last rendered frame
-        covers the viewport (as a *child* widget, not a separate window) until the GL viewport has
-        painted at the new size, because a resized QOpenGLWidget starts with an empty framebuffer
-        (SPEC-001 FS-6). The state change itself runs with updates off (FS-4).
+        ``make_cover`` is kept for older callers and ignored. The state change runs with updates
+        off (SPEC-001 FS-4). The window was created with Qt's border-in-fullscreen flag (see
+        ``__init__``), so Windows keeps compositing it instead of blacking out the screen (FS-7).
         """
         leaving = self.isFullScreen()
 
         self.hide_all_tooltips()
-        self._show_transition_cover()
         self.setUpdatesEnabled(False)
         try:
             if not leaving:
@@ -356,55 +357,7 @@ class PhotoViewer(QMainWindow):
                 self.image_viewer.adjustToFit()
             self.update_floating_controls()
         finally:
-            cover = getattr(self, "_transition_cover", None)
-            if cover is not None:
-                cover.setGeometry(self.rect())
-                cover.raise_()
             self.setUpdatesEnabled(True)
-
-    # -- transition cover (FS-6) ------------------------------------------------
-    _transition_cover = None
-
-    def _show_transition_cover(self):
-        """Cover the viewport with its last frame until it has painted at the new size."""
-        self._drop_transition_cover()
-        viewport = self.image_viewer.viewport()
-        frame = None
-        try:
-            if isinstance(viewport, QOpenGLWidget) and viewport.isValid():
-                frame = QPixmap.fromImage(viewport.grabFramebuffer())
-        except Exception:
-            frame = None
-        if frame is None or frame.isNull():
-            frame = self.grab()
-        cover = QLabel(self)
-        cover.setObjectName("TransitionCover")
-        cover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        cover.setScaledContents(True)
-        cover.setPixmap(frame)
-        cover.setGeometry(self.rect())
-        cover.show()
-        cover.raise_()
-        self._transition_cover = cover
-        # Remove it once the viewport has really painted at the new size; the timer is a safety net.
-        self._cover_filter_target = viewport
-        viewport.installEventFilter(self)
-        self._cover_painted_after_resize = False
-        QTimer.singleShot(300, self._drop_transition_cover)
-
-    def _drop_transition_cover(self):
-        cover = self._transition_cover
-        self._transition_cover = None
-        target = getattr(self, "_cover_filter_target", None)
-        if target is not None:
-            try:
-                target.removeEventFilter(self)
-            except RuntimeError:
-                pass
-            self._cover_filter_target = None
-        if cover is not None:
-            cover.hide()
-            cover.deleteLater()
 
     # ------------------------------------------------------------------
     # 2)  exit_fullscreen  – used by ❌ button and F11
@@ -436,19 +389,6 @@ class PhotoViewer(QMainWindow):
             QTimer.singleShot(30, self._leave_fullscreen_clickaway)
             return True
         return super().event(ev)
-
-    def eventFilter(self, obj, ev):
-        # Viewport painted at the new size: the cover can go (after this paint has been presented).
-        if (
-            obj is getattr(self, "_cover_filter_target", None)
-            and ev.type() == QEvent.Type.Paint
-            and self._transition_cover is not None
-        ):
-            if self._cover_painted_after_resize:
-                QTimer.singleShot(0, self._drop_transition_cover)
-            else:
-                self._cover_painted_after_resize = True
-        return super().eventFilter(obj, ev)
 
     def updateLanguage(self):
         lang = self.current_language

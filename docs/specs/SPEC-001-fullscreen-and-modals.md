@@ -17,7 +17,8 @@ as flicker; entering and leaving fullscreen flashed. It is more noticeable now t
 | FS-3 | The exit button is visible only in fullscreen; `exit_fullscreen()` (Esc, button, click-away) leaves fullscreen and hides it. | Keeps the exit affordance consistent with the state. |
 | FS-4 | The repaint freeze used during the state change is always lifted, even if a step raises. | A leaked `setUpdatesEnabled(False)` leaves a frozen window. |
 | FS-5 | Fullscreen is left by click-away only when the application loses focus to another application. Opening our own dialog, the slideshow (settings dialog and player), the editor or a message never leaves fullscreen, and fullscreen is still on when they close. | The click-away rule fired on any `WindowDeactivate`, so pressing F5 in fullscreen dropped the main window out of fullscreen before the player even opened (measured: `main fs=False max=True` right after launch). |
-| FS-6 | A fullscreen change never shows an empty frame: a copy of the last rendered frame covers the viewport, as a child widget of the main window, until the viewport has painted at the new size, with a short safety timeout. | A resized `QOpenGLWidget` starts with an empty framebuffer, so the first frame at the new size is black ("lights out, lights on"). Removing the old cover window exposed this; the new cover is a child, so it adds no window and no extra repaint on hide. |
+| FS-6 | (retired 2026-11-09) Child cover showing the last frame during the change. | Falsified by user testing: the black wall stayed. The cause was not an empty framebuffer but Windows switching the window into direct fullscreen presentation (FS-7). |
+| FS-7 | Every fullscreen window that renders with OpenGL (main viewer, slideshow player) carries a 1-pixel `WS_BORDER` while fullscreen, applied before its first frame at fullscreen size, so Windows keeps compositing it instead of switching it to direct fullscreen presentation. | A borderless popup covering the whole monitor with an OpenGL surface is switched by Windows/DWM into direct (independent flip / exclusive-like) presentation. Each switch in or out blacks the screen and redraws everything: the "black wall" on entering fullscreen, and one flash each time another window (slideshow settings dialog, player) appears over or replaces it. Measured style while fullscreen: `0x96080000` (`WS_POPUP`, no `WS_BORDER`). Qt handles it with its `HasBorderInFullScreen` flag; PyQt6 has no setter, but Qt's Windows plugin reads the window property `_q_has_border_in_fullscreen` when the native window is created, so `ui/fullscreen_border.py` sets it and recreates the native window before the first show. Setting `WS_BORDER` by hand was tried and rejected: Qt then reported the window as not fullscreen. |
 | OV-1 | The Settings overlay appears complete in one step: panel positioned before the overlay is shown, and no `processEvents()` during opening. | Showing the dim layer first, pumping events, then showing the panel produced two recompositions of the GL window. |
 | OV-2 | Overlays and tooltips are child widgets of the main window, never top-level windows. | A top-level window deactivates the main window, which exits fullscreen (`WindowDeactivate` handler) and recomposes the desktop. |
 | OV-3 | Closing the Settings overlay removes it and re-enables the floating menu and shortcuts. | Prevents a dead UI after a modal closes. |
@@ -57,6 +58,10 @@ Removing the cover window (FS-1) made maximized to fullscreen flash black, and p
 
 All 49 actions keep fullscreen except the explicit F11/fullscreen button. Option toggles (L, N, D, Z, C, Ctrl+Z, Ctrl+C) and arrow buttons: 1-2 repaint waves (were 11-17). Remaining highest: Export 3, Help 3, Shift+C 3, Filter 2 (+2 nested `processEvents`), slideshow settings dialog 3 resizes (the dialog's own window). F5 from fullscreen: main stays fullscreen through settings dialog, player and the player's own settings (was `fs=False` right after launch).
 
+### FS-7 verification (real app, 2026-11-09)
+
+Isolated GL window: without the flag fullscreen style `0x96080000` (no border); with it `0x96880000` (border), `isFullScreen()` true, GL renders, stable over repeated toggles. Full app flow, window in the foreground: main fullscreen bordered; F5 opens the player fullscreen and bordered while the main window stays fullscreen; Space and the pause button pause and resume; player settings pause on open and resume on cancel, fullscreen kept; Esc closes the player, main still fullscreen. What these numbers cannot show is the monitor itself: screen grabs read the composed image, so the absence of the black wall still needs the user's eyes.
+
 ## Decision log
 
 - 2026-11-09 — Removed the cover window instead of tuning it: fewer windows beats masking. Kept the
@@ -69,7 +74,7 @@ All 49 actions keep fullscreen except the explicit F11/fullscreen button. Option
 
 ## Open items (specify and test before changing)
 
-- FS-6 (no black frame on maximized to fullscreen) is implemented from the mechanism and is NOT pixel-verified: needs the user's eyes or a capture faster than the ~10 Hz available here.
+- FS-7 rests on Qt's documented Windows behaviour and the measured window style; the presentation-mode switch itself cannot be captured with screen grabs (they read the composed image). Needs the user's eyes.
 
 - Help, About, Filter, Brightness overlays still use staged show or `processEvents()` (architecture debt §9).
 - Tooltip creation per hover (new widget + fade) could be a single reused widget.

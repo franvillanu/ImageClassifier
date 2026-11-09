@@ -17,7 +17,7 @@ if sys.platform != "win32":
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-6"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7"]
 
 
 @pytest.fixture
@@ -242,7 +242,9 @@ def test_ep4_message_is_removed_and_deleted_after_duration(window, qapp):
         qapp.processEvents()
         time.sleep(0.005)
     assert window.ephemeral_messages == []
-    assert not popup.isVisible()
+    from PyQt6 import sip
+
+    assert sip.isdeleted(popup) or not popup.isVisible()
 
 
 def test_fs5_own_windows_do_not_trigger_click_away(window, qapp, monkeypatch):
@@ -293,25 +295,36 @@ def test_fs5_slideshow_launch_keeps_main_fullscreen(window, qapp, monkeypatch):
     window.exit_fullscreen()
 
 
-def test_fs6_transition_cover_is_a_child_and_goes_away(window, qapp):
-    """FS-6: a cover widget exists during the change, is a child (not a window) and is removed."""
-    import time
+def test_fs7_border_flag_is_set_before_first_show(monkeypatch, qapp):
+    """FS-7: the helper creates the native window, sets Qt's border-in-fullscreen flag and recreates it."""
+    from PyQt6.QtGui import QGuiApplication
+    from PyQt6.QtWidgets import QWidget
+    from image_classifier.ui import fullscreen_border as fb
 
-    window.toggle_fullscreen()
-    cover = window._transition_cover
-    assert cover is not None
-    assert not cover.isWindow() and cover.parentWidget() is window
-    assert cover.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-    end = time.monotonic() + 1.0
-    while window._transition_cover is not None and time.monotonic() < end:
-        qapp.processEvents()
-        time.sleep(0.005)
-    assert window._transition_cover is None
-    assert not cover.isVisible()
-    window.toggle_fullscreen()
-    qapp.processEvents()
-    end = time.monotonic() + 1.0
-    while window._transition_cover is not None and time.monotonic() < end:
-        qapp.processEvents()
-        time.sleep(0.005)
-    assert window._transition_cover is None
+    monkeypatch.setattr(QGuiApplication, "platformName", staticmethod(lambda: "windows"))
+    widget = QWidget()
+    assert fb.enable_border_in_fullscreen(widget) is True
+    assert fb.has_border_in_fullscreen(widget)
+    widget.show()
+    with pytest.raises(RuntimeError):
+        fb.enable_border_in_fullscreen(widget)  # too late once shown: the flag is read at creation
+    widget.close()
+
+
+def test_fs7_main_window_and_player_have_the_flag(window, qapp, tmp_path, monkeypatch):
+    """FS-7: both OpenGL windows (main viewer, slideshow player) are created with the flag on Windows."""
+    import image_classifier.app as app_module
+    import image_classifier.slideshow.player as player_module
+    from image_classifier.slideshow.settings import SlideshowSettings
+
+    calls = []
+    monkeypatch.setattr(app_module, "enable_border_in_fullscreen", lambda w: calls.append(("main", w.isVisible())))
+    monkeypatch.setattr(player_module, "enable_border_in_fullscreen", lambda w: calls.append(("player", w.isVisible())))
+    main = app_module.PhotoViewer()
+    path = tmp_path / "s.jpg"
+    Image.new("RGB", (400, 300), (90, 90, 90)).save(path)
+    player = player_module.PlayerWindow([str(path)], str(path), SlideshowSettings(3, 100, False, True, True), raster=True)
+    assert ("main", False) in calls and ("player", False) in calls  # applied before the first show
+    player.close()
+    main._marked_save_timer.stop()
+    main.close()

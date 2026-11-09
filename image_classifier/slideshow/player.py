@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDi
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.loader import preview_dimension_for
+from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen
 from image_classifier.ui.icons import IconFactory
 from .controller import SlideshowController
 from .loading import SlideLoader
@@ -166,6 +167,8 @@ class PlayerWindow(QDialog):
         self.surface.fallbackActivated.connect(self._install_tracking)
         self._install_tracking()
         QApplication.instance().aboutToQuit.connect(self._shutdown)
+        # Fullscreen keeps a 1px border so Windows never blacks out the screen (SPEC-001 FS-7)
+        enable_border_in_fullscreen(self)
         QTimer.singleShot(0, self._start)
 
     def _first_frame(self):
