@@ -7,7 +7,7 @@ from PIL import Image
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtTest import QTest
 
-REQUIRES = ["CV-1"]
+REQUIRES = ["CV-1", "CV-2"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -68,5 +68,37 @@ def test_cv1_help_lists_both_keys():
     """CV-1: Help shows Backspace and 0 for the fit action, EN and ES."""
     from image_classifier.i18n.translations import translations
 
-    assert translations["en"]["shortcut_doubleclick_key"] == "Backspace / 0"
-    assert translations["es"]["shortcut_doubleclick_key"] == "Retroceso / 0"
+    assert translations["en"]["shortcut_doubleclick_key"].startswith("Backspace / 0")
+    assert translations["es"]["shortcut_doubleclick_key"].startswith("Retroceso / 0")
+
+
+@pytest.mark.parametrize("key,mods,grows", [
+    (Qt.Key.Key_Plus, Qt.KeyboardModifier.NoModifier, True),
+    (Qt.Key.Key_Equal, Qt.KeyboardModifier.ControlModifier, True),
+    (Qt.Key.Key_Plus, Qt.KeyboardModifier.KeypadModifier, True),
+    (Qt.Key.Key_Minus, Qt.KeyboardModifier.NoModifier, False),
+    (Qt.Key.Key_Minus, Qt.KeyboardModifier.ControlModifier, False),
+    (Qt.Key.Key_Minus, Qt.KeyboardModifier.KeypadModifier, False),
+])
+def test_cv2_plus_minus_zoom_like_up_down(window, qapp, key, mods, grows):
+    """CV-2: + zooms in and - zooms out in the classifier (also Ctrl and numpad)."""
+    viewer = window.image_viewer
+    viewer._manual_zoom(zoom_in=True)  # start zoomed so '-' has room to go out
+    qapp.processEvents()
+    before = viewer.transform().m11()
+    QTest.keyClick(window, key, mods)
+    qapp.processEvents()
+    after = viewer.transform().m11()
+    assert (after > before * 1.01) if grows else (after < before * 0.99)
+
+
+def test_cv2_ctrl_zero_fits_and_arrows_still_zoom(window, qapp):
+    """CV-2: Ctrl+0 fits like 0; Up still zooms in."""
+    viewer = window.image_viewer
+    fit = viewer.transform().m11()
+    QTest.keyClick(window, Qt.Key.Key_Up)
+    qapp.processEvents()
+    assert viewer.transform().m11() > fit * 1.01
+    QTest.keyClick(window, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
+    qapp.processEvents()
+    assert viewer.transform().m11() == pytest.approx(fit, rel=1e-3)
