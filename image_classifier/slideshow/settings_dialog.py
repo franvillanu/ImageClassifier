@@ -184,18 +184,13 @@ class SettingsDialog(QDialog):
         root.addLayout(buttons)
 
     def _shortcuts(self, t):
-        """A compact two-column cheat sheet of the keys that work while the slideshow plays."""
+        """Compact cheat sheet: three columns, each keycap row above its small label."""
         card = QFrame()
         card.setObjectName("card")
-        outer = QVBoxLayout(card)
-        outer.setContentsMargins(20, 12, 20, 14)
-        outer.setSpacing(10)
-        heading = QLabel(t["slideshow_shortcuts"])
-        heading.setObjectName("section")
-        outer.addWidget(heading)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(24)
-        grid.setVerticalSpacing(10)
+        grid = QGridLayout(card)
+        grid.setContentsMargins(20, 12, 20, 12)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(12)
         entries = (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
                    (("←", "→"), t["slideshow_key_steps"]),
                    (("↑", "↓"), t["slideshow_key_speed"]),
@@ -203,22 +198,24 @@ class SettingsDialog(QDialog):
                    (("Esc",), t["slideshow_close"]),
                    ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))
         for index, (keys, text) in enumerate(entries):
-            cell = QHBoxLayout()
+            cell = QVBoxLayout()
             cell.setSpacing(6)
+            row = QHBoxLayout()
+            row.setSpacing(4)
             for key in keys:
                 chip = QLabel(key)
                 chip.setObjectName("key")
                 chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 chip.setMinimumWidth(28)
-                cell.addWidget(chip)
+                row.addWidget(chip)
+            row.addStretch(1)
+            cell.addLayout(row)
             label = QLabel(text)
-            label.setObjectName("keyText")
-            cell.addSpacing(4)
-            cell.addWidget(label, 1)
-            grid.addLayout(cell, index % 3, index // 3)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        outer.addLayout(grid)
+            label.setObjectName("hint")
+            cell.addWidget(label)
+            grid.addLayout(cell, index // 3, index % 3)
+        for column in range(3):
+            grid.setColumnStretch(column, 1)
         return card
 
     def _slider(self, layout, text, low, high, value, fmt):

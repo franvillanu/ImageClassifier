@@ -791,6 +791,15 @@ class PhotoViewer(QMainWindow):
                 ],
             ),
             (
+                t["help_cat_slideshow"],
+                [
+                    (t["shortcut_slideshow_key"], t["shortcut_slideshow_desc"]),
+                    (t["shortcut_slideshow_pause_key"], t["shortcut_slideshow_pause_desc"]),
+                    (t["shortcut_slideshow_steps_key"], t["shortcut_slideshow_steps_desc"]),
+                    (t["shortcut_slideshow_speed_key"], t["shortcut_slideshow_speed_desc"]),
+                ],
+            ),
+            (
                 t["help_cat_crop_function"],
                 [
                     (t["shortcut_crop_reset_key"], t["shortcut_crop_reset_desc"]),
