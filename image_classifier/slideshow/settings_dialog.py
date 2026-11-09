@@ -4,6 +4,7 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                             QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
+from image_classifier.ui.icons import IconFactory
 from image_classifier.ui.settings_panel import ToggleSwitch
 from .settings import SlideshowSettings
 
@@ -94,7 +95,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         t = translations.get(language, translations["en"])
         self.setWindowTitle(t["slideshow_settings_title"])
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(600)
         self.setStyleSheet(STYLE)
         root = QVBoxLayout(self)
         root.setContentsMargins(26, 20, 26, 20)
@@ -183,10 +184,31 @@ class SettingsDialog(QDialog):
         """Compact cheat sheet: three columns, each keycap row above its small label."""
         card = QFrame()
         card.setObjectName("card")
-        grid = QGridLayout(card)
-        grid.setContentsMargins(20, 12, 20, 12)
-        grid.setHorizontalSpacing(16)
+        outer = QHBoxLayout(card)
+        outer.setContentsMargins(18, 12, 18, 12)
+        outer.setSpacing(14)
+        side = QVBoxLayout()
+        side.setSpacing(6)
+        side.setAlignment(Qt.AlignmentFlag.AlignTop)
+        icon = QLabel()
+        icon.setPixmap(IconFactory.get_icon("keyboard", 48).pixmap(24, 24))
+        title = QLabel(t["slideshow_shortcuts"])
+        title.setObjectName("hint")
+        title.setWordWrap(True)
+        side.addWidget(icon)
+        side.addWidget(title)
+        side_box = QWidget()
+        side_box.setFixedWidth(74)
+        side_box.setLayout(side)
+        outer.addWidget(side_box, 0, Qt.AlignmentFlag.AlignTop)
+        divider = QFrame()
+        divider.setObjectName("rule")
+        divider.setFixedWidth(1)
+        outer.addWidget(divider)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(12)
+        outer.addLayout(grid, 1)
         entries = (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
                    (("←", "→"), t["slideshow_key_steps"]),
                    (("↑", "↓"), t["slideshow_key_speed"]),

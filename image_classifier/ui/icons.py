@@ -19,6 +19,7 @@ class IconFactory:
               </g>
             </svg>
         """,
+        "keyboard": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="white" stroke-width="1.7"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>',
         "slideshow_play": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="none" stroke="white" stroke-width="1.7" stroke-linejoin="round"/></svg>',
         "slideshow_play_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z" fill="#171a20" stroke="#171a20" stroke-width="1.4" stroke-linejoin="round"/></svg>',
         "slideshow_pause_dark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="#171a20" stroke-width="2.6" stroke-linecap="round"/></svg>',
