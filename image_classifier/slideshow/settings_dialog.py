@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QGr
                             QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.ui.icons import IconFactory
+from image_classifier.ui.help_panel import CATEGORY_COLORS
 from image_classifier.ui.settings_panel import ToggleSwitch
 from .settings import SlideshowSettings
 
@@ -21,7 +22,7 @@ STYLE = f"""
     QLabel#value {{ color: #f4f6fa; font-size: 15px; font-weight: 600; }}
     QLabel#hint {{ color: #aeb6c3; font-size: 12px; }}
     QLabel#key {{ color: #f4f6fa; background: #1f232b; border: 1px solid #323843;
-        border-bottom: 2px solid #323843; border-radius: 7px; padding: 4px 11px; font-size: 12px; font-weight: 600; }}
+        border-bottom: 2px solid #323843; border-radius: 7px; padding: 5px 13px; font-size: 12px; font-weight: 600; }}
     QLabel#keyText {{ color: #c5ccd6; font-size: 13px; }}
     QLabel#section {{ color: #aeb6c3; font-size: 13px; }}
     QFrame#card {{ background: #20242b; border: 1px solid #2f3540; border-radius: 14px; }}
@@ -333,15 +334,23 @@ class SettingsDialog(QDialog):
                     ((t["slideshow_key_wheel"], "+", "−"), t["slideshow_key_zoom"]),
                     ((t["slideshow_key_drag"],), t["slideshow_key_pan"]),
                     (("⌫", "0"), t["slideshow_key_reset_view"]))))
-        for heading, entries in groups:
+        for (heading, entries), color in zip(groups, (CATEGORY_COLORS[0], CATEGORY_COLORS[2])):
             layout.addSpacing(10)
+            head_row = QHBoxLayout()  # dot + title in the Help panel's category colours
+            head_row.setSpacing(8)
+            dot = QLabel()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
             group = QLabel(heading)
             group.setObjectName("group")
-            layout.addWidget(group)
+            group.setStyleSheet(f"color: {color};")
+            head_row.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+            head_row.addWidget(group, 1)
+            layout.addLayout(head_row)
             for keys, text in entries:
                 row = QHBoxLayout()
                 row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(6)
+                row.setSpacing(10)
                 label = QLabel(text)
                 label.setObjectName("keyText")
                 row.addWidget(label, 1)
@@ -352,7 +361,7 @@ class SettingsDialog(QDialog):
                     chip.setMinimumWidth(34)
                     row.addWidget(chip)
                 holder = QWidget()
-                holder.setFixedHeight(38)
+                holder.setFixedHeight(48)
                 holder.setLayout(row)
                 layout.addWidget(holder)
         layout.addStretch(1)

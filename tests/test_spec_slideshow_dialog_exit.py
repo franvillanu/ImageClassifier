@@ -180,6 +180,8 @@ def test_sd5_one_column_grouped_in_english_and_spanish(dialog, qapp):
 
     texts, chips, heads = rows(dialog)
     assert heads == ["Viewer", "Photo"]
+    colours = [label.styleSheet() for label in dialog.shortcuts_card.findChildren(QLabel, "group")]
+    assert colours[0] != colours[1] and all("color: #" in c for c in colours)
     assert len(texts) == 11
     assert {label.text() for label in texts} >= {"Pause / resume", "Show controls", "Close", "Fullscreen"}
     assert len({label.mapTo(dialog, label.rect().topLeft()).x() for label in texts}) == 1
