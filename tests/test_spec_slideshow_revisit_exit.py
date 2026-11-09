@@ -150,7 +150,9 @@ def test_sx2_closing_on_the_starting_photo_leaves_the_classifier_untouched(class
     classifier.current_index = 2
     classifier.show_image()
     viewer = classifier.image_viewer
-    assert _wait(qapp, lambda: viewer._shown_load_id == viewer.current_load_id)
+    # wait for preview AND full resolution: a late full-resolution swap rescales a manual zoom
+    assert _wait(qapp, lambda: viewer._shown_load_id == viewer.current_load_id and viewer.full_resolution_ready
+                 and viewer.full_loader is None and not viewer._full_request_timer.isActive())
     classifier.image_viewer.zoom_factor = 1.7
     classifier.image_viewer.setTransform(QTransform().scale(1.7, 1.7))
     classifier.open_slideshow()

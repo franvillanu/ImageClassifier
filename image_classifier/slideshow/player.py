@@ -1,5 +1,7 @@
 """Modal viewing window and localized slideshow preferences."""
 import ctypes
+import math
+import time
 from dataclasses import replace
 import os
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
@@ -20,7 +22,9 @@ from .surface import SlideSurface
 
 class PlayerWindow(QDialog):
     settingsChanged = pyqtSignal(object)
-    closedOnPhoto = pyqtSignal(str)  # photo on screen when the slideshow closed (SPEC-002 SX-1)
+    # photo on screen when the slideshow closes, with its unrotated frame, emitted while the window is
+    # still visible so the classifier can switch before it disappears (SPEC-002 SX-1, SX-3)
+    closedOnPhoto = pyqtSignal(str, object)
 
     def __init__(self, playlist, starting_image, settings, parent=None, *, language="en", raster=False):
         super().__init__(parent)
@@ -167,6 +171,14 @@ class PlayerWindow(QDialog):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
+        # Ctrl+arrows: smooth panning driven per frame (SPEC-002 SP-1)
+        self._pan_held = set()
+        self._pan_target = (0.0, 0.0)
+        self._pan_last = 0.0
+        self.pan_timer = QTimer(self)
+        self.pan_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.pan_timer.setInterval(16)
+        self.pan_timer.timeout.connect(self._pan_tick)
         self.surface.fallbackActivated.connect(self._install_tracking)
         self._install_tracking()
         QApplication.instance().aboutToQuit.connect(self._shutdown)
@@ -211,6 +223,8 @@ class PlayerWindow(QDialog):
 
     def _present(self, entry, frame):
         self._last_presented = entry
+        self._pan_target = (0.0, 0.0)  # every presentation starts framed by its motion (SP-3)
+        self.surface.reset_pan()
         self.surface.present(entry, frame, self._rotations.get(entry.path, 0))
         self._message(os.path.basename(entry.path))
 
@@ -234,6 +248,62 @@ class PlayerWindow(QDialog):
         else:
             self._rotations.pop(entry.path, None)
         self.surface.set_rotation(angle)
+
+    # Smooth panning (SPEC-002 SP-1): the target moves (tap nudge, or continuously while held) and the
+    # photo eases toward it every frame, so taps and holds both glide instead of jumping.
+    PAN_TAP = 0.05    # fraction of the window a tap moves the target
+    PAN_SPEED = 0.5   # fraction of the window per second while held
+    PAN_EASE = 0.07   # seconds: how closely the photo follows the target
+    _PAN_KEYS = {Qt.Key.Key_Left: (1, 0), Qt.Key.Key_Right: (-1, 0), Qt.Key.Key_Up: (0, 1), Qt.Key.Key_Down: (0, -1)}
+
+    def _clamp_pan(self, x, y):
+        limit_x, limit_y = self.surface.width() / 2, self.surface.height() / 2
+        return max(-limit_x, min(limit_x, x)), max(-limit_y, min(limit_y, y))
+
+    def _handle_pan_key(self, event, pressed):
+        """True when the key event belongs to Ctrl+arrow panning (it is then consumed)."""
+        direction = self._PAN_KEYS.get(event.key())
+        if direction is None:
+            return False
+        if pressed and not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            return False
+        if not pressed and direction not in self._pan_held:
+            return False
+        if event.isAutoRepeat() or self._closing or self.surface.entry is None:
+            return True
+        if pressed:
+            self._pan_held.add(direction)
+            w, h = self.surface.width(), self.surface.height()
+            self._pan_target = self._clamp_pan(self._pan_target[0] + direction[0] * w * self.PAN_TAP,
+                                               self._pan_target[1] + direction[1] * h * self.PAN_TAP)
+            if not self.pan_timer.isActive():
+                self._pan_last = time.monotonic()
+                self.pan_timer.start()
+        else:
+            self._pan_held.discard(direction)
+        return True
+
+    def _pan_tick(self):
+        now = time.monotonic()
+        dt = min(0.05, max(0.0, now - self._pan_last))
+        self._pan_last = now
+        w, h = self.surface.width(), self.surface.height()
+        vx = sum(d[0] for d in self._pan_held) * w * self.PAN_SPEED
+        vy = sum(d[1] for d in self._pan_held) * h * self.PAN_SPEED
+        tx, ty = self._clamp_pan(self._pan_target[0] + vx * dt, self._pan_target[1] + vy * dt)
+        self._pan_target = (tx, ty)
+        follow = 1 - math.exp(-dt / self.PAN_EASE) if dt else 0
+        cx, cy = self.surface.pan
+        cx += (tx - cx) * follow
+        cy += (ty - cy) * follow
+        if not self._pan_held and abs(tx - cx) < 0.5 and abs(ty - cy) < 0.5:
+            self.surface.set_pan((tx, ty))
+            self.pan_timer.stop()
+            return
+        self.surface.set_pan((cx, cy))
+
+    def _stop_pan_keys(self):
+        self._pan_held.clear()
 
     def _message(self, text):
         self._status = text
@@ -409,6 +479,11 @@ class PlayerWindow(QDialog):
             self.hide_timer.start()
 
     def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            if self._handle_pan_key(event, event.type() == QEvent.Type.KeyPress):
+                return True
+        elif event.type() in (QEvent.Type.WindowDeactivate, QEvent.Type.FocusOut) and obj is self:
+            self._stop_pan_keys()  # a key released while another window had focus must not keep panning
         if event.type() in (QEvent.Type.MouseMove, QEvent.Type.FocusIn):
             self.reveal_controls()
         elif event.type() == QEvent.Type.MouseButtonDblClick and obj in (self.surface, self.surface.canvas):
@@ -458,12 +533,14 @@ class PlayerWindow(QDialog):
         self._closing = True
         shown = self.surface.entry
         if shown is not None:
-            self.closedOnPhoto.emit(shown.path)
+            source = self.surface._source
+            self.closedOnPhoto.emit(shown.path, source.toImage() if source is not None else None)
         self.timer.stop()
         self.hide_timer.stop()
         self.decode_refresh_timer.stop()
         self.notice_timer.stop()
         self.toast_timer.stop()
+        self.pan_timer.stop()
         self.controller.close()
         self.surface.release()
         self._prevent_sleep(False)

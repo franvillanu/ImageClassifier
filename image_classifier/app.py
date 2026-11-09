@@ -766,6 +766,7 @@ class PhotoViewer(QMainWindow):
                     (t["shortcut_slideshow_steps_key"], t["shortcut_slideshow_steps_desc"]),
                     (t["shortcut_slideshow_speed_key"], t["shortcut_slideshow_speed_desc"]),
                     (t["shortcut_slideshow_rotate_key"], t["shortcut_slideshow_rotate_desc"]),
+                    (t["shortcut_slideshow_pan_key"], t["shortcut_slideshow_pan_desc"]),
                 ],
             ),
             (
@@ -1910,7 +1911,7 @@ class PhotoViewer(QMainWindow):
         player.settingsChanged.connect(self._save_slideshow_settings)
         self._slideshow_start_path = selected
         self._slideshow_exit_path = None
-        player.closedOnPhoto.connect(lambda path: setattr(self, "_slideshow_exit_path", path))
+        player.closedOnPhoto.connect(self._slideshow_exit_on)
         player.finished.connect(self._slideshow_closed)
         player.show()
 
@@ -1918,14 +1919,24 @@ class PhotoViewer(QMainWindow):
         self.slideshow_settings = settings
         self.save_config()
 
+    def _slideshow_exit_on(self, path, frame=None):
+        """The slideshow is closing on ``path`` and is still on screen: switch now, from its frame,
+        so the photo is already there when the slideshow window disappears (SPEC-002 SX-1, SX-3).
+        Same photo as the start, or a photo no longer listed: leave everything as it was (SX-2)."""
+        self._slideshow_exit_path = path
+        if not path or path == getattr(self, "_slideshow_start_path", None) or path not in self.image_files:
+            return
+        if frame is not None:
+            ImageLoaderRunnable.seed_preview(path, self.image_viewer.preview_dimension(), frame)
+        self.current_index = self.image_files.index(path)
+        self._nav_direction = 1
+        self.show_image()
+        # Render it NOW, while the slideshow still covers the window: otherwise Windows reveals the
+        # classifier's last presented frame (the old photo) until the next paint, ~25-500 ms (SX-3).
+        self.repaint()
+
     def _slideshow_closed(self, result):
         self._slideshow_player = None
-        # Land on the photo that was on screen (SPEC-002 SX-1); same photo or none: untouched (SX-2)
-        exit_path = getattr(self, "_slideshow_exit_path", None)
-        if exit_path and exit_path != getattr(self, "_slideshow_start_path", None) and exit_path in self.image_files:
-            self.current_index = self.image_files.index(exit_path)
-            self._nav_direction = 1
-            self.show_image()
         self._slideshow_exit_path = None
         self.activateWindow()
         self.setFocus()

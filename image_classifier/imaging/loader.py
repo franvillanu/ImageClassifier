@@ -301,6 +301,21 @@ class ImageLoaderRunnable(QRunnable):
         return cls._preview_cache.get(cls._preview_key(image_path, max_dimension))
 
     @classmethod
+    def seed_preview(cls, image_path: str, max_dimension: int, image: QImage) -> bool:
+        """Store an already decoded frame as ``image_path``'s preview for ``max_dimension``.
+
+        Used when the slideshow closes so the classifier shows the same photo at once
+        (SPEC-002 SX-3). Larger frames are scaled down to the preview size; smaller ones are kept
+        as they are (the photo itself is that small)."""
+        if image is None or image.isNull() or max_dimension <= 0:
+            return False
+        if max(image.width(), image.height()) > max_dimension:
+            image = image.scaled(max_dimension, max_dimension, Qt.AspectRatioMode.KeepAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation)
+        cls._preview_cache.put(cls._preview_key(cls.normalize_path(image_path), max_dimension), image)
+        return True
+
+    @classmethod
     def get_cached_image(cls, image_path: str):
         return cls._full_cache.get(cls._memory_source_key(image_path))
 
