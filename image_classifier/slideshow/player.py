@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDi
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging.loader import preview_dimension_for
-from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen
+from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen, handle_frame_message
 from image_classifier.ui.icons import IconFactory
 from .controller import SlideshowController
 from .loading import SlideLoader
@@ -391,6 +391,13 @@ class PlayerWindow(QDialog):
             self.toggle_fullscreen()
             return True
         return super().eventFilter(obj, event)
+
+    def nativeEvent(self, event_type, message):
+        # Fullscreen frame painted black instead of Windows grey (SPEC-001 FS-8)
+        handled = handle_frame_message(self, message, "#000000")
+        if handled is not None:
+            return handled
+        return False, 0
 
     def changeEvent(self, event):
         super().changeEvent(event)

@@ -21,7 +21,7 @@ from PyQt6.QtCore import (
     QThread, QCoreApplication, QRect, QRectF, QRunnable, pyqtSlot, QThreadPool, QStandardPaths, QBuffer, QIODevice
 )    
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen
+from image_classifier.ui.fullscreen_border import enable_border_in_fullscreen, handle_frame_message, refresh_frame
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 # Windows Shell (COM + open in Explorer); imaging (sharpen, loader); config; workers; UI
 from image_classifier.shell_win import open_folder_and_select_item
@@ -358,6 +358,14 @@ class PhotoViewer(QMainWindow):
             self.update_floating_controls()
         finally:
             self.setUpdatesEnabled(True)
+
+    def nativeEvent(self, event_type, message):
+        # Fullscreen frame painted in the viewer background instead of Windows grey (SPEC-001 FS-8)
+        color = getattr(getattr(self, "image_viewer", None), "bg_color", "#000000")
+        handled = handle_frame_message(self, message, color)
+        if handled is not None:
+            return handled
+        return False, 0
 
     # ------------------------------------------------------------------
     # 2)  exit_fullscreen  – used by ❌ button and F11
@@ -4085,6 +4093,8 @@ class PhotoViewer(QMainWindow):
                 f"border: none; background-color: {bg};"
             )
             self.image_viewer.viewport().update()
+            if self.isFullScreen():
+                refresh_frame(self)  # frame colour follows the theme (FS-8)
 
         # 5) paint the central widget’s own background (under the dock margin)
         cw = self.centralWidget()

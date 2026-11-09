@@ -17,7 +17,7 @@ if sys.platform != "win32":
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8"]
 
 
 @pytest.fixture
@@ -328,3 +328,67 @@ def test_fs7_main_window_and_player_have_the_flag(window, qapp, tmp_path, monkey
     player.close()
     main._marked_save_timer.stop()
     main.close()
+
+
+def _msg(message_id):
+    import ctypes
+    import ctypes.wintypes as wt
+
+    msg = wt.MSG()
+    msg.message = message_id
+    return msg, ctypes.addressof(msg)
+
+
+class _FsWidget:
+    def __init__(self, fullscreen):
+        self.fs = fullscreen
+
+    def isFullScreen(self):
+        return self.fs
+
+    def winId(self):
+        return 42
+
+
+def test_fs8_frame_painted_in_background_colour_while_fullscreen():
+    """FS-8: WM_NCPAINT and WM_NCACTIVATE paint the frame in the given colour while fullscreen."""
+    from image_classifier.ui import fullscreen_border as fb
+
+    painted = []
+    painter = lambda hwnd, color: painted.append((hwnd, color))
+    keep_paint, address = _msg(fb.WM_NCPAINT)
+    assert fb.handle_frame_message(_FsWidget(True), address, "#212121", painter) == (True, 0)
+    keep_act, address = _msg(fb.WM_NCACTIVATE)
+    assert fb.handle_frame_message(_FsWidget(True), address, "#212121", painter) == (True, 1)
+    assert painted == [(42, "#212121"), (42, "#212121")]
+    assert fb.colorref("#212121") == 0x212121 and fb.colorref("#1A202C") == 0x2C201A
+
+
+def test_fs8_frame_left_to_windows_when_not_fullscreen_or_other_message():
+    """FS-8: windowed/maximized frames and unrelated messages are untouched; errors never escape."""
+    from image_classifier.ui import fullscreen_border as fb
+
+    painted = []
+    keep, address = _msg(fb.WM_NCPAINT)
+    assert fb.handle_frame_message(_FsWidget(False), address, "#000000", lambda *a: painted.append(a)) is None
+    keep2, address2 = _msg(0x000F)  # WM_PAINT
+    assert fb.handle_frame_message(_FsWidget(True), address2, "#000000", lambda *a: painted.append(a)) is None
+    assert painted == []
+
+    def boom(*_):
+        raise OSError("gdi failure")
+
+    assert fb.handle_frame_message(_FsWidget(True), address, "#000000", boom) is None
+
+
+def test_fs8_both_windows_route_native_events_through_the_frame_handler(window, qapp, monkeypatch):
+    """FS-8: the main window (theme colour) and the player (black) hand frame messages to the handler."""
+    import image_classifier.app as app_module
+    import image_classifier.slideshow.player as player_module
+
+    seen = []
+    monkeypatch.setattr(app_module, "handle_frame_message", lambda w, m, c: seen.append(("main", c)) or (True, 0))
+    monkeypatch.setattr(player_module, "handle_frame_message", lambda w, m, c: seen.append(("player", c)) or (True, 0))
+    assert window.nativeEvent(b"windows_generic_MSG", 0) == (True, 0)
+    assert player_module.PlayerWindow.nativeEvent(window, b"windows_generic_MSG", 0) == (True, 0)
+    assert ("main", window.image_viewer.bg_color) in seen and ("player", "#000000") in seen
