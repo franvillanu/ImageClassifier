@@ -210,6 +210,7 @@ class SettingsDialog(QDialog):
         entries = (((t["slideshow_key_space"],), t["slideshow_key_pause"]),
                    (("←", "→"), t["slideshow_key_steps"]),
                    (("↑", "↓"), t["slideshow_key_speed"]),
+                   (("R",), t["slideshow_key_rotate"]),
                    (("F11",), t["slideshow_fullscreen"]),
                    (("Esc",), t["slideshow_close"]),
                    ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))

@@ -1,6 +1,6 @@
 # SPEC-002 — Slideshow floating controls
 
-Status: active · Code: `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`)
+Status: active · Code: `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`, `rotate_current`), `slideshow/surface.py`
 Tests: `tests/test_spec_slideshow_controls.py`
 
 ## Problem (observed)
@@ -15,6 +15,11 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SC-2 | The first movement after the controls were hidden shows them once (bar, close button in fullscreen, cursor) and starts the auto-hide timer. | The reveal itself is the one legitimate change. |
 | SC-3 | The fullscreen/restore icon and the close button are only touched when the window mode actually changes. | `setIcon` and `raise_` repaint even when nothing changed. |
 | SC-4 | After auto-hide, the next movement reveals again (SC-2 path is not skipped by the fast path of SC-1). | Guards the optimisation against leaving the controls stuck hidden. |
+
+| SR-1 | Pressing R during the slideshow rotates the photo on screen 90° clockwise (to the right); each press adds 90° (0, 90, 180, 270, back to 0). Playback state and the photo's progress are unchanged. | User request: fix sideways photos while watching without stopping the show. |
+| SR-2 | The rotation is temporary: it belongs to that photo for the current slideshow only (it comes back rotated if the photo is shown again in the same run) and is never written to the file, to the classifier's per-photo rotation or to the config. A new slideshow starts unrotated. | "Temporarily": watching must never modify the user's photos. |
+| SR-3 | A rotated photo is fitted with its rotated proportions (a landscape photo turned 90° is fitted as portrait), and the rotation survives the switch from preview to full-resolution frame. | Otherwise the pan/zoom would fit the unrotated size and crop or letterbox wrongly, or the rotation would be lost when the sharper frame arrives. |
+| SR-4 | R appears in the slideshow settings shortcut sheet and in the Help shortcut list, in English and Spanish. | A shortcut nobody can discover does not exist for the user. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
