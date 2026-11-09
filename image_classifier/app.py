@@ -297,105 +297,64 @@ class PhotoViewer(QMainWindow):
         self.save_config()
 
     def toggle_fullscreen(self, *, make_cover: bool = True):
-        """
-        make_cover = True   → use fade-out overlay (❌, F11, etc.)
-        make_cover = False  → leave FS with NO overlay (click-away path)
+        """Enter/leave fullscreen with as few repaints as possible.
+
+        ``make_cover`` is kept for older callers and ignored: the old screenshot cover was a
+        separate always-on-top window whose hide forced yet another full-window repaint.
+        The state change itself runs with updates off, so the window repaints once at the end.
         """
         leaving = self.isFullScreen()
 
-        # 1 – pre-exit repaint (to flush GPU buffer)
-        if leaving:
-            self.image_viewer.viewport().repaint()
-            self.repaint()
-            QCoreApplication.processEvents(
-                QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
-            )
-
         self.hide_all_tooltips()
         self.setUpdatesEnabled(False)
+        try:
+            if not leaving:
+                # ---- ENTER ----
+                self._fs_was_maximized = self.isMaximized()
+                if not self._fs_was_maximized:
+                    self.stored_geometry = self.geometry()
 
-        cover = None
-        if make_cover:
-            cover = self.create_screenshot_cover()
-            QCoreApplication.processEvents()
+                # Try to disable Windows color management for consistent colors in fullscreen
+                try:
+                    import ctypes
+                    ICM_OFF = 1
+                    hwnd = int(self.winId())
+                    if hwnd:
+                        hdc = ctypes.windll.user32.GetDC(hwnd)
+                        if hdc:
+                            ctypes.windll.gdi32.SetICMMode(hdc, ICM_OFF)
+                            ctypes.windll.user32.ReleaseDC(hwnd, hdc)
+                except Exception:
+                    pass
 
-        # 2 – switch state
-        if not leaving:
-            # ---- ENTER ----
-            self.stored_geometry = self.geometry()
-            
-            # Try to disable Windows color management for consistent colors in fullscreen
-            # This may help reduce color differences between fullscreen and windowed mode
-            try:
-                import ctypes
-                from ctypes import wintypes
-                # ICM_OFF = 1, ICM_ON = 2, ICM_QUERY = 3
-                ICM_OFF = 1
-                gdi32 = ctypes.windll.gdi32
-                # Get window handle
-                hwnd = int(self.winId()) if hasattr(self, 'winId') else None
-                if hwnd:
-                    hdc = ctypes.windll.user32.GetDC(hwnd)
-                    if hdc:
-                        # Try to disable ICM for this device context
-                        gdi32.SetICMMode(hdc, ICM_OFF)
-                        ctypes.windll.user32.ReleaseDC(hwnd, hdc)
-            except Exception:
-                # If Windows API call fails, continue anyway
-                pass
-            
-            super().showFullScreen()
-            self.is_fullscreen = True
-            self.float_exit.show()
-            
-            # Force OpenGL context to refresh with sRGB color space
-            vp = self.image_viewer.viewport()
-            if isinstance(vp, QOpenGLWidget):
-                vp.makeCurrent()
-                vp.doneCurrent()
-                QTimer.singleShot(50, lambda: vp.update())
+                super().showFullScreen()
+                self.is_fullscreen = True
+                self.float_exit.show()
 
-        else:
-            # ---- EXIT ----
-            if not make_cover:
-                # hide window immediately so no flash
-                self.setWindowOpacity(0.0)
+                # Force OpenGL context to refresh with sRGB color space
+                vp = self.image_viewer.viewport()
+                if isinstance(vp, QOpenGLWidget):
+                    vp.makeCurrent()
+                    vp.doneCurrent()
+            else:
+                # ---- EXIT ---- one state change back to where we came from (no normal->geometry double resize)
+                if getattr(self, "_fs_was_maximized", False):
+                    super().showMaximized()
+                else:
+                    super().showNormal()
+                    if hasattr(self, "stored_geometry"):
+                        self.setGeometry(self.stored_geometry)
+                self.is_fullscreen = False
+                self.float_exit.hide()
 
-            super().showNormal()
-            if hasattr(self, "stored_geometry"):
-                self.setGeometry(self.stored_geometry)
-            self.is_fullscreen = False
-            self.float_exit.hide()
-
-            if not make_cover:
-                # restore opacity and force a repaint
-                self.setWindowOpacity(1.0)
-                self.image_viewer.viewport().repaint()
-                self.repaint()
-                QCoreApplication.processEvents(
-                    QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
-                )
-
-        self.setUpdatesEnabled(True)
-
-        # 3 – fade overlay (only if we created one)
-        if cover is not None:
-            effect = QGraphicsOpacityEffect(cover)
-            cover.setGraphicsEffect(effect)
-            anim = QPropertyAnimation(effect, b"opacity", cover)
-            anim.setDuration(50)
-            anim.setStartValue(1.0)
-            anim.setEndValue(0.0)
-            anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-            anim.finished.connect(lambda: (cover.hide(), cover.deleteLater()))
-            anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
-
-        # 4 – house-keeping
-        if not self.floating_menu.isVisible():
-            self.floating_menu.show()
-        if self.image_viewer.auto_fit:
-            self.image_viewer.adjustToFit()
-        self.update_floating_controls()
+            # house-keeping while updates are still off, so it lands in the same repaint
+            if not self.floating_menu.isVisible():
+                self.floating_menu.show()
+            if self.image_viewer.auto_fit:
+                self.image_viewer.adjustToFit()
+            self.update_floating_controls()
+        finally:
+            self.setUpdatesEnabled(True)
 
     # ------------------------------------------------------------------
     # 2)  exit_fullscreen  – used by ❌ button and F11
@@ -428,23 +387,6 @@ class PhotoViewer(QMainWindow):
             QTimer.singleShot(10, self._leave_fullscreen_clickaway)
             return True
         return super().event(ev)
-
-    def create_screenshot_cover(self):
-        viewport = self.image_viewer.viewport()
-        if isinstance(viewport, QOpenGLWidget):
-            viewport.makeCurrent()
-            from OpenGL import GL
-            GL.glFinish()
-            viewport.doneCurrent()
-
-        pix = self.grab()
-        label = QLabel(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        label.setPixmap(pix)
-        label.setGeometry(self.geometry())
-        label.show()
-        label.raise_()
-        return label
 
     def updateLanguage(self):
         lang = self.current_language
@@ -570,20 +512,12 @@ class PhotoViewer(QMainWindow):
                 ev.accept()
         self.settings_overlay.mousePressEvent = overlay_mousePressEvent
 
-        # We want the first appearance to anchor near the settings button:
-        container.hide()
-        self.settings_overlay.show()
-        self.settings_overlay.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-
-        self.settings_overlay.raise_()
-        QApplication.processEvents()
-
-        # Then place it next to the floating_menu.settings_button, like before
+        # Place the panel next to the settings button BEFORE anything is shown, so the overlay
+        # and its panel appear in a single paint (no dim-only frame, no mid-open processEvents).
         btn_local_pos = self.floating_menu.settings_button.pos()
         pos_in_main = self.floating_menu.mapTo(self, btn_local_pos)
         x = pos_in_main.x() + self.floating_menu.settings_button.width() + 15
         y = pos_in_main.y() - 170
-        # If that goes offscreen, clamp it:
         if y < 0:
             y = 0
         if x + container.width() > self.settings_overlay.width():
@@ -591,12 +525,13 @@ class PhotoViewer(QMainWindow):
         if y + container.height() > self.settings_overlay.height():
             y = self.settings_overlay.height() - container.height() - 20
         y = max(y, 20) if container.height() <= self.settings_overlay.height() - 40 else 20
-
         container.move(x, y)
-        container.show()
-        container.raise_()
 
-    
+        self.settings_overlay.show()
+        container.show()
+        self.settings_overlay.raise_()
+        self.settings_overlay.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
     def close_settings_overlay(self):
         if hasattr(self, "settings_overlay") and self.settings_overlay is not None:
             self.settings_overlay.hide()

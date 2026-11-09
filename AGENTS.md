@@ -29,6 +29,21 @@
 - `.cursor/rules/git-branch-gate.mdc` - Branch creation rules
 - `.cursor/rules/git-commit-push-gate.mdc` - Commit/push rules
 
+## Specs-Driven Development (MANDATORY)
+
+Behaviour is defined in a spec, proven by a test, then implemented. Full process: [docs/specs/README.md](docs/specs/README.md); system map: [docs/specs/ARCHITECTURE.md](docs/specs/ARCHITECTURE.md).
+
+**For every change, in order:**
+
+1. Read `docs/specs/ARCHITECTURE.md` and the spec of the area you touch. For bugs, diagnose with evidence first (observed symptom, measurement, hypothesis); never present a guess as the cause.
+2. Add or change the requirement (`| XX-n | requirement | why |`) in a `docs/specs/SPEC-*.md` **before** the code. New area without a spec: write it first and add it to the README index.
+3. Write the test citing the requirement ID in `tests/test_spec_*.py`; for a bug fix, show it fails on the old behaviour.
+4. Implement, then run `py -m pytest -q`. `tests/test_spec_traceability.py` must pass (every requirement has a test, no test cites an unknown ID).
+5. UI/timing behaviour cannot be proven offscreen: measure it in the real app (event-count method in the specs README) or say plainly it is unverified.
+6. Update the spec's Evidence/Decision log, add the release-notes line, commit and push on the session branch.
+
+Never delete or weaken a spec test to make a change pass: change the spec first, with the reason.
+
 ## Release notes (MANDATORY)
 
 The release script (`.vscode/pr_create_merge_update.ps1` → `Release.bat`) bumps the version automatically but **stops if `docs/release_notes.txt` has no entry for the new version**. Customers see those notes in the app, so they are written by hand.
