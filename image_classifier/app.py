@@ -791,6 +791,15 @@ class PhotoViewer(QMainWindow):
                 ],
             ),
             (
+                t["help_cat_slideshow"],
+                [
+                    (t["shortcut_slideshow_key"], t["shortcut_slideshow_desc"]),
+                    (t["shortcut_slideshow_pause_key"], t["shortcut_slideshow_pause_desc"]),
+                    (t["shortcut_slideshow_steps_key"], t["shortcut_slideshow_steps_desc"]),
+                    (t["shortcut_slideshow_speed_key"], t["shortcut_slideshow_speed_desc"]),
+                ],
+            ),
+            (
                 t["help_cat_crop_function"],
                 [
                     (t["shortcut_crop_reset_key"], t["shortcut_crop_reset_desc"]),
@@ -1143,6 +1152,7 @@ class PhotoViewer(QMainWindow):
     def show_floating_menu(self):
         if not (hasattr(self, "menu_button") and hasattr(self, "floating_menu")):
             return
+        self.floating_menu.slideshow_button.setEnabled(bool(self.image_files))
         self.floating_menu.show()
         QApplication.processEvents()
         left_margin = -5
@@ -1598,6 +1608,7 @@ class PhotoViewer(QMainWindow):
         layout = QHBoxLayout(container)
         self.update_scroll_area_margins()
         self.floating_menu = FloatingMenu(self)
+        self.floating_menu.slideshow_button.clicked.connect(self.open_slideshow)
         self.floating_menu.open_button.clicked.connect(self.open_directory)
         self.floating_menu.export_button.clicked.connect(self.open_export_overlay)
         self.floating_menu.fullscreen_button.clicked.connect(self.toggle_fullscreen)
@@ -1748,6 +1759,7 @@ class PhotoViewer(QMainWindow):
         # If the floating controls aren't created yet, exit early.
         if not hasattr(self, "float_favorite"):
             return
+        self.floating_menu.slideshow_button.setEnabled(bool(self.image_files))
 
         # Should we skip ★ updates right now?
         skip_star = getattr(self, "image_loading", False)
@@ -1840,10 +1852,15 @@ class PhotoViewer(QMainWindow):
         self.all_tooltips.clear()
 
     def load_config(self):
+        from image_classifier.slideshow.settings import SlideshowSettings
+        self.slideshow_settings = SlideshowSettings()
+        self._preserved_config = {}
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                self._preserved_config = dict(config)
+                self.slideshow_settings = SlideshowSettings.from_dict(config.get('slideshow'))
                 self.load_last_folder         = config.get('load_last_folder', False)
                 self.current_directory        = config.get('last_directory', None) if self.load_last_folder else None
                 self.show_all_images          = config.get('show_all_images', True)
@@ -1899,9 +1916,48 @@ class PhotoViewer(QMainWindow):
             self.preview_cache_enabled    = True
             self.preview_cache_limit_mb   = 1024
 
+    def open_slideshow(self):
+        existing = getattr(self, '_slideshow_player', None)
+        if existing is not None:
+            if existing.isMinimized():
+                existing.setWindowState(existing.windowState() & ~Qt.WindowState.WindowMinimized)
+            existing.raise_()
+            existing.activateWindow()
+            return
+        if not self.image_files:
+            return
+        from image_classifier.slideshow.player import PlayerWindow, SettingsDialog
+        snapshot = tuple(self.image_files)
+        selected = getattr(self, '_current_path', None)
+        if selected not in snapshot:
+            selected = snapshot[max(0, min(self.current_index, len(snapshot)-1))]
+        dialog = SettingsDialog(self.slideshow_settings, self.current_language, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.slideshow_settings = dialog.settings()
+        self.save_config()
+        player = PlayerWindow(snapshot, selected, self.slideshow_settings, self, language=self.current_language)
+        self._slideshow_player = player
+        player.settingsChanged.connect(self._save_slideshow_settings)
+        player.finished.connect(self._slideshow_closed)
+        player.show()
+
+    def _save_slideshow_settings(self, settings):
+        self.slideshow_settings = settings
+        self.save_config()
+
+    def _slideshow_closed(self, result):
+        self._slideshow_player = None
+        self.activateWindow()
+        self.setFocus()
+
     def save_config(self):
         try:
-            config = {
+            previous_slideshow = getattr(self, '_preserved_config', {}).get('slideshow', {})
+            if not isinstance(previous_slideshow, dict):
+                previous_slideshow = {}
+            config = {**getattr(self, '_preserved_config', {}),
+                'slideshow': {**previous_slideshow, **self.slideshow_settings.to_dict()},
                 'load_last_folder':        self.load_last_folder,
                 'last_directory':          self.current_directory,
                 'show_all_images':         self.show_all_images,
@@ -1983,6 +2039,7 @@ class PhotoViewer(QMainWindow):
             )
 
     def setup_shortcuts(self):
+        QShortcut(QKeySequence("F5"), self, self.open_slideshow)
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, self.show_previous_image)
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, self.show_next_image)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, lambda: self.image_viewer._manual_zoom(True))
@@ -2192,6 +2249,7 @@ class PhotoViewer(QMainWindow):
         self.update_floating_controls()
 
     def show_image(self, reset_zoom=None, preserve_zoom=False):
+        self.floating_menu.slideshow_button.setEnabled(bool(self.image_files))
         # ——— Per-image history & modified-flag setup ———
         if self.image_files:
             path = self.image_files[self.current_index]
@@ -2712,14 +2770,14 @@ class PhotoViewer(QMainWindow):
         button_layout = QHBoxLayout()
         main_layout.addLayout(button_layout)
         export_text = f"{t['export_favorites']} ({len(self.favorites)})"
-        ok_button = QPushButton(export_text, container)
-        ok_button.setObjectName("exportBtn")
-        ok_button.setFixedHeight(38)
-        button_layout.addWidget(ok_button)
         cancel_button = QPushButton(t["cancel"], container)
         cancel_button.setObjectName("cancelBtn")
         cancel_button.setFixedHeight(38)
         button_layout.addWidget(cancel_button)
+        ok_button = QPushButton(export_text, container)
+        ok_button.setObjectName("exportBtn")
+        ok_button.setFixedHeight(38)
+        button_layout.addWidget(ok_button)
         ok_button.setDefault(True)
         ok_button.setAutoDefault(True)
         def is_valid_folder_name(name: str) -> bool:

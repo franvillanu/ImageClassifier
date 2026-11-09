@@ -101,6 +101,14 @@ class FloatingMenu(QWidget):
         self.settings_button.setIconSize(QSize(36, 36))
         self.settings_button.setFixedSize(50, 50)
 
+        self.slideshow_button = QPushButton()
+        self.slideshow_button.setIcon(IconFactory.get_icon("slideshow", 36))
+        self.slideshow_button.setIconSize(QSize(36, 36))
+        self.slideshow_button.setAccessibleName(t["slideshow"])
+        self._set_tooltip(self.slideshow_button, t, "slideshow")
+        self.slideshow_button.setFixedSize(50, 50)
+        self.slideshow_button.setEnabled(False)
+
         self.crop_button = QPushButton(self)
         self._set_tooltip(self.crop_button, t, "crop")
         self.crop_button.setFixedSize(50, 50)
@@ -116,6 +124,7 @@ class FloatingMenu(QWidget):
             self.sharpness_button,
             self.rotate_button,
             self.fullscreen_button,
+            self.slideshow_button,
             self.filter_button,
             self.settings_button
         ]:
@@ -124,6 +133,8 @@ class FloatingMenu(QWidget):
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def update_tooltips(self, t):
+        self._set_tooltip(self.slideshow_button, t, "slideshow")
+        self.slideshow_button.setAccessibleName(t["slideshow"])
         self._set_tooltip(self.open_button, t, "select_folder")
         self._set_tooltip(self.export_button, t, "export_favorites")
         self._set_tooltip(self.rotate_button, t, "rotate")

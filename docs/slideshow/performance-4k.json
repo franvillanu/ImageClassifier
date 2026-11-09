@@ -1,0 +1,49 @@
+{
+  "platform": "Windows-11-10.0.26300-SP0",
+  "requested_size": [
+    2560,
+    1440
+  ],
+  "actual_size": [
+    2560,
+    1440
+  ],
+  "dpr": 1.5,
+  "physical_size": [
+    3840,
+    2160
+  ],
+  "elapsed_seconds": 60.62331329996232,
+  "requested_seconds": 60,
+  "renderer": "GLSurface",
+  "raster_fallback": false,
+  "fullscreen": true,
+  "slides_presented": 20,
+  "effects_seen": [
+    "v2-01",
+    "v2-02",
+    "v2-04",
+    "v2-05",
+    "v2-06",
+    "v2-07",
+    "v2-09",
+    "v2-10",
+    "v2-14",
+    "v2-15",
+    "v2-19",
+    "v2-20",
+    "v2-21",
+    "v2-22",
+    "v2-24"
+  ],
+  "errors": [],
+  "state_counts": {
+    "loading": 20,
+    "playing": 20
+  },
+  "frames_measured": 2350,
+  "p95_ms": 16.833100002259016,
+  "maximum_ms": 33.38370000710711,
+  "target_p95_ms": 25,
+  "resources_released": true
+}

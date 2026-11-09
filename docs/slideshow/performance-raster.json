@@ -1,0 +1,45 @@
+{
+  "platform": "Windows-11-10.0.26300-SP0",
+  "requested_size": [
+    1280,
+    720
+  ],
+  "actual_size": [
+    1280,
+    720
+  ],
+  "dpr": 1.5,
+  "physical_size": [
+    1920,
+    1080
+  ],
+  "elapsed_seconds": 60.03708630002802,
+  "requested_seconds": 60,
+  "renderer": "RasterSurface",
+  "raster_fallback": false,
+  "fullscreen": false,
+  "slides_presented": 14,
+  "effects_seen": [
+    "v2-03",
+    "v2-09",
+    "v2-12",
+    "v2-15",
+    "v2-18",
+    "v2-19",
+    "v2-23",
+    "v2-24",
+    "v2-27",
+    "v2-29"
+  ],
+  "errors": [],
+  "state_counts": {
+    "loading": 14,
+    "playing": 15,
+    "paused": 1
+  },
+  "frames_measured": 1635,
+  "p95_ms": 17.372200032696128,
+  "maximum_ms": 36.59229999175295,
+  "target_p95_ms": 25,
+  "resources_released": true
+}
