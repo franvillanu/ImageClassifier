@@ -17,8 +17,9 @@ acceptance); its output becomes the spec.
 | Spec | Area | Status |
 |---|---|---|
 | [SPEC-001-fullscreen-and-modals.md](SPEC-001-fullscreen-and-modals.md) | Fullscreen transitions, overlays, tooltips | Active, fully tested |
+| [SPEC-002-slideshow-controls.md](SPEC-002-slideshow-controls.md) | Slideshow floating controls, settings dialog, mode changes | Active, in progress |
 
-Backlog (write the spec *before* touching these areas): navigation and preloading, slideshow player,
+Backlog (write the spec *before* touching these areas): navigation and preloading, slideshow playback engine,
 editor, updates, config persistence, favorites/compare/export, i18n.
 
 ## The workflow (mandatory, in this order)

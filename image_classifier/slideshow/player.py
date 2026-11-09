@@ -52,6 +52,8 @@ class PlayerWindow(QDialog):
             QPushButton#slideshowClose { background: rgba(24, 27, 33, 210); border-radius: 18px; }
         """)
         self._closing = False
+        self._cursor_hidden = False
+        self._fs_icon_state = None
         self._editing_settings = False
         self._fullscreen_change = False
         self._sleep_active = False
@@ -325,15 +327,23 @@ class PlayerWindow(QDialog):
         self._update_fullscreen_control()
 
     def _set_idle_cursor(self, hidden):
+        self._cursor_hidden = hidden
         shape = Qt.CursorShape.BlankCursor if hidden else Qt.CursorShape.ArrowCursor
         for widget in (self, self.surface, self.surface.canvas):
             widget.setCursor(shape)
 
     def _update_fullscreen_control(self):
-        icon = "slideshow_restore" if self.isFullScreen() else "slideshow_fullscreen"
-        self.buttons["fullscreen"].setIcon(IconFactory.get_icon(icon, 48))
-        self.buttons["close"].setVisible(self.isFullScreen() and not self.controls.isHidden())
-        self.buttons["close"].raise_()
+        # Only touch widgets whose state really changed: setIcon/raise_ repaint even when nothing differs.
+        fullscreen = self.isFullScreen()
+        if self._fs_icon_state != fullscreen:
+            self._fs_icon_state = fullscreen
+            icon = "slideshow_restore" if fullscreen else "slideshow_fullscreen"
+            self.buttons["fullscreen"].setIcon(IconFactory.get_icon(icon, 48))
+        close_visible = fullscreen and not self.controls.isHidden()
+        if self.buttons["close"].isVisible() != close_visible:
+            self.buttons["close"].setVisible(close_visible)
+            if close_visible:
+                self.buttons["close"].raise_()
 
     def _position_controls(self):
         width = min(480, max(200, self.width()-40))
@@ -347,6 +357,10 @@ class PlayerWindow(QDialog):
 
     def reveal_controls(self):
         if self._closing:
+            return
+        if not self.controls.isHidden() and not self._cursor_hidden:
+            # Already on screen (this runs on every mouse move): only keep it alive.
+            self.hide_timer.start()
             return
         self._set_idle_cursor(False)
         self.controls.show()
