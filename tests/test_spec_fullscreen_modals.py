@@ -17,7 +17,7 @@ if sys.platform != "win32":
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-6"]
 
 
 @pytest.fixture
@@ -161,3 +161,157 @@ def test_ov3_closing_settings_restores_menu_and_shortcuts(window, qapp):
     qapp.processEvents()
     assert window.settings_overlay is None
     assert window.floating_menu.isEnabled()
+
+
+def _paint_waves(qapp, window, action, settle_ms=120):
+    """Run ``action`` and count Paint events delivered to the main window itself (EP-1 helper)."""
+    from PyQt6.QtCore import QEvent, QObject
+    import time
+
+    class Counter(QObject):
+        paints = 0
+
+        def eventFilter(self, obj, event):
+            if obj is window and event.type() == QEvent.Type.Paint:
+                Counter.paints += 1
+            return False
+
+    counter = Counter()
+    qapp.installEventFilter(counter)
+    try:
+        action()
+        end = time.monotonic() + settle_ms / 1000
+        while time.monotonic() < end:
+            qapp.processEvents()
+            time.sleep(0.005)
+    finally:
+        qapp.removeEventFilter(counter)
+    return Counter.paints
+
+
+def test_ep1_message_has_no_animation_effect(window, qapp):
+    """EP-1: a message uses no opacity effect and no property animation, so it repaints only on show/hide."""
+    window.show_ephemeral_message("Loop on", duration_ms=50)
+    popup = window.ephemeral_messages[0]
+    assert popup.graphicsEffect() is None
+    assert not hasattr(popup, "fade_anim")
+    from PyQt6.QtCore import QPropertyAnimation
+
+    assert popup.findChildren(QPropertyAnimation) == []
+    window._fade_out_popup(popup)
+
+
+def test_ep1_message_total_paints_stay_small(window, qapp):
+    """EP-1: showing and hiding a message repaints the window a handful of times, not dozens."""
+    paints = _paint_waves(qapp, window, lambda: window.show_ephemeral_message("Loop on", duration_ms=60), settle_ms=400)
+    assert paints <= 8, paints  # was 26 with the fade animations
+
+
+def test_ep2_message_is_content_sized_child_and_click_through(window, qapp):
+    """EP-2: the popup is small, a child of the window and transparent for mouse events."""
+    window.show_ephemeral_message("Loop on", duration_ms=5000)
+    popup = window.ephemeral_messages[0]
+    assert not popup.isWindow() and popup.parentWidget() is window
+    assert popup.width() < window.width() // 2 and popup.height() < window.height() // 4
+    assert popup.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    window._fade_out_popup(popup)
+
+
+def test_ep3_messages_stack_without_overlap_and_centred(window, qapp):
+    """EP-3: simultaneous messages are centred, stacked and never overlap."""
+    window.show_ephemeral_message("first", duration_ms=5000)
+    window.show_ephemeral_message("second message", duration_ms=5000)
+    qapp.processEvents()
+    a, b = window.ephemeral_messages[0], window.ephemeral_messages[1]
+    assert a is not b
+    assert not a.geometry().intersects(b.geometry())
+    for popup in (a, b):
+        assert abs(popup.geometry().center().x() - window.width() // 2) <= 1
+    for popup in list(window.ephemeral_messages):
+        window._fade_out_popup(popup)
+
+
+def test_ep4_message_is_removed_and_deleted_after_duration(window, qapp):
+    """EP-4: after its duration the popup is gone and the stack holds no stale entries."""
+    import time
+
+    window.show_ephemeral_message("bye", duration_ms=30)
+    popup = window.ephemeral_messages[0]
+    deadline = time.monotonic() + 1.0
+    while window.ephemeral_messages and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert window.ephemeral_messages == []
+    assert not popup.isVisible()
+
+
+def test_fs5_own_windows_do_not_trigger_click_away(window, qapp, monkeypatch):
+    """FS-5: with another window of this app active, a deactivation does not leave fullscreen."""
+    window.toggle_fullscreen()
+    qapp.processEvents()
+    assert window.isFullScreen()
+    from PyQt6.QtWidgets import QDialog
+
+    other = QDialog()
+    monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: other))
+    window._leave_fullscreen_clickaway()
+    qapp.processEvents()
+    assert window.isFullScreen()
+    window.exit_fullscreen()
+
+
+def test_fs5_losing_focus_to_another_application_leaves_fullscreen(window, qapp, monkeypatch):
+    """FS-5: with no window of this app active (focus went elsewhere) click-away still exits."""
+    window.toggle_fullscreen()
+    qapp.processEvents()
+    monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: None))
+    window._leave_fullscreen_clickaway()
+    qapp.processEvents()
+    assert not window.isFullScreen()
+
+
+def test_fs5_slideshow_launch_keeps_main_fullscreen(window, qapp, monkeypatch):
+    """FS-5: the main window is still fullscreen with the slideshow open, and after it closes."""
+    from PyQt6.QtWidgets import QDialog
+
+    window.toggle_fullscreen()
+    qapp.processEvents()
+    player_stub = QDialog(window)
+    player_stub.show()
+    monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: player_stub))
+    window.event(__import__("PyQt6.QtCore", fromlist=["QEvent"]).QEvent(
+        __import__("PyQt6.QtCore", fromlist=["QEvent"]).QEvent.Type.WindowDeactivate))
+    import time
+
+    end = time.monotonic() + 0.15
+    while time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert window.isFullScreen()
+    player_stub.close()
+    assert window.isFullScreen()
+    window.exit_fullscreen()
+
+
+def test_fs6_transition_cover_is_a_child_and_goes_away(window, qapp):
+    """FS-6: a cover widget exists during the change, is a child (not a window) and is removed."""
+    import time
+
+    window.toggle_fullscreen()
+    cover = window._transition_cover
+    assert cover is not None
+    assert not cover.isWindow() and cover.parentWidget() is window
+    assert cover.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    end = time.monotonic() + 1.0
+    while window._transition_cover is not None and time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert window._transition_cover is None
+    assert not cover.isVisible()
+    window.toggle_fullscreen()
+    qapp.processEvents()
+    end = time.monotonic() + 1.0
+    while window._transition_cover is not None and time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert window._transition_cover is None

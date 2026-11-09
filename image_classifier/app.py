@@ -297,15 +297,17 @@ class PhotoViewer(QMainWindow):
         self.save_config()
 
     def toggle_fullscreen(self, *, make_cover: bool = True):
-        """Enter/leave fullscreen with as few repaints as possible.
+        """Enter/leave fullscreen with as few repaints as possible and never an empty frame.
 
-        ``make_cover`` is kept for older callers and ignored: the old screenshot cover was a
-        separate always-on-top window whose hide forced yet another full-window repaint.
-        The state change itself runs with updates off, so the window repaints once at the end.
+        ``make_cover`` is kept for older callers and ignored. A copy of the last rendered frame
+        covers the viewport (as a *child* widget, not a separate window) until the GL viewport has
+        painted at the new size, because a resized QOpenGLWidget starts with an empty framebuffer
+        (SPEC-001 FS-6). The state change itself runs with updates off (FS-4).
         """
         leaving = self.isFullScreen()
 
         self.hide_all_tooltips()
+        self._show_transition_cover()
         self.setUpdatesEnabled(False)
         try:
             if not leaving:
@@ -354,7 +356,55 @@ class PhotoViewer(QMainWindow):
                 self.image_viewer.adjustToFit()
             self.update_floating_controls()
         finally:
+            cover = getattr(self, "_transition_cover", None)
+            if cover is not None:
+                cover.setGeometry(self.rect())
+                cover.raise_()
             self.setUpdatesEnabled(True)
+
+    # -- transition cover (FS-6) ------------------------------------------------
+    _transition_cover = None
+
+    def _show_transition_cover(self):
+        """Cover the viewport with its last frame until it has painted at the new size."""
+        self._drop_transition_cover()
+        viewport = self.image_viewer.viewport()
+        frame = None
+        try:
+            if isinstance(viewport, QOpenGLWidget) and viewport.isValid():
+                frame = QPixmap.fromImage(viewport.grabFramebuffer())
+        except Exception:
+            frame = None
+        if frame is None or frame.isNull():
+            frame = self.grab()
+        cover = QLabel(self)
+        cover.setObjectName("TransitionCover")
+        cover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        cover.setScaledContents(True)
+        cover.setPixmap(frame)
+        cover.setGeometry(self.rect())
+        cover.show()
+        cover.raise_()
+        self._transition_cover = cover
+        # Remove it once the viewport has really painted at the new size; the timer is a safety net.
+        self._cover_filter_target = viewport
+        viewport.installEventFilter(self)
+        self._cover_painted_after_resize = False
+        QTimer.singleShot(300, self._drop_transition_cover)
+
+    def _drop_transition_cover(self):
+        cover = self._transition_cover
+        self._transition_cover = None
+        target = getattr(self, "_cover_filter_target", None)
+        if target is not None:
+            try:
+                target.removeEventFilter(self)
+            except RuntimeError:
+                pass
+            self._cover_filter_target = None
+        if cover is not None:
+            cover.hide()
+            cover.deleteLater()
 
     # ------------------------------------------------------------------
     # 2)  exit_fullscreen  – used by ❌ button and F11
@@ -369,13 +419,12 @@ class PhotoViewer(QMainWindow):
     # 3)  _leave_fullscreen_clickaway  – helper for the click-away path
     # ------------------------------------------------------------------
     def _leave_fullscreen_clickaway(self):
-        """
-        Called once after the window loses focus while in FS.
+        """Leave fullscreen after the window lost focus, but only if focus left the application.
 
-        Now we just call the same exit path as the ❌ button,
-        so we get the identical fade-out overlay instead of a flash.
+        Our own dialogs, the slideshow and the editor take focus too; those must not drop the
+        user out of fullscreen (SPEC-001 FS-5).
         """
-        if self.isFullScreen():
+        if self.isFullScreen() and QApplication.activeWindow() is None:
             self.exit_fullscreen()
 
     # ------------------------------------------------------------------
@@ -383,10 +432,23 @@ class PhotoViewer(QMainWindow):
     # ------------------------------------------------------------------
     def event(self, ev):
         if ev.type() == QEvent.Type.WindowDeactivate and self.isFullScreen():
-            # give the new frame a few ms to appear before we exit
-            QTimer.singleShot(10, self._leave_fullscreen_clickaway)
+            # give the new window a few ms to become active before deciding
+            QTimer.singleShot(30, self._leave_fullscreen_clickaway)
             return True
         return super().event(ev)
+
+    def eventFilter(self, obj, ev):
+        # Viewport painted at the new size: the cover can go (after this paint has been presented).
+        if (
+            obj is getattr(self, "_cover_filter_target", None)
+            and ev.type() == QEvent.Type.Paint
+            and self._transition_cover is not None
+        ):
+            if self._cover_painted_after_resize:
+                QTimer.singleShot(0, self._drop_transition_cover)
+            else:
+                self._cover_painted_after_resize = True
+        return super().eventFilter(obj, ev)
 
     def updateLanguage(self):
         lang = self.current_language
@@ -3235,65 +3297,33 @@ class PhotoViewer(QMainWindow):
             self.show_ephemeral_message(t["loop_disabled_message"])
 
     def show_ephemeral_message(self, message, duration_ms=1600):
+        """Transient centred message. Appears and disappears instantly: no animation (SPEC-001 EP-1)."""
         popup = EphemeralPopup(message, parent=self)
-        popup.show()
-        popup.fadeIn()
         if not hasattr(self, "ephemeral_messages"):
             self.ephemeral_messages = []
         self.ephemeral_messages.insert(0, popup)
-        spacing = 10
-        total_height = 0
-        for ep in self.ephemeral_messages:
-            ep.container.adjustSize()
-            total_height += ep.container.height() + spacing
-        if total_height > 0:
-            total_height -= spacing
-        top_y = (self.height() - total_height) // 2
-        current_y = top_y
-        for ep in self.ephemeral_messages:
-            ep.container.adjustSize()
-            w = ep.container.width()
-            new_pos = QPoint((self.width() - w) // 2, current_y)
-            anim = QPropertyAnimation(ep.container, b"pos")
-            anim.setDuration(300)
-            anim.setEndValue(new_pos)
-            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-            anim.start()
-            ep.pos_anim = anim
-            current_y += ep.container.height() + spacing
+        popup.adjustSize()
+        self._layout_ephemeral_popups()
+        popup.show()
+        popup.raise_()
         QTimer.singleShot(duration_ms, lambda: self._fade_out_popup(popup))
 
     def _fade_out_popup(self, popup):
-        popup.fadeOut()
-        def cleanup():
-            if popup in self.ephemeral_messages:
-                self.ephemeral_messages.remove(popup)
-            popup.hide()
-            popup.deleteLater()
-            self._reposition_ephemeral_popups()
-        popup.fade_anim.finished.connect(cleanup)
+        if popup in getattr(self, "ephemeral_messages", []):
+            self.ephemeral_messages.remove(popup)
+        popup.hide()
+        popup.deleteLater()
+        self._layout_ephemeral_popups()
 
-    def _reposition_ephemeral_popups(self):
+    def _layout_ephemeral_popups(self):
+        """Stack the messages centred, newest first, with no overlap (EP-3)."""
+        popups = getattr(self, "ephemeral_messages", [])
         spacing = 10
-        total_height = 0
-        for ep in self.ephemeral_messages:
-            ep.container.adjustSize()
-            total_height += ep.container.height() + spacing
-        if total_height > 0:
-            total_height -= spacing
-        top_y = (self.height() - total_height) // 2
-        current_y = top_y
-        for ep in self.ephemeral_messages:
-            ep.container.adjustSize()
-            w = ep.container.width()
-            new_pos = QPoint((self.width() - w) // 2, current_y)
-            anim = QPropertyAnimation(ep.container, b"pos")
-            anim.setDuration(300)
-            anim.setEndValue(new_pos)
-            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-            anim.start()
-            ep.pos_anim = anim
-            current_y += ep.container.height() + spacing
+        total = sum(ep.height() for ep in popups) + spacing * max(0, len(popups) - 1)
+        y = (self.height() - total) // 2
+        for ep in popups:
+            ep.move((self.width() - ep.width()) // 2, y)
+            y += ep.height() + spacing
 
     def backspace_toggle_fit(self):
         self.image_viewer.auto_fit = True
