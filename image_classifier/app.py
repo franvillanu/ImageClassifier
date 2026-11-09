@@ -1931,6 +1931,9 @@ class PhotoViewer(QMainWindow):
         self.current_index = self.image_files.index(path)
         self._nav_direction = 1
         self.show_image()
+        # Render it NOW, while the slideshow still covers the window: otherwise Windows reveals the
+        # classifier's last presented frame (the old photo) until the next paint, ~25-500 ms (SX-3).
+        self.repaint()
 
     def _slideshow_closed(self, result):
         self._slideshow_player = None

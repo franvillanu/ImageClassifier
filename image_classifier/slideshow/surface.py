@@ -107,12 +107,11 @@ class SlideSurface(QWidget):
             self.pixmap = self._rotated(self._source)
             self.canvas.update()
 
-    def pan_by(self, dx, dy):
-        """Move the photo by (dx, dy) logical pixels on top of its motion (SP-1). The stored pan is
-        kept within half the window so a long key repeat cannot build up an offset far past the clamp."""
-        limit_x, limit_y = self.width() / 2, self.height() / 2
-        self.pan = (max(-limit_x, min(limit_x, self.pan[0] + dx)), max(-limit_y, min(limit_y, self.pan[1] + dy)))
-        self.canvas.update()
+    def set_pan(self, pan):
+        """Offset in logical pixels on top of the motion; the player animates it (SP-1)."""
+        if pan != self.pan:
+            self.pan = pan
+            self.canvas.update()
 
     def reset_pan(self):
         self.pan = (0.0, 0.0)

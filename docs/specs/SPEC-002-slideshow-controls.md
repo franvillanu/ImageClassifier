@@ -25,14 +25,15 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SV-3 | With the setting off, a revisited photo replays the motion it had (previous behaviour). | No change for users who do not opt in. |
 | SX-1 | Closing the slideshow (Esc, the close button, the window's close) on a photo other than the one it started on selects and shows that photo in the classifier. | User request: exit on photo X lands on X, not on the photo the slideshow was launched from. Replaces the earlier rule "Escape returns to the unchanged classifier selection". |
 | SX-2 | Closing on the same photo it started on, or before any photo was shown, leaves the classifier exactly as it was (selection, zoom, pan). | Nothing to move to; reloading would throw away the user's zoom. |
-| SP-1 | During the slideshow Ctrl+←/→/↑/↓ pans the photo on screen by a tenth of the window per press (repeating while held), like scrolling: Ctrl+→ shows more of the right side (the photo moves left), Ctrl+↓ more of the bottom. Playback and the motion effect keep running on top of the pan. | User request: look around a photo while it plays. |
+| SP-1 | During the slideshow Ctrl+←/→/↑/↓ pans the photo smoothly, like scrolling (Ctrl+→ shows more of the right side, so the photo moves left; Ctrl+↓ more of the bottom): a tap glides it by 5% of the window, holding moves it continuously at about half the window per second, and it eases to a stop on release (also when Ctrl is released first). Movement is updated every frame, never in jumps; key auto-repeat is ignored. Playback and the motion effect keep running. | User request: look around a photo while it plays; first version moved in 10% jumps per key repeat, which the user found jerky. |
 | SP-2 | The pan never moves the photo more than half its displayed size away from where the motion puts it, so at least half of it stays on screen. | Unlimited panning would push the photo off screen and leave a black window. |
 | SP-3 | The pan is temporary: it resets when the next photo (or the same photo again) is presented, survives the full-resolution frame and R rotation, and is never saved. | Each slide starts framed by its motion; a pan is a momentary look. |
 | SP-4 | Ctrl+arrows appear in the slideshow settings shortcut sheet and in the Help list, in English and Spanish. | Discoverability, as SR-4. |
-| SX-3 | When the slideshow closes on photo X, the classifier already shows X at the moment the slideshow window disappears: the slideshow hands over the frame it is showing (unrotated), which the classifier displays at once; the full resolution follows as usual. No frame of the previous photo is shown. | User report: on exit the old photo was visible first and then changed to X. The switch happened after the window closed and X still had to be decoded. |
+| SX-3 | When the slideshow closes on photo X, the classifier already shows X at the moment the slideshow window disappears: the slideshow hands over the frame it is showing (unrotated), which the classifier displays and *renders* before the slideshow window hides; the full resolution follows as usual. No frame of the previous photo is shown. | User report: on exit the old photo was visible first and then changed to X. The switch happened after the window closed and X still had to be decoded. |
 | SD-1 | In the slideshow settings dialog the keyboard shortcut sheet is collapsed by default behind a single "Keyboard shortcuts" row with a chevron, so the dialog is shorter. | User request: the dialog was too tall. |
 | SD-2 | Expanding or collapsing animates the sheet's height (about 180 ms, ease-out) and the dialog's height follows it; the chevron turns with it. Collapsing ends hidden, expanding ends at the sheet's natural height. | Smooth, minimal: no jump in size. |
 | SD-3 | The toggle works from the keyboard (focusable, Space toggles) and has an accessible name. | Same reach as the rest of the dialog. |
+| SD-4 | The settings dialog opened during playback has no "Changes apply to the next slide" note. | User request: the note was unnecessary and added height. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
@@ -59,6 +60,10 @@ these extra repaints are pure overhead on top of it.
 | Settings dialog open | 67 (dialog's own first paint) | 1 | one `Expose`, player not repainted beyond that |
 | Dialog: slider, switch, mode tile | 3-5 | 0 | confined to the dialog, nothing in the player repaints |
 | Dialog Apply with window-mode change | 13 | 2 | 3 resizes, 4 `Expose`; **open item** |
+
+### SX-3 correction (2026-11-09)
+
+User saw the old photo for ~500 ms after closing. Real-app timeline: frame handed over and cache hit at 11 ms, classifier switched at 12 ms, slideshow hid at 22 ms, but the classifier's GL view first painted at 48 ms: Windows showed the window's last presented frame (the old photo) until then. Fix: the classifier repaints synchronously before the slideshow hides. After: paint at 30 ms, hide at 84 ms. The test now requires a paint of the new photo before the hide, not just loading it.
 
 ## Decision log
 

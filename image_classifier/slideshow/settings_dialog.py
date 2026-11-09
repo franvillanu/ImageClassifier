@@ -225,11 +225,6 @@ class SettingsDialog(QDialog):
         self._shortcuts_anim.valueChanged.connect(lambda _value: self.adjustSize())
         self._shortcuts_anim.finished.connect(self._shortcuts_settled)
         self.shortcuts_toggle.toggled.connect(self._set_shortcuts_expanded)
-        if playback:
-            note = QLabel(t["slideshow_next_settings"])
-            note.setObjectName("hint")
-            note.setWordWrap(True)
-            root.addWidget(note)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(12)

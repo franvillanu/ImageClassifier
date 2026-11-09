@@ -76,10 +76,23 @@ def test_sx3_classifier_shows_the_photo_before_the_slideshow_window_goes(classif
     ImageLoaderRunnable._preview_cache.clear()
     seen_at_hide = {}
 
+    painted = []
+    from PyQt6.QtCore import QEvent, QObject
+
+    class PaintWatch(QObject):
+        def eventFilter(self, obj, event):
+            if obj is classifier and event.type() == QEvent.Type.Paint and classifier._current_path == watched:
+                painted.append(True)
+            return False
+
+    watch = PaintWatch()
+    qapp.installEventFilter(watch)
+
     def on_hide():
         viewer = classifier.image_viewer
         seen_at_hide["path"] = classifier._current_path
         seen_at_hide["shown"] = viewer._shown_load_id == viewer.current_load_id and viewer.original_pixmap is not None
+        seen_at_hide["painted_before_hide"] = bool(painted)  # rendered, not just loaded
 
     original_hide_event = player.hideEvent
 
@@ -89,7 +102,8 @@ def test_sx3_classifier_shows_the_photo_before_the_slideshow_window_goes(classif
 
     player.hideEvent = hide_event
     player.close()
-    assert seen_at_hide == {"path": watched, "shown": True}
+    qapp.removeEventFilter(watch)
+    assert seen_at_hide == {"path": watched, "shown": True, "painted_before_hide": True}
 
 
 def test_sx3_handover_is_not_rotated(classifier, qapp):
