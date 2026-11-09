@@ -9,6 +9,14 @@ except ImportError:
 from .motion import EFFECTS
 
 
+def panned_bounds(bounds, pan):
+    """Shift the motion's bounds by the user's pan, never more than half the drawn size (SPEC-002 SP-2)."""
+    x, y, w, h = bounds
+    dx = max(-w / 2, min(w / 2, pan[0]))
+    dy = max(-h / 2, min(h / 2, pan[1]))
+    return x + dx, y + dy, w, h
+
+
 def paint_slide(widget):
     painter = QPainter(widget)
     painter.fillRect(widget.rect(), Qt.GlobalColor.black)
@@ -19,7 +27,7 @@ def paint_slide(widget):
             (widget.width(), widget.height()), surface.strength)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setOpacity(frame.opacity)
-        painter.drawPixmap(QRectF(*frame.bounds), surface.pixmap, QRectF(surface.pixmap.rect()))
+        painter.drawPixmap(QRectF(*panned_bounds(frame.bounds, surface.pan)), surface.pixmap, QRectF(surface.pixmap.rect()))
     painter.end()
     surface.framePainted.emit()
 
@@ -43,6 +51,7 @@ class SlideSurface(QWidget):
         self.pixmap = None
         self._source = None
         self.rotation = 0
+        self.pan = (0.0, 0.0)
         self.entry = None
         self.progress = 0
         self.strength = 100
@@ -97,6 +106,16 @@ class SlideSurface(QWidget):
         if self._source is not None:
             self.pixmap = self._rotated(self._source)
             self.canvas.update()
+
+    def pan_by(self, dx, dy):
+        """Move the photo by (dx, dy) logical pixels on top of its motion (SP-1). The stored pan is
+        kept within half the window so a long key repeat cannot build up an offset far past the clamp."""
+        limit_x, limit_y = self.width() / 2, self.height() / 2
+        self.pan = (max(-limit_x, min(limit_x, self.pan[0] + dx)), max(-limit_y, min(limit_y, self.pan[1] + dy)))
+        self.canvas.update()
+
+    def reset_pan(self):
+        self.pan = (0.0, 0.0)
 
     def _rotated(self, pixmap):
         if not self.rotation:

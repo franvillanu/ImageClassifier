@@ -20,7 +20,9 @@ from .surface import SlideSurface
 
 class PlayerWindow(QDialog):
     settingsChanged = pyqtSignal(object)
-    closedOnPhoto = pyqtSignal(str)  # photo on screen when the slideshow closed (SPEC-002 SX-1)
+    # photo on screen when the slideshow closes, with its unrotated frame, emitted while the window is
+    # still visible so the classifier can switch before it disappears (SPEC-002 SX-1, SX-3)
+    closedOnPhoto = pyqtSignal(str, object)
 
     def __init__(self, playlist, starting_image, settings, parent=None, *, language="en", raster=False):
         super().__init__(parent)
@@ -163,7 +165,9 @@ class PlayerWindow(QDialog):
                               ("Up", lambda: self.change_speed(longer=True)),
                               ("Down", lambda: self.change_speed(longer=False)),
                               ("F11", self.toggle_fullscreen), ("Escape", self.close),
-                              ("R", self.rotate_current)):
+                              ("R", self.rotate_current),
+                              ("Ctrl+Left", lambda: self.pan_view(1, 0)), ("Ctrl+Right", lambda: self.pan_view(-1, 0)),
+                              ("Ctrl+Up", lambda: self.pan_view(0, 1)), ("Ctrl+Down", lambda: self.pan_view(0, -1))):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
@@ -211,6 +215,7 @@ class PlayerWindow(QDialog):
 
     def _present(self, entry, frame):
         self._last_presented = entry
+        self.surface.reset_pan()  # every presentation starts framed by its motion (SP-3)
         self.surface.present(entry, frame, self._rotations.get(entry.path, 0))
         self._message(os.path.basename(entry.path))
 
@@ -234,6 +239,15 @@ class PlayerWindow(QDialog):
         else:
             self._rotations.pop(entry.path, None)
         self.surface.set_rotation(angle)
+
+    PAN_STEP = 0.1  # fraction of the window per Ctrl+arrow press (SP-1)
+
+    def pan_view(self, x_sign, y_sign):
+        """Ctrl+arrows: move the photo like scrolling (Ctrl+Right shows more of the right side)."""
+        if self._closing or self.surface.entry is None:
+            return
+        self.surface.pan_by(x_sign * self.surface.width() * self.PAN_STEP,
+                            y_sign * self.surface.height() * self.PAN_STEP)
 
     def _message(self, text):
         self._status = text
@@ -458,7 +472,8 @@ class PlayerWindow(QDialog):
         self._closing = True
         shown = self.surface.entry
         if shown is not None:
-            self.closedOnPhoto.emit(shown.path)
+            source = self.surface._source
+            self.closedOnPhoto.emit(shown.path, source.toImage() if source is not None else None)
         self.timer.stop()
         self.hide_timer.stop()
         self.decode_refresh_timer.stop()

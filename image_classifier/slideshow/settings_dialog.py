@@ -1,5 +1,5 @@
 """Slideshow preferences dialog: sliders, switches and visual window-mode tiles."""
-from PyQt6.QtCore import QRectF, QSize, Qt
+from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QVariantAnimation
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QButtonGroup, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                             QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
@@ -90,6 +90,61 @@ class ModeTile(QAbstractButton):
             painter.drawRoundedRect(card.adjusted(-1, -1, 1, 1), 13, 13)
 
 
+class DisclosureRow(QAbstractButton):
+    """Quiet, checkable row: icon, label and a chevron that turns as the section opens (SPEC-002 SD-1/SD-3)."""
+
+    def __init__(self, icon, text, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.setAccessibleName(text)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFixedHeight(40)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._icon = icon
+        self._angle = 0.0
+        self._turn = QVariantAnimation(self)
+        self._turn.setDuration(180)
+        self._turn.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._turn.valueChanged.connect(self._set_angle)
+        self.toggled.connect(self._animate_chevron)
+
+    def sizeHint(self):
+        return QSize(240, 40)
+
+    def _set_angle(self, value):
+        self._angle = float(value)
+        self.update()
+
+    def _animate_chevron(self, checked):
+        self._turn.stop()
+        self._turn.setStartValue(self._angle)
+        self._turn.setEndValue(90.0 if checked else 0.0)
+        self._turn.start()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if self.underMouse() or self.hasFocus():
+            painter.setPen(QPen(QColor("#b9c9df"), 1) if self.hasFocus() else Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#20242b"))
+            painter.drawRoundedRect(rect, 10, 10)
+        self._icon.paint(painter, 12, (self.height() - 20) // 2, 20, 20)
+        font = QFont(self.font())
+        font.setPixelSize(13)
+        painter.setFont(font)
+        painter.setPen(QColor("#aeb6c3"))
+        painter.drawText(QRectF(42, 0, self.width() - 80, self.height()),
+                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        painter.translate(self.width() - 22, self.height() / 2)
+        painter.rotate(self._angle)
+        painter.setPen(QPen(QColor("#aeb6c3"), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                            Qt.PenJoinStyle.RoundJoin))
+        painter.drawPolyline([QPointF(-2.5, -5), QPointF(2.5, 0), QPointF(-2.5, 5)])
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings, language="en", parent=None, *, playback=False):
         super().__init__(parent)
@@ -157,7 +212,19 @@ class SettingsDialog(QDialog):
             self.mode_group.addButton(tile)
             tiles.addWidget(tile)
         root.addLayout(tiles)
-        root.addWidget(self._shortcuts(t))
+        # Shortcut sheet collapsed by default behind a quiet row (SPEC-002 SD-1); animated (SD-2)
+        self.shortcuts_toggle = DisclosureRow(IconFactory.get_icon("keyboard", 48), t["slideshow_shortcuts_toggle"])
+        self.shortcuts_card = self._shortcuts(t)
+        self.shortcuts_card.setMaximumHeight(0)
+        self.shortcuts_card.hide()
+        root.addWidget(self.shortcuts_toggle)
+        root.addWidget(self.shortcuts_card)
+        self._shortcuts_anim = QPropertyAnimation(self.shortcuts_card, b"maximumHeight", self)
+        self._shortcuts_anim.setDuration(180)
+        self._shortcuts_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._shortcuts_anim.valueChanged.connect(lambda _value: self.adjustSize())
+        self._shortcuts_anim.finished.connect(self._shortcuts_settled)
+        self.shortcuts_toggle.toggled.connect(self._set_shortcuts_expanded)
         if playback:
             note = QLabel(t["slideshow_next_settings"])
             note.setObjectName("hint")
@@ -180,6 +247,27 @@ class SettingsDialog(QDialog):
         root.addSpacing(4)
         root.addLayout(buttons)
 
+    def _set_shortcuts_expanded(self, expanded):
+        card = self.shortcuts_card
+        start = card.maximumHeight() if card.isVisible() else 0
+        if start > card.sizeHint().height():
+            start = card.height()
+        if expanded:
+            card.setMaximumHeight(start)
+            card.show()
+        self._shortcuts_anim.stop()
+        self._shortcuts_anim.setStartValue(start)
+        self._shortcuts_anim.setEndValue(card.sizeHint().height() if expanded else 0)
+        self._shortcuts_anim.start()
+
+    def _shortcuts_settled(self):
+        card = self.shortcuts_card
+        if self.shortcuts_toggle.isChecked():
+            card.setMaximumHeight(16777215)  # natural height again (QWIDGETSIZE_MAX)
+        else:
+            card.hide()
+        self.adjustSize()
+
     def _shortcuts(self, t):
         """Compact cheat sheet: three columns, each keycap row above its small label."""
         card = QFrame()
@@ -187,22 +275,6 @@ class SettingsDialog(QDialog):
         outer = QHBoxLayout(card)
         outer.setContentsMargins(18, 12, 18, 12)
         outer.setSpacing(14)
-        side = QVBoxLayout()
-        side.setSpacing(6)
-        side.setAlignment(Qt.AlignmentFlag.AlignTop)
-        icon = QLabel()
-        icon.setPixmap(IconFactory.get_icon("keyboard", 48).pixmap(24, 24))
-        title = QLabel(t["slideshow_shortcuts"])
-        title.setObjectName("hint")
-        side.addWidget(icon, 0, Qt.AlignmentFlag.AlignHCenter)
-        side.addWidget(title, 0, Qt.AlignmentFlag.AlignHCenter)
-        side_box = QWidget()
-        side_box.setLayout(side)
-        outer.addWidget(side_box, 0, Qt.AlignmentFlag.AlignTop)
-        divider = QFrame()
-        divider.setObjectName("rule")
-        divider.setFixedWidth(1)
-        outer.addWidget(divider)
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(12)
@@ -211,6 +283,7 @@ class SettingsDialog(QDialog):
                    (("←", "→"), t["slideshow_key_steps"]),
                    (("↑", "↓"), t["slideshow_key_speed"]),
                    (("R",), t["slideshow_key_rotate"]),
+                   (("Ctrl", "←↑↓→"), t["slideshow_key_pan"]),
                    (("F11",), t["slideshow_fullscreen"]),
                    (("Esc",), t["slideshow_close"]),
                    ((t["slideshow_key_mouse"],), t["slideshow_key_controls"]))

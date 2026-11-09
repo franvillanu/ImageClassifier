@@ -1,6 +1,6 @@
 # SPEC-002 — Slideshow floating controls
 
-Status: active · Code: `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`, `rotate_current`), `slideshow/surface.py`
+Status: active · Code: `slideshow/settings_dialog.py`, `slideshow/player.py` (`reveal_controls`, `_hide_controls`, `_update_fullscreen_control`, `eventFilter`, `rotate_current`), `slideshow/surface.py`
 Tests: `tests/test_spec_slideshow_controls.py`
 
 ## Problem (observed)
@@ -25,6 +25,14 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SV-3 | With the setting off, a revisited photo replays the motion it had (previous behaviour). | No change for users who do not opt in. |
 | SX-1 | Closing the slideshow (Esc, the close button, the window's close) on a photo other than the one it started on selects and shows that photo in the classifier. | User request: exit on photo X lands on X, not on the photo the slideshow was launched from. Replaces the earlier rule "Escape returns to the unchanged classifier selection". |
 | SX-2 | Closing on the same photo it started on, or before any photo was shown, leaves the classifier exactly as it was (selection, zoom, pan). | Nothing to move to; reloading would throw away the user's zoom. |
+| SP-1 | During the slideshow Ctrl+←/→/↑/↓ pans the photo on screen by a tenth of the window per press (repeating while held), like scrolling: Ctrl+→ shows more of the right side (the photo moves left), Ctrl+↓ more of the bottom. Playback and the motion effect keep running on top of the pan. | User request: look around a photo while it plays. |
+| SP-2 | The pan never moves the photo more than half its displayed size away from where the motion puts it, so at least half of it stays on screen. | Unlimited panning would push the photo off screen and leave a black window. |
+| SP-3 | The pan is temporary: it resets when the next photo (or the same photo again) is presented, survives the full-resolution frame and R rotation, and is never saved. | Each slide starts framed by its motion; a pan is a momentary look. |
+| SP-4 | Ctrl+arrows appear in the slideshow settings shortcut sheet and in the Help list, in English and Spanish. | Discoverability, as SR-4. |
+| SX-3 | When the slideshow closes on photo X, the classifier already shows X at the moment the slideshow window disappears: the slideshow hands over the frame it is showing (unrotated), which the classifier displays at once; the full resolution follows as usual. No frame of the previous photo is shown. | User report: on exit the old photo was visible first and then changed to X. The switch happened after the window closed and X still had to be decoded. |
+| SD-1 | In the slideshow settings dialog the keyboard shortcut sheet is collapsed by default behind a single "Keyboard shortcuts" row with a chevron, so the dialog is shorter. | User request: the dialog was too tall. |
+| SD-2 | Expanding or collapsing animates the sheet's height (about 180 ms, ease-out) and the dialog's height follows it; the chevron turns with it. Collapsing ends hidden, expanding ends at the sheet's natural height. | Smooth, minimal: no jump in size. |
+| SD-3 | The toggle works from the keyboard (focusable, Space toggles) and has an accessible name. | Same reach as the rest of the dialog. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
