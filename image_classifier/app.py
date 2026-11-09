@@ -52,7 +52,7 @@ from image_classifier.ui.whats_new import WhatsNewOverlay
 from image_classifier.ui.icons import IconFactory
 from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from image_classifier.ui.crop_overlay import CropOverlay
-from image_classifier.ui.settings_panel import Segmented, SettingsPanel
+from image_classifier.ui.settings_panel import Segmented, SettingsPanel, settings_panel_position
 from image_classifier.ui.scaling import scale_css, ui_scale
 from image_classifier.ui.help_panel import HELP_STYLE, HelpContent
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
@@ -547,17 +547,9 @@ class PhotoViewer(QMainWindow):
 
         # Place the panel next to the settings button BEFORE anything is shown, so the overlay
         # and its panel appear in a single paint (no dim-only frame, no mid-open processEvents).
-        btn_local_pos = self.floating_menu.settings_button.pos()
-        pos_in_main = self.floating_menu.mapTo(self, btn_local_pos)
-        x = pos_in_main.x() + self.floating_menu.settings_button.width() + 15
-        y = pos_in_main.y() - 170
-        if y < 0:
-            y = 0
-        if x + container.width() > self.settings_overlay.width():
-            x = self.settings_overlay.width() - container.width() - 20
-        if y + container.height() > self.settings_overlay.height():
-            y = self.settings_overlay.height() - container.height() - 20
-        y = max(y, 20) if container.height() <= self.settings_overlay.height() - 40 else 20
+        button = self.floating_menu.settings_button
+        beside_menu_x = self.floating_menu.mapTo(self, button.pos()).x() + button.width() + 15
+        x, y = settings_panel_position(self.settings_overlay.size(), container.size(), beside_menu_x)
         container.move(x, y)
 
         self.settings_overlay.show()

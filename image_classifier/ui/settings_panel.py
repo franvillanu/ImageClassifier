@@ -64,6 +64,17 @@ STYLE = f"""
 """
 
 
+def settings_panel_position(window_size, panel_size, x, margin=20):
+    """Top-left of the Options panel (OV-4): vertically centred, horizontal `x` kept.
+
+    Always inside the window (pinned to `margin` when the window is too small).
+    """
+    y = (window_size.height() - panel_size.height()) // 2
+    x = min(x, window_size.width() - panel_size.width() - margin)
+    y = min(y, window_size.height() - panel_size.height() - margin)
+    return max(x, margin), max(y, margin)
+
+
 class ToggleSwitch(QAbstractButton):
     """A checkable on/off switch (40x22 at scale 1)."""
 

@@ -17,7 +17,7 @@ if sys.platform != "win32":
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "OV-4", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
 
 
 @pytest.fixture
@@ -161,6 +161,31 @@ def test_ov3_closing_settings_restores_menu_and_shortcuts(window, qapp):
     qapp.processEvents()
     assert window.settings_overlay is None
     assert window.floating_menu.isEnabled()
+
+
+def test_ov4_options_panel_is_vertically_centred_horizontal_unchanged():
+    """OV-4: vertically centred; horizontal stays beside the button; always inside the window."""
+    from PyQt6.QtCore import QSize
+    from image_classifier.ui.settings_panel import settings_panel_position
+
+    panel = QSize(360, 600)
+    assert settings_panel_position(QSize(1600, 900), panel, 115) == (115, 150)
+    assert settings_panel_position(QSize(1600, 500), panel, 115)[1] == 20
+    assert settings_panel_position(QSize(380, 900), panel, 115)[0] == 20
+
+
+def test_ov4_opening_settings_centres_the_panel_vertically(window, qapp):
+    """OV-4: the real overlay centres the panel vertically, beside the settings button."""
+    window.resize(1400, 900)
+    qapp.processEvents()
+    window.open_settings_overlay()
+    overlay = window.settings_overlay
+    panel = [c for c in overlay.children() if hasattr(c, "preferred_height")][0]
+    assert abs(panel.geometry().center().y() - overlay.height() // 2) <= 1
+    button = window.floating_menu.settings_button
+    expected_x = window.floating_menu.mapTo(window, button.pos()).x() + button.width() + 15
+    assert panel.x() == expected_x
+    window.close_settings_overlay()
 
 
 def _paint_waves(qapp, window, action, settle_ms=120):
