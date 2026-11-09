@@ -174,6 +174,8 @@ class PlayerWindow(QDialog):
         # Ctrl+arrows: smooth panning driven per frame (SPEC-002 SP-1)
         self._pan_held = set()
         self._pan_target = (0.0, 0.0)
+        self._zoom_target = 1.0  # mouse wheel zoom (SPEC-002 SZ-1)
+        self._drag = None  # (start pointer, start pan) while dragging the photo (SM-1)
         self._pan_last = 0.0
         self.pan_timer = QTimer(self)
         self.pan_timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -223,7 +225,10 @@ class PlayerWindow(QDialog):
 
     def _present(self, entry, frame):
         self._last_presented = entry
-        self._pan_target = (0.0, 0.0)  # every presentation starts framed by its motion (SP-3)
+        self._pan_target = (0.0, 0.0)  # every presentation starts framed by its motion (SP-3, SZ-3, SM-3)
+        if self._drag is not None:
+            self._drag = (self._drag[0], (0.0, 0.0))
+        self._zoom_target = 1.0
         self.surface.reset_pan()
         self.surface.present(entry, frame, self._rotations.get(entry.path, 0))
         self._message(os.path.basename(entry.path))
@@ -256,9 +261,40 @@ class PlayerWindow(QDialog):
     PAN_EASE = 0.07   # seconds: how closely the photo follows the target
     _PAN_KEYS = {Qt.Key.Key_Left: (1, 0), Qt.Key.Key_Right: (-1, 0), Qt.Key.Key_Up: (0, 1), Qt.Key.Key_Down: (0, -1)}
 
-    def _clamp_pan(self, x, y):
-        limit_x, limit_y = self.surface.width() / 2, self.surface.height() / 2
+    ZOOM_STEP = 1.25  # per wheel notch (SZ-1)
+    ZOOM_MAX = 5.0
+
+    def _clamp_pan(self, x, y, zoom=None):
+        zoom = self._zoom_target if zoom is None else zoom
+        limit_x, limit_y = self.surface.width() * zoom / 2, self.surface.height() * zoom / 2  # grows with zoom (SZ-4)
         return max(-limit_x, min(limit_x, x)), max(-limit_y, min(limit_y, y))
+
+    def _start_view_animation(self):
+        if not self.pan_timer.isActive():
+            self._pan_last = time.monotonic()
+            self.pan_timer.start()
+
+    def _handle_wheel(self, event):
+        """Mouse wheel (or Ctrl+wheel): smooth zoom around the pointer (SZ-1, SZ-2)."""
+        if self._closing or self.surface.entry is None:
+            return True
+        notches = event.angleDelta().y() / 120
+        if not notches:
+            return True
+        z0 = self._zoom_target
+        z1 = max(1.0, min(self.ZOOM_MAX, z0 * self.ZOOM_STEP ** notches))
+        if z1 == z0:
+            return True
+        point = self.surface.mapFromGlobal(event.globalPosition().toPoint())
+        mx = point.x() - self.surface.width() / 2
+        my = point.y() - self.surface.height() / 2
+        px, py = self._pan_target
+        ratio = z1 / z0
+        # keep the photo point under the pointer where it is: p1 = m - (m - p0) * z1 / z0
+        self._zoom_target = z1
+        self._pan_target = self._clamp_pan(mx - (mx - px) * ratio, my - (my - py) * ratio, z1)
+        self._start_view_animation()
+        return True
 
     def _handle_pan_key(self, event, pressed):
         """True when the key event belongs to Ctrl+arrow panning (it is then consumed)."""
@@ -277,9 +313,7 @@ class PlayerWindow(QDialog):
             w, h = self.surface.width(), self.surface.height()
             self._pan_target = self._clamp_pan(self._pan_target[0] + direction[0] * w * self.PAN_TAP,
                                                self._pan_target[1] + direction[1] * h * self.PAN_TAP)
-            if not self.pan_timer.isActive():
-                self._pan_last = time.monotonic()
-                self.pan_timer.start()
+            self._start_view_animation()
         else:
             self._pan_held.discard(direction)
         return True
@@ -297,14 +331,50 @@ class PlayerWindow(QDialog):
         cx, cy = self.surface.pan
         cx += (tx - cx) * follow
         cy += (ty - cy) * follow
-        if not self._pan_held and abs(tx - cx) < 0.5 and abs(ty - cy) < 0.5:
+        zt, zc = self._zoom_target, self.surface.zoom
+        zc = math.exp(math.log(zc) + (math.log(zt) - math.log(zc)) * follow)  # eased in log space: even feel
+        if not self._pan_held and abs(tx - cx) < 0.5 and abs(ty - cy) < 0.5 and abs(zt - zc) < 0.002:
+            self.surface.set_zoom(zt)
             self.surface.set_pan((tx, ty))
             self.pan_timer.stop()
             return
+        self.surface.set_zoom(zc)
         self.surface.set_pan((cx, cy))
 
     def _stop_pan_keys(self):
         self._pan_held.clear()
+        self._end_drag()
+
+    def _handle_drag(self, obj, event):
+        """Left-drag on the photo moves it 1:1 with the pointer (SM-1). Returns True when consumed."""
+        kind = event.type()
+        if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton \
+                and obj in (self.surface, self.surface.canvas) and self.surface.entry is not None and not self._closing:
+            self._drag = (event.globalPosition(), self._pan_target)
+            return False  # a click without movement does nothing else (SM-2)
+        if self._drag is None:
+            return False
+        if kind == QEvent.Type.MouseMove:
+            if not event.buttons() & Qt.MouseButton.LeftButton:
+                self._end_drag()
+                return False
+            start, (px, py) = self._drag
+            delta = event.globalPosition() - start
+            if abs(delta.x()) + abs(delta.y()) >= 2:
+                self.surface.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
+            target = self._clamp_pan(px + delta.x(), py + delta.y())
+            self._pan_target = target
+            if not self.pan_timer.isActive():
+                self.surface.set_pan(target)  # direct: the photo stays under the pointer
+            return False
+        if kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            self._end_drag()
+        return False
+
+    def _end_drag(self):
+        if self._drag is not None:
+            self._drag = None
+            self.surface.canvas.setCursor(Qt.CursorShape.BlankCursor if self._cursor_hidden else Qt.CursorShape.ArrowCursor)
 
     def _message(self, text):
         self._status = text
@@ -483,6 +553,10 @@ class PlayerWindow(QDialog):
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             if self._handle_pan_key(event, event.type() == QEvent.Type.KeyPress):
                 return True
+        elif event.type() == QEvent.Type.Wheel:
+            return self._handle_wheel(event)
+        elif event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease):
+            self._handle_drag(obj, event)
         elif event.type() in (QEvent.Type.WindowDeactivate, QEvent.Type.FocusOut) and obj is self:
             self._stop_pan_keys()  # a key released while another window had focus must not keep panning
         if event.type() in (QEvent.Type.MouseMove, QEvent.Type.FocusIn):

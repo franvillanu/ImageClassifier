@@ -30,6 +30,15 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SP-3 | The pan is temporary: it resets when the next photo (or the same photo again) is presented, survives the full-resolution frame and R rotation, and is never saved. | Each slide starts framed by its motion; a pan is a momentary look. |
 | SP-4 | Ctrl+arrows appear in the slideshow settings shortcut sheet and in the Help list, in English and Spanish. | Discoverability, as SR-4. |
 | SP-5 | Shift+←/→/↑/↓ pans exactly like Ctrl+arrows (same speed, glide, limit, reset and release rules), and the shortcut sheet and Help show both modifiers. | User request: Shift as an alternative to Ctrl. |
+| SZ-1 | During the slideshow the mouse wheel zooms the photo in and out smoothly (Ctrl+wheel does the same): one notch changes the zoom by ×1.25, trackpads proportionally, eased over several frames, between 1× (the normal framing) and 5×. Playback and the motion effect keep running. | User request. Plain wheel like the classifier and common photo viewers; the wheel has no other job in the slideshow and an accidental zoom is temporary (SZ-3). Ctrl+wheel accepted because users try it. |
+| SZ-2 | Zooming keeps the point under the mouse pointer under the pointer (within the pan limit). | Zooming into what you are looking at, not into the middle of the screen. |
+| SZ-3 | The zoom is temporary: it resets to 1× when the next photo (or the same photo again) is presented, survives R rotation and the full-resolution frame, and is never saved. | Same lifetime as the pan (SP-3). |
+| SZ-4 | Zoom and Ctrl/Shift+arrow panning combine; the pan limit grows with the zoom (half the zoomed size), so a zoomed photo can be explored edge to edge. | At 5× the old half-window limit would hide most of the photo. |
+| SZ-5 | The mouse wheel zoom appears in the slideshow shortcut sheet and in Help, in English and Spanish. | Discoverability, as SR-4/SP-4. |
+| SM-1 | Pressing the left mouse button on the photo and dragging moves it 1:1 with the pointer (closed-hand cursor while dragging), within the pan limit (SZ-4); it combines with wheel zoom and Ctrl/Shift+arrows. Playback continues. | User request: move freely with the mouse. |
+| SM-2 | A click without movement changes nothing, double-click still toggles fullscreen, and dragging only starts on the photo (the control bar's buttons work as before). | The mouse already has meanings in the slideshow; none may break. |
+| SM-3 | Moving the photo by dragging follows the same lifetime as the other view changes: reset on the next photo, never saved (SP-3). | Consistency with the keys and the wheel. |
+| SM-4 | Dragging appears in the slideshow shortcut sheet and in Help, in English and Spanish. | Discoverability. |
 | SX-3 | When the slideshow closes on photo X, the classifier already shows X at the moment the slideshow window disappears: the slideshow hands over the frame it is showing (unrotated), which the classifier displays and *renders* before the slideshow window hides; the full resolution follows as usual. No frame of the previous photo is shown. | User report: on exit the old photo was visible first and then changed to X. The switch happened after the window closed and X still had to be decoded. |
 | SD-1 | In the slideshow settings dialog the keyboard shortcut sheet is collapsed by default behind a single "Keyboard shortcuts" row with a chevron, so the dialog is shorter. | User request: the dialog was too tall. |
 | SD-2 | Expanding or collapsing animates the sheet's height (about 180 ms, ease-out) and the dialog's height follows it; the chevron turns with it. Collapsing ends hidden, expanding ends at the sheet's natural height. | Smooth, minimal: no jump in size. |
@@ -65,6 +74,10 @@ these extra repaints are pure overhead on top of it.
 ### SX-3 correction (2026-11-09)
 
 User saw the old photo for ~500 ms after closing. Real-app timeline: frame handed over and cache hit at 11 ms, classifier switched at 12 ms, slideshow hid at 22 ms, but the classifier's GL view first painted at 48 ms: Windows showed the window's last presented frame (the old photo) until then. Fix: the classifier repaints synchronously before the slideshow hides. After: paint at 30 ms, hide at 84 ms. The test now requires a paint of the new photo before the hide, not just loading it.
+
+### Wheel zoom performance (2026-11-09, real GL fullscreen 2560x1440 @150%, 6000x4000 photos)
+
+Frame intervals while playing: 1x median 16.7 ms / p95 16.8 / max 20.5; while zooming 16.7 / 16.8 / 17.7; held at 5x 16.7 / 16.8 / 17.1. No measurable cost: the zoom only changes the rectangle the motion already draws.
 
 ## Decision log
 
