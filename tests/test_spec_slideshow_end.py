@@ -31,14 +31,30 @@ def photos(tmp_path):
     return paths
 
 
-@pytest.fixture
-def player(qapp, photos):
+def _make_player(qapp, photos, monkeypatch, effect):
     QStandardPaths.setTestModeEnabled(True)
+    from image_classifier.slideshow import controller as controller_module
+    monkeypatch.setattr(controller_module, "EFFECTS", {effect: controller_module.EFFECTS[effect]})
     win = PlayerWindow(photos, photos[0], SlideshowSettings(600, 100, False, False, False), raster=True)
     win.resize(900, 600)
     win.show()
     assert _wait(qapp, lambda: win.surface.pixmap is not None and win.controller.entry is not None
                  and not win.controller._waiting)
+    return win
+
+
+@pytest.fixture
+def player(qapp, photos, monkeypatch):
+    """Gentle zoom: the photo is on screen at both ends, so only the fade can hide it."""
+    win = _make_player(qapp, photos, monkeypatch, "v2-01")
+    yield win
+    win.close()
+
+
+@pytest.fixture
+def sweeping_player(qapp, photos, monkeypatch):
+    """Sweep right: the photo is (almost) off screen at progress 0 and 1, the worst case."""
+    win = _make_player(qapp, photos, monkeypatch, "v2-07")
     yield win
     win.close()
 
@@ -66,7 +82,8 @@ def test_se1_paused_photo_is_fully_visible(player, qapp):
     assert _brightness(player, qapp) > 150
 
 
-def test_se2_end_of_show_keeps_last_photo_and_previous_works(player, qapp, photos):
+def test_se2_end_of_show_keeps_last_photo_and_previous_works(sweeping_player, qapp, photos):
+    player = sweeping_player
     """SE-2: Repeat off, time runs out on the last photo: it stays visible; Previous shows the other one."""
     player.controller.next()
     assert _presented(player, qapp, photos[1])

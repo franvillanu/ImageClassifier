@@ -49,7 +49,7 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SD-7 | The panel has its own close button (accessible name "Close panel" / "Cerrar panel") that does the same as the row, and Esc still closes the dialog, not only the panel. | A panel that can only be closed from the row it covers feels trapped; Esc keeps its existing meaning. |
 | SD-3 | The toggle works from the keyboard (focusable, Space toggles) and has an accessible name. | Same reach as the rest of the dialog. |
 | SD-4 | The settings dialog opened during playback has no "Changes apply to the next slide" note. | User request: the note was unnecessary and added height. |
-| SE-1 | A slide's fade in and out applies only while the slideshow is playing. Whenever it is not playing (paused, or finished), the photo on screen is drawn fully visible, wherever its motion is. | User report: with Repeat off the show ended on a black screen that stayed black even going backwards. Every motion has opacity 0 at progress 0 and 1, so a slide frozen at either end was invisible. |
+| SE-1 | A slide's fade in and out applies only while the slideshow is playing. Whenever it is not playing (paused, or finished), the photo on screen is drawn fully visible. A slide that is not playing and sits at its very start or very end (just navigated to, or the show finished) is drawn at its neutral framing, fitted and centred; one paused part-way keeps its motion position. | User report: with Repeat off the show ended on a black screen that stayed black even going backwards. Every motion has opacity 0 at progress 0 and 1, so a slide frozen at either end was invisible; and sweep motions also start and end with the photo (almost) off screen, so full opacity alone still left a black screen (found by a test that failed for some random effects). |
 | SE-2 | With Repeat off, when the last photo's time runs out the show stops on that photo, visible at its final position, and Previous / ← shows the earlier photo (visible, paused). | Same report: the end of the show must leave the last photo to look at, and going back must work. |
 | SE-3 | While playing, the fade in and out is unchanged (opacity 0 at the very start of a slide). | The fix must not remove the transition between photos. |
 
@@ -94,6 +94,7 @@ Diagnosis state: **direct causal evidence** for the mechanism (measured opacity,
 
 ## Decision log
 
+- 2026-11-10 — First version of SE-1 only removed the fade; the SE-2 test then failed for about 1 run in 4 (random effect: for the sweep motions the photo is off screen at progress 0 and 1, e.g. `v2-07` ends 699 px right). Neutral framing at the two ends fixed that; the test now forces a sweep effect so it fails every time without the rule.
 - 2026-11-10 — Fade only while playing (SE-1). Alternatives: hold the last frame only at the end (leaves paused-then-Previous black), or start paused slides at a mid-motion progress (changes the clock, the pan and the history tests). Cost accepted: pausing during a fade makes the photo jump to full brightness.
 
 - 2026-11-09 — Exit lands on the photo being watched (SX-1). The previous verification note "Escape back to the unchanged classifier selection" is superseded by user request; the classifier state is still untouched when the slideshow ends on its starting photo (SX-2).
