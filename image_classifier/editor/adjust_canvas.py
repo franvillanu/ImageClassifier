@@ -21,6 +21,7 @@ class AdjustCanvas(QWidget):
         self._size = (1, 1)  # logical (full-resolution) size the image represents
         self._compare: tuple[QImage, tuple[int, int]] | None = None
         self._compare_zoom: float | None = None
+        self._compare_focus: tuple[float, float] | None = None
         self._zoom: float | None = None  # None = fit
         self._center = QPointF(0.5, 0.5)  # view centre in normalised image coords
         self._drag = None
@@ -49,13 +50,16 @@ class AdjustCanvas(QWidget):
         self._emit_zoom()
         self.update()
 
-    def set_compare(self, compare: tuple[QImage, tuple[int, int]] | None, zoom: float | None = None):
+    def set_compare(self, compare: tuple[QImage, tuple[int, int]] | None, zoom: float | None = None,
+                    focus: tuple[float, float] | None = None):
         """Show ``compare`` (image, size) instead of the edit, at ``zoom`` (the edit's screen scale).
 
         Keeping the scale means the original is drawn at its true size next to what you were
-        looking at, instead of being refitted (and shrunk) to the window.
+        looking at, instead of being refitted (and shrunk) to the window. ``focus`` is the point
+        of ``compare`` (in its ``size`` units) drawn at ``area_center()``; None centres it.
         """
         self._compare_zoom = zoom if compare is not None else None
+        self._compare_focus = focus if compare is not None else None
         self._compare = compare
         self._emit_zoom()
         self.update()
@@ -121,19 +125,33 @@ class AdjustCanvas(QWidget):
         cy = 0.5 if half_y >= 0.5 else min(1 - half_y, max(half_y, self._center.y()))
         self._center = QPointF(cx, cy)
 
+    def area_center(self) -> QPointF:
+        """Screen point at the centre of the view area (the zoom/pan anchor)."""
+        return self._area().center()
+
+    def view_center(self) -> QPointF:
+        """Normalised point of the edit shown at ``area_center()``."""
+        return QPointF(0.5, 0.5) if self._zoom is None else QPointF(self._center)
+
+    def image_rect(self) -> QRectF:
+        """Screen rect the shown image (edit or compare) is drawn in."""
+        _, size = self._shown()
+        z = self.zoom()
+        w, h = size[0] * z, size[1] * z
+        mid = self.area_center()
+        if self._compare is not None and self._compare_focus is not None:
+            fx, fy = self._compare_focus  # SPEC-004 ED-1: keep the same source point under the centre
+            return QRectF(mid.x() - fx * z, mid.y() - fy * z, w, h)
+        center = QPointF(0.5, 0.5) if self._compare is not None else self.view_center()
+        return QRectF(mid.x() - center.x() * w, mid.y() - center.y() * h, w, h)
+
     def paintEvent(self, _e):
         p = QPainter(self)
         p.fillRect(self.rect(), self._bg)
-        image, size = self._shown()
+        image, _ = self._shown()
         if image is not None and not image.isNull():
-            z = self.zoom()
-            w, h = size[0] * z, size[1] * z
-            center = (QPointF(0.5, 0.5) if self._compare is not None or self._zoom is None else self._center)
-            mid = self._area().center()
-            x = mid.x() - center.x() * w
-            y = mid.y() - center.y() * h
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            p.drawImage(QRectF(x, y, w, h), image, QRectF(image.rect()))
+            p.drawImage(self.image_rect(), image, QRectF(image.rect()))
         p.end()
 
     def resizeEvent(self, e):
@@ -166,22 +184,7 @@ class AdjustCanvas(QWidget):
 
     def mouseReleaseEvent(self, e):
         self._drag = None
-        self._bg = QColor(0, 0, 0)
-        self._insets = (0, 0, 0, 0)  # left, top, right, bottom kept free for floating controls
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-
-    def set_background(self, color: QColor):
-        self._bg = QColor(color)
-        self.update()
-
-    def set_insets(self, left: int, top: int, right: int, bottom: int):
-        self._insets = (left, top, right, bottom)
-        self._emit_zoom()
-        self.update()
-
-    def _area(self) -> QRectF:
-        l, t, r, b = self._insets
-        return QRectF(l, t, max(10, self.width() - l - r), max(10, self.height() - t - b))
 
     def mouseDoubleClickEvent(self, e):
         if self._zoom is None:

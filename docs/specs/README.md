@@ -19,9 +19,10 @@ acceptance); its output becomes the spec.
 | [SPEC-001-fullscreen-and-modals.md](SPEC-001-fullscreen-and-modals.md) | Fullscreen transitions, overlays, tooltips | Active, fully tested |
 | [SPEC-002-slideshow-controls.md](SPEC-002-slideshow-controls.md) | Slideshow floating controls, settings dialog, mode changes | Active, in progress |
 | [SPEC-003-classifier-view.md](SPEC-003-classifier-view.md) | Classifier photo view: fit, zoom, position | Active, started |
+| [SPEC-004-editor-view.md](SPEC-004-editor-view.md) | Editor: compare with the original, canvas zoom/pan | Active, started |
 
 Backlog (write the spec *before* touching these areas): navigation and preloading, slideshow playback engine,
-editor, updates, config persistence, favorites/compare/export, i18n.
+rest of the editor, updates, config persistence, favorites/compare/export, i18n.
 
 ## The workflow (mandatory, in this order)
 
