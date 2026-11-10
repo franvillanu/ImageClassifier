@@ -54,6 +54,7 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SE-1 | A slide's fade in and out applies only while the slideshow is playing. Whenever it is not playing (paused, or finished), the photo on screen is drawn fully visible. A slide that is not playing and sits at its very start or very end (just navigated to, or the show finished) is drawn at its neutral framing, fitted and centred; one paused part-way keeps its motion position. | User report: with Repeat off the show ended on a black screen that stayed black even going backwards. Every motion has opacity 0 at progress 0 and 1, so a slide frozen at either end was invisible; and sweep motions also start and end with the photo (almost) off screen, so full opacity alone still left a black screen (found by a test that failed for some random effects). |
 | SE-2 | With Repeat off, when the last photo's time runs out the show stops on that photo, visible at its final position, and Previous / ← shows the earlier photo (visible, paused). | Same report: the end of the show must leave the last photo to look at, and going back must work. |
 | SE-3 | While playing, the fade in and out is unchanged (opacity 0 at the very start of a slide). | The fix must not remove the transition between photos. |
+| SG-1 | The slideshow's drawing surface always ends on a whole device pixel inside the window: when the window's logical size times the device pixel ratio is fractional, the surface leaves the last logical pixel(s) on the right / bottom to the window's black background, so no screen column or row is half covered by it. | User report: while photos change, a thin strip of an earlier photo stays frozen at the far right edge in fullscreen. Measured at 3840×2160 @150%: the FS-7 border makes the client 3838 px wide = 2559 logical = 3838.5 device px, and the last physical column kept a stale earlier frame. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
@@ -94,7 +95,14 @@ Frame intervals while playing: 1x median 16.7 ms / p95 16.8 / max 20.5; while zo
 User report: Repeat off, the slideshow ends on black and stays black, also after going back. Measured `MotionEffect.evaluate(...).opacity` at progress 0 / 0.05 / 0.5 / 0.95 / 1: 0.0 / 0.42 / 1.0 / 0.42 / 0.0. Code path: `controller.next()` at the end sets `_elapsed = duration` (progress 1) and `playing = False`; `previous()` → `_navigate()` restarts the slide at progress 0 paused. `paint_slide` always applied the motion's opacity, so both frozen states drew an invisible photo.
 Diagnosis state: **direct causal evidence** for the mechanism (measured opacity, code path); the report itself was not reproduced in the GUI. The new test shows the old code paints black.
 
+### Frozen strip at the right edge (2026-11-10, real GL fullscreen, 3840×2160 @150%)
+
+Probe: real `PlayerWindow`, fullscreen, six solid-colour photos at 3 s, the screen grabbed every 120 ms and the rightmost columns compared with the centre. Geometry: window rect 0,0–3840,2160, client 1,1–3839,2159 (the FS-7 border), Qt window 2559×1439 logical, canvas 3838.5×2158.5 device px. Column x=3838 (the last client column) showed a previous photo at full brightness (e.g. red while the green photo played, or while the centre was black mid-fade) in 144 of 232 samples; its neighbours were correct and the border column x=3839 stayed black. Bottom rows were not affected.
+Candidate fixes, same probe (16 s each): unchanged 61/128 isolated-strip samples (44 with the edge colour different from the photo); surface ending on a whole pixel (2558 logical = 3837 device) **0/128 (0)**; repainting the whole window every frame 77/127 (42), so a missed repaint is ruled out. Diagnosis state: **direct causal evidence** for the condition (fractional device width of the GL surface) and the cure; *why* Qt's composition leaves that column stale was not traced into Qt.
+
 ## Decision log
+
+- 2026-11-10 — Frozen right-edge strip: inset the surface to a whole device pixel (SG-1) instead of dropping the FS-7 border (which would bring back the fullscreen black wall) or repainting more (measured useless). The one uncovered device column is the window's black background, next to the black FS-8 border.
 
 - 2026-11-10 — Minimum zoom 1× → 0.5× (SZ-8). Chosen: down to 0.5× (three full ×1.25 steps, then the limit) rather than exactly two, so there is a visible margin beyond the two steps asked for, and the photo stays big enough to recognise. Only the slideshow: the classifier has its own zoom limits and was not asked about.
 

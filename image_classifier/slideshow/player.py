@@ -20,6 +20,15 @@ from .settings_dialog import SettingsDialog
 from .surface import SlideSurface
 
 
+def whole_pixel_inset(length, dpr, limit=8):
+    """Logical pixels to leave uncovered so that ``length - inset`` is a whole number of device pixels (SG-1)."""
+    for inset in range(min(limit, max(1, length))):
+        device = (length - inset) * dpr
+        if abs(device - round(device)) < 1e-6:
+            return inset
+    return 0
+
+
 class PlayerWindow(QDialog):
     settingsChanged = pyqtSignal(object)
     # photo on screen when the slideshow closes, with its unrotated frame, emitted while the window is
@@ -629,6 +638,7 @@ class PlayerWindow(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._fit_surface_to_pixels()
         if hasattr(self, "buttons") and "close" in self.buttons:
             self._position_controls()
         if hasattr(self, "loader"):
@@ -636,9 +646,26 @@ class PlayerWindow(QDialog):
 
     def event(self, event):
         result = super().event(event)
-        if event.type() == getattr(QEvent.Type, "DevicePixelRatioChange", None) and hasattr(self, "loader"):
-            self._update_decode_size()
+        if event.type() == getattr(QEvent.Type, "DevicePixelRatioChange", None):
+            self._fit_surface_to_pixels()
+            if hasattr(self, "loader"):
+                self._update_decode_size()
         return result
+
+    def _fit_surface_to_pixels(self):
+        """SPEC-002 SG-1: never let the GL surface end half-way through a device pixel.
+
+        With the FS-7 border at 150% the window is e.g. 2559 logical = 3838.5 device px wide; the
+        last screen column then kept a stale earlier frame (measured). Leaving the last logical
+        pixel to the black window background makes the surface end on a whole pixel."""
+        layout = self.layout()
+        if layout is None:
+            return
+        dpr = self.devicePixelRatioF()
+        right, bottom = whole_pixel_inset(self.width(), dpr), whole_pixel_inset(self.height(), dpr)
+        margins = layout.contentsMargins()
+        if (margins.right(), margins.bottom()) != (right, bottom):
+            layout.setContentsMargins(0, 0, right, bottom)
 
     def done(self, result):
         self._shutdown()
