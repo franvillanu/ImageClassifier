@@ -30,6 +30,7 @@ STYLE = f"""
     #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
     #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 12px; font-weight: bold; padding: 0; }}
     #SettingsContainer QFrame#rule {{ background-color: #2c3036; border: none; }}
+    #SettingsContainer QFrame#titleRule {{ background-color: {SWITCH_ON}; border: none; }}
     #SettingsContainer QWidget#Card {{ background-color: #1e2024; border: 1px solid #2c3036; border-radius: 10px; }}
     #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #25282d; }}
     #SettingsContainer QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
@@ -156,9 +157,9 @@ class Segmented(QWidget):
             row.addWidget(button, 1)
 
 
-def _rule(parent):
+def _rule(parent, name="rule"):
     line = QFrame(parent)
-    line.setObjectName("rule")
+    line.setObjectName(name)
     line.setFixedHeight(1)
     return line
 
@@ -242,7 +243,7 @@ class SettingsPanel(QWidget):
         label = QLabel(text.upper(), header)
         label.setObjectName("groupTitle")
         header_row.addWidget(label)
-        header_row.addWidget(_rule(header), 1, Qt.AlignmentFlag.AlignVCenter)  # OV-5: GENERAL ──────
+        header_row.addWidget(_rule(header, "titleRule"), 1, Qt.AlignmentFlag.AlignVCenter)  # OV-5: GENERAL ──────
         self.body_layout.addWidget(header)
         self._card_widget = QWidget(self.body)
         self._card_widget.setObjectName("Card")

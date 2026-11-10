@@ -14,7 +14,7 @@ from image_classifier.slideshow.player import PlayerWindow
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.surface import panned_bounds
 
-REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6"]
+REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6", "SZ-7"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -207,12 +207,13 @@ def test_sz6_minus_keys_zoom_out_and_stop_at_normal(player, qapp, mods):
 
 
 def test_sz6_ctrl_zero_resets_and_both_pan_modifiers_still_pan(player, qapp):
-    """SZ-6: Ctrl+0 resets like 0; Ctrl+arrows and Shift+arrows both still pan."""
-    QTest.keyClick(player, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
-    QTest.keyClick(player, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    """SZ-6: Ctrl+0 resets like 0; Ctrl+arrows and Shift+Left/Right still pan."""
+    QTest.keyClick(player, Qt.Key.Key_Down, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(player, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
     QTest.keyClick(player, Qt.Key.Key_Plus)
     _settled(qapp, player)
-    assert player.surface.pan[0] < 0 and player.surface.pan[1] < 0 and player.surface.zoom > 1.2
+    assert player.surface.pan[0] > 0  # Shift+Left moved the photo right, as before
+    assert player.surface.pan[1] < 0 and player.surface.zoom > 1.2
     QTest.keyClick(player, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
     _settled(qapp, player)
     assert player.surface.zoom == 1.0 and player.surface.pan == (0.0, 0.0)
@@ -227,5 +228,55 @@ def test_sz6_keys_listed_in_sheet_and_help():
     assert '"+", "−"' in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
     for lang in ("en", "es"):
         t = translations[lang]
-        assert t["shortcut_slideshow_zoom_keys_key"] == "+ / −" and "Ctrl+0" in t["shortcut_slideshow_reset_view_key"]
+        assert t["shortcut_slideshow_zoom_keys_key"].startswith("+ / −") and "Ctrl+0" in t["shortcut_slideshow_reset_view_key"]
     assert "shortcut_slideshow_zoom_keys_key" in inspect.getsource(app_module.PhotoViewer.open_help_overlay)
+
+
+SHIFT = Qt.KeyboardModifier.ShiftModifier
+
+
+def test_sz7_shift_up_zooms_in_and_shift_down_out_toward_the_centre(player, qapp):
+    """SZ-7: Shift+Up x1.25, Shift+Down back, within 1x..5x, pan untouched, playback continues."""
+    QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(1.25, abs=0.003)
+    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
+    QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
+    QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(1.0, abs=0.003)  # never below the normal framing
+    for _ in range(20):
+        QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(5.0, abs=0.003)
+    assert player.controller.playing
+
+
+def test_sz7_holding_shift_up_repeats(player, qapp):
+    """SZ-7: key auto-repeat keeps zooming, like holding + (SZ-6)."""
+    from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtCore import QEvent
+
+    for repeat in (False, True, True):
+        QApplication.sendEvent(player, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Up, SHIFT, "", repeat))
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(1.25 ** 3, abs=0.01)
+
+
+def test_sz7_plain_up_down_still_change_the_speed(player, qapp):
+    """SZ-7: only Shift+Up/Down zoom; plain Up/Down keep changing the seconds per photo."""
+    before = player.controller.active_settings.duration
+    QTest.keyClick(player, Qt.Key.Key_Up)
+    QApplication.processEvents()
+    assert player.controller.active_settings.duration > before
+    assert player.surface.zoom == 1.0
+
+
+def test_sz7_keys_listed_in_sheet_and_help():
+    """SZ-7: the sheet chip and the Help key text mention Shift+Up/Down next to + / -, EN and ES."""
+    from image_classifier.i18n.translations import translations
+    from image_classifier.slideshow import settings_dialog
+
+    assert "Shift ↑↓" in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
+    for lang in ("en", "es"):
+        assert "Shift" in translations[lang]["shortcut_slideshow_zoom_keys_key"]

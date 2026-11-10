@@ -313,16 +313,26 @@ class PlayerWindow(QDialog):
             return False
         if self._closing or self.surface.entry is None:
             return True
+        self._zoom_step(direction)
+        return True
+
+    def _zoom_step(self, direction):
+        """One keyboard zoom step toward the screen centre (SZ-6, SZ-7)."""
         z1 = max(1.0, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
         if z1 != self._zoom_target:
             self._zoom_to(z1)
-        return True
 
     def _handle_pan_key(self, event, pressed):
-        """True when the key event belongs to Ctrl+arrow panning (it is then consumed)."""
+        """True when the key event belongs to Ctrl/Shift+arrow panning or Shift+Up/Down zoom (consumed)."""
         direction = self._PAN_KEYS.get(event.key())
         if direction is None:
             return False
+        modifiers = event.modifiers()
+        if direction[0] == 0 and modifiers & Qt.KeyboardModifier.ShiftModifier                 and not modifiers & Qt.KeyboardModifier.ControlModifier:
+            # Shift+Up / Shift+Down zoom in / out; holding repeats (SZ-7)
+            if pressed and not self._closing and self.surface.entry is not None:
+                self._zoom_step(direction[1])
+            return pressed
         pan_modifiers = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier  # SP-5
         if pressed and not event.modifiers() & pan_modifiers:
             return False

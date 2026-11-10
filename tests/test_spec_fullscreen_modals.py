@@ -199,9 +199,12 @@ def test_ov5_every_section_title_is_followed_by_a_line(window, qapp):
     titles = [l for l in panel.body.findChildren(QLabel) if l.objectName() == "groupTitle"]
     assert len(titles) == 6
     for title in titles:
-        lines = [f for f in title.parentWidget().findChildren(QFrame) if f.objectName() == "rule"]
+        lines = [f for f in title.parentWidget().findChildren(QFrame) if f.objectName() == "titleRule"]
         assert len(lines) == 1
         line = lines[0]
+        shot = line.grab().toImage()
+        colour = shot.pixelColor(shot.width() // 2, 0)
+        assert (colour.red(), colour.green(), colour.blue()) == (0x34, 0x98, 0xDB)  # the app's blue
         assert line.geometry().left() > title.geometry().right()  # after the title, on the same row
         assert abs(line.geometry().center().y() - title.geometry().center().y()) <= 12
     assert panel.width() == 360

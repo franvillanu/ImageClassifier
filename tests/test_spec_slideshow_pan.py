@@ -180,16 +180,30 @@ def test_sp5_shift_tap_glides_exactly_like_ctrl(player, qapp):
 
 
 def test_sp5_shift_hold_moves_continuously_and_stops_on_release(player, qapp):
-    """SP-5: holding Shift+Down keeps moving; releasing Shift first still stops it."""
-    QTest.keyPress(player, Qt.Key.Key_Down, SHIFT)
+    """SP-5: holding Shift+Left keeps moving; releasing Shift first still stops it."""
+    QTest.keyPress(player, Qt.Key.Key_Left, SHIFT)
     _run(qapp, 0.2)
-    early = player.surface.pan[1]
+    early = player.surface.pan[0]
     _run(qapp, 0.2)
-    assert player.surface.pan[1] < early < 0
-    QTest.keyRelease(player, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    assert player.surface.pan[0] > early > 0
+    QTest.keyRelease(player, Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier)
     _settled(qapp, player)
     assert player._pan_held == set()
     assert player.controller.playing
+
+
+def test_sp5_shift_up_down_do_not_pan_but_ctrl_and_ctrl_shift_do(player, qapp):
+    """SP-5: Shift+Up/Down no longer pan (they zoom, SZ-7); Ctrl+Down and Ctrl+Shift+Up still pan vertically."""
+    QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
+    QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
+    _settled(qapp, player)
+    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
+    QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
+    _settled(qapp, player)
+    assert player.surface.pan[1] < 0
+    QTest.keyClick(player, Qt.Key.Key_Up, CTRL | SHIFT)
+    _settled(qapp, player)
+    assert player.surface.pan[1] == pytest.approx(0, abs=0.6)
 
 
 def test_sp5_sheet_and_help_name_both_modifiers():
@@ -197,7 +211,8 @@ def test_sp5_sheet_and_help_name_both_modifiers():
     from image_classifier.i18n.translations import translations
     from image_classifier.slideshow import settings_dialog
 
-    assert "Ctrl / Shift" in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
+    source = inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
+    assert "Ctrl ←↑↓→" in source and "Shift ←→" in source
     for lang in ("en", "es"):
         key = translations[lang]["shortcut_slideshow_pan_key"]
         assert "Ctrl" in key and "Shift" in key
