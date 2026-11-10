@@ -9,16 +9,15 @@ import types
 
 import pytest
 from PIL import Image
-from PyQt6.QtCore import QCoreApplication, QPoint, Qt
-from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QCoreApplication, Qt
+from PyQt6.QtWidgets import QApplication
 
 if sys.platform != "win32":
     _stub = types.ModuleType("image_classifier.shell_win")
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "OV-4", "OV-5", "OV-6", "OV-7", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "OV-4", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
 
 
 @pytest.fixture
@@ -128,7 +127,7 @@ def test_ov1_settings_overlay_appears_complete_without_nested_event_loop(window,
     overlay = window.settings_overlay
     assert calls == []
     assert overlay.isVisible()
-    panels = [c for c in overlay.children() if hasattr(c, "apply_filter")]
+    panels = [c for c in overlay.children() if hasattr(c, "preferred_height")]
     assert len(panels) == 1
     panel = panels[0]
     assert panel.isVisible()
@@ -164,92 +163,29 @@ def test_ov3_closing_settings_restores_menu_and_shortcuts(window, qapp):
     assert window.floating_menu.isEnabled()
 
 
-def test_ov4_drawer_geometry_is_full_height_flush_right_and_never_wider_than_the_window():
-    """OV-4: full height, flush against the right edge, width capped to the window."""
-    from PyQt6.QtCore import QRect, QSize
-    from image_classifier.ui.settings_panel import settings_drawer_geometry
+def test_ov4_options_panel_is_vertically_centred_horizontal_unchanged():
+    """OV-4: vertically centred; horizontal stays beside the button; always inside the window."""
+    from PyQt6.QtCore import QSize
+    from image_classifier.ui.settings_panel import settings_panel_position
 
-    assert settings_drawer_geometry(QSize(1600, 900), 460) == QRect(1140, 0, 460, 900)
-    assert settings_drawer_geometry(QSize(400, 700), 460) == QRect(0, 0, 400, 700)
+    panel = QSize(360, 600)
+    assert settings_panel_position(QSize(1600, 900), panel, 115) == (115, 150)
+    assert settings_panel_position(QSize(1600, 500), panel, 115)[1] == 20
+    assert settings_panel_position(QSize(380, 900), panel, 115)[0] == 20
 
 
-def test_ov4_opening_settings_shows_a_full_height_drawer_on_the_right(window, qapp):
-    """OV-4: the real overlay holds a full-height panel against the right edge that cannot be dragged."""
+def test_ov4_opening_settings_centres_the_panel_vertically(window, qapp):
+    """OV-4: the real overlay centres the panel vertically, beside the settings button."""
     window.resize(1400, 900)
     qapp.processEvents()
     window.open_settings_overlay()
     overlay = window.settings_overlay
-    panel = [c for c in overlay.children() if hasattr(c, "apply_filter")][0]
-    assert panel.geometry().top() == 0 and panel.height() == overlay.height()
-    assert panel.geometry().right() + 1 == overlay.width()
-    before = panel.pos()
-    QTest.mousePress(panel, Qt.MouseButton.LeftButton, pos=QPoint(10, 300))
-    QTest.mouseMove(panel, QPoint(80, 340))
-    QTest.mouseRelease(panel, Qt.MouseButton.LeftButton, pos=QPoint(80, 340))
-    assert panel.pos() == before
+    panel = [c for c in overlay.children() if hasattr(c, "preferred_height")][0]
+    assert abs(panel.geometry().center().y() - overlay.height() // 2) <= 1
+    button = window.floating_menu.settings_button
+    expected_x = window.floating_menu.mapTo(window, button.pos()).x() + button.width() + 15
+    assert panel.x() == expected_x
     window.close_settings_overlay()
-
-
-def _open_panel(window):
-    window.open_settings_overlay()
-    return [c for c in window.settings_overlay.children() if hasattr(c, "apply_filter")][0]
-
-
-def _visible_labels(panel):
-    from PyQt6.QtWidgets import QLabel
-
-    return [l.text() for l in panel.body.findChildren(QLabel)
-            if l.objectName() != "groupTitle" and l.isVisibleTo(panel) and l.text()]
-
-
-def test_ov5_search_filters_rows_and_sections_and_clearing_restores(window, qapp):
-    """OV-5: filter by row label or section title, hide empty sections, "no results", clear restores."""
-    from PyQt6.QtWidgets import QLabel
-
-    window.current_language = "es"
-    panel = _open_panel(window)
-    assert panel.search.placeholderText()
-    all_rows = _visible_labels(panel)
-    panel.search.setText("BUCLE")  # case-insensitive, matches the label "Habilitar navegación en bucle"
-    shown = _visible_labels(panel)
-    assert any("bucle" in text.lower() for text in shown)
-    assert len(shown) < len(all_rows)
-    titles = [l for l in panel.body.findChildren(QLabel) if l.objectName() == "groupTitle"]
-    assert sum(t.isVisibleTo(panel) for t in titles) == 1  # only the section holding that row
-    panel.search.setText("tema")  # section title match shows the whole section
-    assert any(t.isVisibleTo(panel) and t.text().lower() == "tema" for t in titles)
-    panel.search.setText("zzzzzz")
-    assert panel.no_results.isVisibleTo(panel)
-    assert not [t for t in titles if t.isVisibleTo(panel)]
-    panel.search.setText("")
-    assert not panel.no_results.isVisibleTo(panel)
-    assert _visible_labels(panel) == all_rows
-    assert all(t.isVisibleTo(panel) for t in titles)
-    window.close_settings_overlay()
-
-
-def test_ov6_sections_are_title_plus_line_without_cards_or_dividers(window, qapp):
-    """OV-6: no card or divider widgets; each section header holds its title and one line."""
-    from PyQt6.QtWidgets import QFrame, QLabel
-
-    panel = _open_panel(window)
-    assert not [w for w in panel.findChildren(QWidget) if w.objectName() == "Card"]
-    rules = [f for f in panel.body.findChildren(QFrame) if f.objectName() == "rule"]
-    titles = [l for l in panel.body.findChildren(QLabel) if l.objectName() == "groupTitle"]
-    assert titles and len(rules) == len(titles)  # exactly one line per section title, none between rows
-    for title in titles:
-        header = title.parentWidget()
-        assert [f for f in header.findChildren(QFrame) if f.objectName() == "rule"]
-    window.close_settings_overlay()
-
-
-def test_ov7_text_sizes_and_control_heights():
-    """OV-7: labels >= 16 px, section titles >= 14 px, controls >= 44 px."""
-    from image_classifier.ui import settings_panel as sp
-
-    assert sp.LABEL_PX >= 16 and sp.GROUP_TITLE_PX >= 14 and sp.CONTROL_MIN_HEIGHT >= 44
-    assert f"font-size: {sp.LABEL_PX}px" in sp.STYLE and f"font-size: {sp.GROUP_TITLE_PX}px" in sp.STYLE
-    assert f"min-height: {sp.CONTROL_MIN_HEIGHT}px" in sp.STYLE
 
 
 def _paint_waves(qapp, window, action, settle_ms=120):

@@ -142,8 +142,6 @@ translations = {
         "settings_group_general": "General",
         "settings_group_viewing": "Viewing",
         "settings_group_storage": "Storage",
-        "settings_search_placeholder": "Search settings…",
-        "settings_no_results": "No settings match your search",
         "rotate_all_option": "Rotate ⟳ applies to all images",
         
         # 5. Help & Shortcuts
@@ -619,8 +617,6 @@ translations = {
         "settings_group_general": "General",
         "settings_group_viewing": "Visualización",
         "settings_group_storage": "Almacenamiento",
-        "settings_search_placeholder": "Buscar ajustes…",
-        "settings_no_results": "Ningún ajuste coincide con tu búsqueda",
         "rotate_all_option": "Rotar ⟳ se aplica a todas las imágenes",
         
         # 5. Ayuda y Comandos

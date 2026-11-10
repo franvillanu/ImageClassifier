@@ -52,7 +52,7 @@ from image_classifier.ui.whats_new import WhatsNewOverlay
 from image_classifier.ui.icons import IconFactory
 from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from image_classifier.ui.crop_overlay import CropOverlay
-from image_classifier.ui.settings_panel import Segmented, SettingsPanel, settings_drawer_geometry
+from image_classifier.ui.settings_panel import Segmented, SettingsPanel, settings_panel_position
 from image_classifier.ui.scaling import scale_css, ui_scale
 from image_classifier.ui.help_panel import HELP_STYLE, HelpContent
 from image_classifier.ui.sharpness_overlay import SharpnessOverlay, SharpnessOverlayContent
@@ -488,7 +488,6 @@ class PhotoViewer(QMainWindow):
             t["about_button"], t["help_button"],
             self.open_about_overlay, self.open_help_overlay, self.close_settings_overlay,
             scale=ui_scale(self),
-            search_placeholder=t["settings_search_placeholder"], no_results_text=t["settings_no_results"],
         )
 
         def cache_size_text(megabytes):
@@ -535,6 +534,9 @@ class PhotoViewer(QMainWindow):
         ))
         container.finish()
 
+        # Never taller than the window: the body scrolls, the header and footer stay put
+        container.setFixedHeight(min(container.preferred_height(), self.settings_overlay.height() - 40))
+
         # Clicking outside => close
         def overlay_mousePressEvent(ev):
             if not container.geometry().contains(ev.pos()):
@@ -543,9 +545,12 @@ class PhotoViewer(QMainWindow):
                 ev.accept()
         self.settings_overlay.mousePressEvent = overlay_mousePressEvent
 
-        # Place the drawer (full height, right edge) BEFORE anything is shown, so the overlay
+        # Place the panel next to the settings button BEFORE anything is shown, so the overlay
         # and its panel appear in a single paint (no dim-only frame, no mid-open processEvents).
-        container.setGeometry(settings_drawer_geometry(self.settings_overlay.size(), container.width()))
+        button = self.floating_menu.settings_button
+        beside_menu_x = self.floating_menu.mapTo(self, button.pos()).x() + button.width() + 15
+        x, y = settings_panel_position(self.settings_overlay.size(), container.size(), beside_menu_x)
+        container.move(x, y)
 
         self.settings_overlay.show()
         container.show()
