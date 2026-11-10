@@ -173,8 +173,17 @@ class HaloTextButton(HaloButton):
         from PyQt6.QtGui import QFontMetricsF
         metrics = QFontMetricsF(self._font)
         tw = max(metrics.horizontalAdvance(t) for t in (reserve or []) + [text])
-        self.setFixedWidth(int(self.PAD + self._size + self.GAP + tw + self.PAD + 2))
+        self._full_width = int(self.PAD + self._size + self.GAP + tw + self.PAD + 2)
+        self._compact = False
+        self.setFixedWidth(self._full_width)
         self.setText(text)
+
+    def set_compact(self, compact: bool):
+        """Icon only (the label moves to the tooltip), for narrow windows."""
+        if compact != self._compact:
+            self._compact = compact
+            self.setFixedWidth(self.PAD + self._size + self.PAD if compact else self._full_width)
+            self.update()
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -188,9 +197,10 @@ class HaloTextButton(HaloButton):
         s = self._size
         y = (self.height() - s) / 2.0
         icons.icon(self._name, s).paint(p, QRectF(self.PAD, y, s, s).toRect())
-        p.setFont(self._font)
-        text_rect = QRectF(self.PAD + s + self.GAP, 0, self.width() - self.PAD - s - self.GAP, self.height())
-        halo_text(p, text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+        if not self._compact:
+            p.setFont(self._font)
+            text_rect = QRectF(self.PAD + s + self.GAP, 0, self.width() - self.PAD - s - self.GAP, self.height())
+            halo_text(p, text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
         if self.isCheckable() and self.isChecked():
             p.setOpacity(1.0)
             p.setPen(Qt.PenStyle.NoPen)
@@ -322,12 +332,16 @@ class Popover(QWidget):
         a = anchor.mapTo(parent, anchor.rect().bottomRight())
         x = max(8, a.x() - self.card.width() + 1)
         y = a.y() + 8
+        drop = -8  # slides down into place
+        if y + self.card.height() > parent.height() - 8:  # no room below (bottom toolbar): open above
+            y = anchor.mapTo(parent, anchor.rect().topLeft()).y() - 8 - self.card.height()
+            drop = 8
         from PyQt6.QtCore import QPoint
-        self._slide.setStartValue(QPoint(x, y - 8))
+        self._slide.setStartValue(QPoint(x, y + drop))
         self._slide.setEndValue(QPoint(x, y))
         self._fade.setStartValue(0.0)
         self._fade.setEndValue(1.0)
-        self.card.move(x, y - 8)
+        self.card.move(x, y + drop)
         self._fx.setEnabled(True)
         self._fx.setOpacity(0.0)
         self.show()

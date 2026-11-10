@@ -316,14 +316,15 @@ def test_handle_drag_does_not_zoom_or_move_the_view(editor):
 def test_save_menu_opens_under_the_button_and_saves_a_copy(editor):
     ed, _, _ = editor
     ed._set_aspect(1.0)
+    ed._switch_tab("adjust")  # SPEC-004 ED-5: Guardar is shown outside the crop tool, at the end of the bottom row
     saved = []
     ed.saved.connect(lambda p, o: saved.append((p, o)))
     ed.btn_save.click()
     QApplication.processEvents()
     menu = ed.save_menu
     assert menu.isVisible()
-    save_rect = ed.btn_save.geometry().translated(ed.actions.pos())
-    assert _wait(lambda: menu.card.y() > save_rect.bottom(), timeout=2)  # after the slide-in
+    save_rect = ed.btn_save.rect().translated(ed.btn_save.mapTo(ed, ed.btn_save.rect().topLeft()))
+    assert _wait(lambda: menu.card.geometry().bottom() < save_rect.top(), timeout=2)  # opens above, after the slide
     assert abs(menu.card.geometry().right() - save_rect.right()) <= 2
     rows = [w for w in menu.card.children() if w.__class__.__name__ == "_MenuRow"]
     assert len(rows) == 3

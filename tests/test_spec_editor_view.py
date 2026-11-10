@@ -1,4 +1,4 @@
-"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-6)."""
+"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-7)."""
 import time
 
 import numpy as np
@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7"]
 
 
 def _wait(pred, timeout=10.0):
@@ -171,16 +171,16 @@ def _in_editor(ed, w):
     return w.rect().translated(w.mapTo(ed, QPoint(0, 0)))
 
 
-def test_ed3_modes_are_text_tabs_top_left_and_no_rail(editor):
-    """ED-3: Recortar/Ajuste are labelled tabs in the top-left corner; no icon rail on the left edge."""
+def test_ed3_modes_are_tabs_at_the_start_of_the_bottom_row(editor):
+    """ED-3: Recortar/Ajuste are labelled tabs that start the bottom row; no rail, only close at the top."""
     ed = editor
     assert not hasattr(ed, "rail")
-    assert _in_editor(ed, ed.tab_crop).left() < 60
     for tab, label in ((ed.tab_crop, "Recortar"), (ed.tab_adjust, "Ajuste")):
-        r = _in_editor(ed, tab)
-        assert tab.text() == label
-        assert r.right() < ed.width() / 3 and r.top() < 40, r
-    assert _in_editor(ed, ed.tab_crop).right() < _in_editor(ed, ed.tab_adjust).left()  # side by side
+        assert tab.text() == label and ed.crop_tools.isAncestorOf(tab)
+    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
+    assert _in_editor(ed, ed.tab_crop).left() == min(_in_editor(ed, w).left() for w in shown)
+    assert _in_editor(ed, ed.tab_crop).right() < _in_editor(ed, ed.tab_adjust).left()
+    assert not ed.actions.isAncestorOf(ed.btn_save) and ed.actions.isAncestorOf(ed.btn_cancel)
     assert ed.tab_crop.isChecked() and not ed.tab_adjust.isChecked()
     ed._switch_tab("adjust")
     assert ed.tab_adjust.isChecked() and not ed.tab_crop.isChecked()
@@ -188,7 +188,7 @@ def test_ed3_modes_are_text_tabs_top_left_and_no_rail(editor):
 
 @pytest.mark.parametrize("tab", ["crop", "adjust", "result"])
 def test_ed4_history_and_compare_live_in_the_bottom_row(editor, tab):
-    """ED-4: undo, redo, reset and compare are in the bottom row on every tab; undo/redo start it."""
+    """ED-4: undo, redo, reset and compare are in the bottom row on every tab, after the tab's tools."""
     ed = editor
     if tab == "result":
         ed._set_aspect(1.0)
@@ -196,28 +196,45 @@ def test_ed4_history_and_compare_live_in_the_bottom_row(editor, tab):
     else:
         ed._switch_tab(tab)
     QApplication.processEvents()
-    row = _in_editor(ed, ed.crop_tools)
-    assert row.top() > ed.height() * 0.75
+    assert _in_editor(ed, ed.crop_tools).top() > ed.height() * 0.75
     for b in (ed.btn_undo, ed.btn_redo, ed.btn_reset, ed.btn_compare):
         assert ed.crop_tools.isAncestorOf(b) and b.isVisible()
-    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
-    first_x = min(_in_editor(ed, w).left() for w in shown)
-    assert _in_editor(ed, ed.btn_undo).left() == first_x
+    tools = ed.crop_group if tab == "crop" else ed.adjust_group if tab == "adjust" else None
+    if tools is not None:
+        assert _in_editor(ed, tools).right() < _in_editor(ed, ed.btn_undo).left()
     assert _in_editor(ed, ed.btn_undo).right() < _in_editor(ed, ed.btn_redo).left()
 
 
-def test_ed5_save_is_not_an_accent_button_while_cropping(editor):
-    """ED-5: on Recortar only Listo is the accent button; Guardar becomes the accent again elsewhere."""
+@pytest.mark.parametrize("tab", ["crop", "adjust", "result"])
+def test_ed5_the_row_ends_in_one_accent_button(editor, tab):
+    """ED-5: Listo while cropping, Guardar elsewhere: one accent button, last in the bottom row."""
     ed = editor
-    assert ed.btn_apply.objectName() == "Primary"
-    assert ed.btn_save.objectName() != "Primary"
-    ed._switch_tab("adjust")
-    assert ed.btn_save.objectName() == "Primary"
-    ed._switch_tab("crop")
-    assert ed.btn_save.objectName() != "Primary"
+    if tab == "result":
+        ed._set_aspect(1.0)
+        ed._apply_crop()
+    else:
+        ed._switch_tab(tab)
+        ed._set_aspect(1.0)  # so both would be enabled
+    QApplication.processEvents()
+    expected = ed.btn_apply if tab == "crop" else ed.btn_save
+    other = ed.btn_save if tab == "crop" else ed.btn_apply
+    assert expected.isVisible() and not other.isVisible()
+    assert expected.objectName() == "Primary" and ed.crop_tools.isAncestorOf(expected)
+    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
+    assert _in_editor(ed, expected).right() == max(_in_editor(ed, w).right() for w in shown)
+
+
+def test_ed5_save_options_open_above_the_bottom_row(editor):
+    """ED-5: Guardar sits at the bottom, so its options open above it, fully inside the editor."""
+    ed = editor
     ed._set_aspect(1.0)
-    ed._apply_crop()
-    assert ed.btn_save.objectName() == "Primary"
+    ed._switch_tab("adjust")
+    ed.btn_save.click()
+    menu = ed.save_menu
+    assert _wait(lambda: menu._slide.state() == menu._slide.State.Stopped, timeout=2)
+    card = menu.card.geometry()
+    assert card.bottom() < _in_editor(ed, ed.btn_save).top() and card.top() >= 0
+    menu.close_menu()
 
 
 def test_ed6_photo_area_uses_the_full_width(editor):
@@ -229,3 +246,22 @@ def test_ed6_photo_area_uses_the_full_width(editor):
         for c in (ed.crop_canvas, ed.adjust_canvas):
             left, _, right, _ = c._insets
             assert left == right <= EDGE + 8, (tab, c._insets)
+
+
+@pytest.mark.parametrize("width", [1920, 1366, 1280])
+def test_ed7_bottom_row_fits_the_window(editor, width):
+    """ED-7: on every tab the row stays inside the window; labels go first, then the ruler narrows."""
+    ed = editor
+    ed.parent().resize(width, 900)
+    for tab in ("crop", "adjust", "result"):
+        ed._switch_tab(tab)
+        QApplication.processEvents()
+        r = _in_editor(ed, ed.crop_tools)
+        assert r.left() >= 0 and r.right() < ed.width(), (width, tab, r)
+        assert ed.ruler.width() >= 200
+        if width == 1920:
+            assert not ed.tab_crop._compact and ed.ruler.width() == 360
+    ed.parent().resize(1920, 900)
+    ed._switch_tab("crop")
+    QApplication.processEvents()
+    assert not ed.tab_crop._compact and ed.ruler.width() == 360  # wider again: everything comes back
