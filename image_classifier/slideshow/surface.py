@@ -30,8 +30,16 @@ def paint_slide(widget):
             surface.progress, (surface.pixmap.width(), surface.pixmap.height()),
             (widget.width(), widget.height()), surface.strength)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.setOpacity(frame.opacity)
-        bounds = panned_bounds(frame.bounds, surface.pan, surface.zoom, (widget.width(), widget.height()))
+        bounds = frame.bounds
+        if not surface.fade:  # SPEC-002 SE-1: fade only while playing, and a stopped slide at an end is not off screen
+            painter.setOpacity(1.0)
+            if surface.progress <= 0 or surface.progress >= 1:
+                bounds = EFFECTS[surface.entry.effect_id].evaluate(
+                    surface.progress, (surface.pixmap.width(), surface.pixmap.height()),
+                    (widget.width(), widget.height()), 0).bounds  # strength 0: no zoom or offset, fitted and centred
+        else:
+            painter.setOpacity(frame.opacity)
+        bounds = panned_bounds(bounds, surface.pan, surface.zoom, (widget.width(), widget.height()))
         painter.drawPixmap(QRectF(*bounds), surface.pixmap, QRectF(surface.pixmap.rect()))
     painter.end()
     surface.framePainted.emit()
@@ -60,6 +68,7 @@ class SlideSurface(QWidget):
         self.zoom = 1.0
         self.entry = None
         self.progress = 0
+        self.fade = True
         self.strength = 100
         self._layout = QStackedLayout(self)
         self._layout.setContentsMargins(0,0,0,0)
@@ -134,8 +143,8 @@ class SlideSurface(QWidget):
             return pixmap
         return pixmap.transformed(QTransform().rotate(self.rotation), Qt.TransformationMode.SmoothTransformation)
 
-    def refresh(self, progress, strength):
-        self.progress, self.strength = progress, strength
+    def refresh(self, progress, strength, fade=True):
+        self.progress, self.strength, self.fade = progress, strength, fade
         self.canvas.update()
 
     def release(self):

@@ -20,6 +20,15 @@ from .settings_dialog import SettingsDialog
 from .surface import SlideSurface
 
 
+def whole_pixel_inset(length, dpr, limit=8):
+    """Logical pixels to leave uncovered so that ``length - inset`` is a whole number of device pixels (SG-1)."""
+    for inset in range(min(limit, max(1, length))):
+        device = (length - inset) * dpr
+        if abs(device - round(device)) < 1e-6:
+            return inset
+    return 0
+
+
 class PlayerWindow(QDialog):
     settingsChanged = pyqtSignal(object)
     # photo on screen when the slideshow closes, with its unrotated frame, emitted while the window is
@@ -264,6 +273,7 @@ class PlayerWindow(QDialog):
 
     ZOOM_STEP = 1.25  # per wheel notch (SZ-1)
     ZOOM_MAX = 5.0
+    ZOOM_MIN = 0.5  # below the normal framing: the photo smaller, centred, black around it (SZ-8)
 
     def _clamp_pan(self, x, y, zoom=None):
         zoom = self._zoom_target if zoom is None else zoom
@@ -283,7 +293,7 @@ class PlayerWindow(QDialog):
         if not notches:
             return True
         z0 = self._zoom_target
-        z1 = max(1.0, min(self.ZOOM_MAX, z0 * self.ZOOM_STEP ** notches))
+        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, z0 * self.ZOOM_STEP ** notches))
         if z1 == z0:
             return True
         point = self.surface.mapFromGlobal(event.globalPosition().toPoint())
@@ -313,16 +323,26 @@ class PlayerWindow(QDialog):
             return False
         if self._closing or self.surface.entry is None:
             return True
-        z1 = max(1.0, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
-        if z1 != self._zoom_target:
-            self._zoom_to(z1)
+        self._zoom_step(direction)
         return True
 
+    def _zoom_step(self, direction):
+        """One keyboard zoom step toward the screen centre (SZ-6, SZ-7)."""
+        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
+        if z1 != self._zoom_target:
+            self._zoom_to(z1)
+
     def _handle_pan_key(self, event, pressed):
-        """True when the key event belongs to Ctrl+arrow panning (it is then consumed)."""
+        """True when the key event belongs to Shift/Ctrl+arrow panning or Ctrl+Up/Down zoom (consumed)."""
         direction = self._PAN_KEYS.get(event.key())
         if direction is None:
             return False
+        modifiers = event.modifiers()
+        if direction[0] == 0 and modifiers & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl+Up / Ctrl+Down zoom in / out; holding repeats (SZ-7)
+            if pressed and not self._closing and self.surface.entry is not None:
+                self._zoom_step(direction[1])
+            return pressed
         pan_modifiers = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier  # SP-5
         if pressed and not event.modifiers() & pan_modifiers:
             return False
@@ -429,12 +449,13 @@ class PlayerWindow(QDialog):
         self._message(self._status)
 
     def _refresh(self):
+        fade = self.controller.playing  # a paused or finished slide is never drawn faded out (SE-1)
         if self.controller._waiting:
-            self.surface.refresh(self._frozen_progress, self._frozen_strength)
+            self.surface.refresh(self._frozen_progress, self._frozen_strength, fade)
         else:
             self._frozen_progress = self.controller.progress
             self._frozen_strength = self.controller.active_settings.strength
-            self.surface.refresh(self._frozen_progress, self._frozen_strength)
+            self.surface.refresh(self._frozen_progress, self._frozen_strength, fade)
 
     def _state_changed(self, state):
         label = self.t["slideshow_pause" if self.controller.playing else "slideshow_play"]
@@ -617,6 +638,7 @@ class PlayerWindow(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._fit_surface_to_pixels()
         if hasattr(self, "buttons") and "close" in self.buttons:
             self._position_controls()
         if hasattr(self, "loader"):
@@ -624,9 +646,26 @@ class PlayerWindow(QDialog):
 
     def event(self, event):
         result = super().event(event)
-        if event.type() == getattr(QEvent.Type, "DevicePixelRatioChange", None) and hasattr(self, "loader"):
-            self._update_decode_size()
+        if event.type() == getattr(QEvent.Type, "DevicePixelRatioChange", None):
+            self._fit_surface_to_pixels()
+            if hasattr(self, "loader"):
+                self._update_decode_size()
         return result
+
+    def _fit_surface_to_pixels(self):
+        """SPEC-002 SG-1: never let the GL surface end half-way through a device pixel.
+
+        With the FS-7 border at 150% the window is e.g. 2559 logical = 3838.5 device px wide; the
+        last screen column then kept a stale earlier frame (measured). Leaving the last logical
+        pixel to the black window background makes the surface end on a whole pixel."""
+        layout = self.layout()
+        if layout is None:
+            return
+        dpr = self.devicePixelRatioF()
+        right, bottom = whole_pixel_inset(self.width(), dpr), whole_pixel_inset(self.height(), dpr)
+        margins = layout.contentsMargins()
+        if (margins.right(), margins.bottom()) != (right, bottom):
+            layout.setContentsMargins(0, 0, right, bottom)
 
     def done(self, result):
         self._shutdown()

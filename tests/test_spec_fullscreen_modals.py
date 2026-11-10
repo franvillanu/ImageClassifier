@@ -10,14 +10,14 @@ import types
 import pytest
 from PIL import Image
 from PyQt6.QtCore import QCoreApplication, Qt
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 if sys.platform != "win32":
     _stub = types.ModuleType("image_classifier.shell_win")
     _stub.open_folder_and_select_item = lambda *args, **kwargs: None
     sys.modules.setdefault("image_classifier.shell_win", _stub)
 
-REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "OV-4", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
+REQUIRES = ["FS-1", "FS-2", "FS-3", "FS-4", "OV-1", "OV-2", "OV-3", "OV-4", "OV-5", "EP-1", "EP-2", "EP-3", "EP-4", "FS-5", "FS-7", "FS-8", "FS-9"]
 
 
 @pytest.fixture
@@ -185,6 +185,33 @@ def test_ov4_opening_settings_centres_the_panel_vertically(window, qapp):
     button = window.floating_menu.settings_button
     expected_x = window.floating_menu.mapTo(window, button.pos()).x() + button.width() + 15
     assert panel.x() == expected_x
+    window.close_settings_overlay()
+
+
+def test_ov5_every_section_title_is_followed_by_a_line(window, qapp):
+    """OV-5: each section title shares a row with a thin line; the panel keeps its size and cards."""
+    from PyQt6.QtWidgets import QFrame, QLabel
+
+    window.resize(1400, 900)
+    qapp.processEvents()
+    window.open_settings_overlay()
+    panel = [c for c in window.settings_overlay.children() if hasattr(c, "preferred_height")][0]
+    titles = [l for l in panel.body.findChildren(QLabel) if l.objectName() == "groupTitle"]
+    assert len(titles) == 6
+    for title in titles:
+        lines = [f for f in title.parentWidget().findChildren(QFrame) if f.objectName() == "titleRule"]
+        assert len(lines) == 1
+        line = lines[0]
+        shot = line.grab().toImage()
+        colour = shot.pixelColor(shot.width() // 2, 0)
+        assert (colour.red(), colour.green(), colour.blue()) == (0x3A, 0x3D, 0x44)  # grey line
+        text = title.grab().toImage()
+        blue = [text.pixelColor(x, y) for x in range(text.width()) for y in range(text.height())]
+        assert any(c.blue() > 220 and c.red() < 170 and c.green() > 160 for c in blue)  # light-blue title text
+        assert line.geometry().left() > title.geometry().right()  # after the title, on the same row
+        assert abs(line.geometry().center().y() - title.geometry().center().y()) <= 12
+    assert panel.width() == 360
+    assert panel.findChildren(QWidget, "Card")  # cards are unchanged
     window.close_settings_overlay()
 
 

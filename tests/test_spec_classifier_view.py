@@ -7,7 +7,7 @@ from PIL import Image
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtTest import QTest
 
-REQUIRES = ["CV-1", "CV-2"]
+REQUIRES = ["CV-1", "CV-2", "CV-3"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -102,3 +102,61 @@ def test_cv2_ctrl_zero_fits_and_arrows_still_zoom(window, qapp):
     QTest.keyClick(window, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
     qapp.processEvents()
     assert viewer.transform().m11() == pytest.approx(fit, rel=1e-3)
+
+
+def _zoomed_in(window, qapp):
+    viewer = window.image_viewer
+    for _ in range(8):
+        viewer._manual_zoom(zoom_in=True)
+    qapp.processEvents()
+    viewer.horizontalScrollBar().setValue(viewer.horizontalScrollBar().maximum() // 2)
+    viewer.verticalScrollBar().setValue(viewer.verticalScrollBar().maximum() // 2)
+    qapp.processEvents()
+    return viewer
+
+
+def _state(viewer):
+    return viewer.horizontalScrollBar().value(), viewer.verticalScrollBar().value(), viewer.transform().m11()
+
+
+def test_cv3_ctrl_up_down_zoom_like_up_down(window, qapp):
+    """CV-3: Ctrl+Up zooms in and Ctrl+Down zooms out, sent to the focused photo view."""
+    viewer = _zoomed_in(window, qapp)
+    target = qapp.focusWidget() or viewer
+    before = viewer.transform().m11()
+    QTest.keyClick(target, Qt.Key.Key_Up, Qt.KeyboardModifier.ControlModifier)
+    qapp.processEvents()
+    zoomed = viewer.transform().m11()
+    assert zoomed > before * 1.01
+    QTest.keyClick(target, Qt.Key.Key_Down, Qt.KeyboardModifier.ControlModifier)
+    qapp.processEvents()
+    assert viewer.transform().m11() < zoomed * 0.99
+
+
+@pytest.mark.parametrize("key,mods,axis,sign", [
+    (Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier, 1, 1),
+    (Qt.Key.Key_Up, Qt.KeyboardModifier.ShiftModifier, 1, -1),
+    (Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier, 0, 1),
+    (Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier, 0, 1),
+    (Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier, 0, -1),
+])
+def test_cv3_shift_arrows_and_ctrl_left_right_still_move(window, qapp, key, mods, axis, sign):
+    """CV-3: Shift+arrows and Ctrl+Left/Right keep moving the zoomed photo without zooming."""
+    viewer = _zoomed_in(window, qapp)
+    target = qapp.focusWidget() or viewer
+    before = _state(viewer)
+    QTest.keyClick(target, key, mods)
+    qapp.processEvents()
+    after = _state(viewer)
+    assert (after[axis] - before[axis]) * sign > 0
+    assert after[2] == pytest.approx(before[2])
+
+
+def test_cv3_help_shows_ctrl_up_down_as_zoom_not_move():
+    """CV-3: Help lists Ctrl+Up/Down with the zoom keys and not as a move alternative, EN and ES."""
+    from image_classifier.i18n.translations import translations
+
+    for lang in ("en", "es"):
+        t = translations[lang]
+        assert "Ctrl+⬆️" in t["shortcut_zoom_in_key"] and "Ctrl+⬇️" in t["shortcut_zoom_out_key"]
+        assert "Ctrl+⬆️" not in t["shortcut_pan_up_desc"] and "Ctrl+⬇️" not in t["shortcut_pan_down_desc"]
