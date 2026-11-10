@@ -1,11 +1,12 @@
 """The photo editor: crop and adjust over a non-destructive EditState.
 
 Layout follows the viewer itself: one full-bleed canvas in the theme colour
-with controls floating over it (halo icons on the left like the main menu,
-a single tool row at the bottom, save/close at the top right, and a
-dock of adjustment icons with one dial for the selected adjustment). The
-canvases are told which
-margins the controls occupy, so a fitted photo is never covered.
+with controls floating over it: the Recortar/Ajuste tabs at the top left,
+save/close at the top right, and one tool row at the bottom that starts with
+undo/redo and holds the tools of the current tab, compare and reset (the
+Ajuste dock adds one dial for the selected adjustment). See SPEC-004 ED-3..6.
+The canvases are told which margins the controls occupy, so a fitted photo is
+never covered.
 
 All edits flow through ``_set_state``. Widgets only display state and report
 user intent; history stores states; pixels are rendered from the source at
@@ -274,7 +275,7 @@ class PhotoEditor(QWidget):
         self.crop_canvas.rotateChanged.connect(self._ruler_changed)
         self.crop_canvas.rotateFinished.connect(self._ruler_released)
 
-        self._build_rail()
+        self._build_tabs()
         self._build_actions()
         self._build_crop_tools()
 
@@ -294,23 +295,15 @@ class PhotoEditor(QWidget):
         self._toast_timer.setSingleShot(True)
         self._toast_timer.timeout.connect(self._toast.hide)
 
-    def _build_rail(self):
-        """Vertical halo icons on the left, exactly where the viewer keeps its menu."""
-        self.tab_crop = HaloButton("crop", self.tr_("editor_tab_crop"), size=34, box=52)
-        self.tab_adjust = HaloButton("adjust", self.tr_("editor_tab_adjust"), size=34, box=52)
+    def _build_tabs(self):
+        """Top left: the two modes as labelled tabs (SPEC-004 ED-3); chosen about once per photo."""
+        self.tab_crop = HaloTextButton("crop", self.tr_("editor_tab_crop"), size=24, height=46)
+        self.tab_adjust = HaloTextButton("adjust", self.tr_("editor_tab_adjust"), size=24, height=46)
         for b in (self.tab_crop, self.tab_adjust):
             b.setCheckable(True)
-        self.btn_undo = HaloButton("undo", self.tr_("editor_undo") + "  (Ctrl+Z)", size=30, box=50)
-        self.btn_redo = HaloButton("redo", self.tr_("editor_redo") + "  (Ctrl+Y)", size=30, box=50)
-        self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=30, box=50)
-        self.rail = _row(self.tab_crop, self.tab_adjust, 22, self.btn_undo, self.btn_redo, self.btn_reset,
-                         spacing=8, parent=self, vertical=True)
-
+        self.tabs = _row(self.tab_crop, self.tab_adjust, spacing=12, parent=self)
         self.tab_crop.clicked.connect(lambda: self._switch_tab("crop"))
         self.tab_adjust.clicked.connect(lambda: self._switch_tab("adjust"))
-        self.btn_undo.clicked.connect(self._undo)
-        self.btn_redo.clicked.connect(self._redo)
-        self.btn_reset.clicked.connect(self._reset)
 
     def _build_actions(self):
         """Top right: one accent save button with its options, and a close icon."""
@@ -354,6 +347,14 @@ class PhotoEditor(QWidget):
                                self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, 10,
                                spacing=2)
         self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=30, box=46)
+        # SPEC-004 ED-4: history starts the row and stays on every tab, next to the tools in use
+        self.btn_undo = HaloButton("undo", self.tr_("editor_undo"), size=30, box=46)
+        self.btn_redo = HaloButton("redo", self.tr_("editor_redo"), size=30, box=46)
+        self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=30, box=46)
+        self.history_group = _row(self.btn_undo, self.btn_redo, 18, spacing=2)
+        self.btn_undo.clicked.connect(self._undo)
+        self.btn_redo.clicked.connect(self._redo)
+        self.btn_reset.clicked.connect(self._reset)
         self.btn_apply = tool_button(text=self.tr_("editor_done"), tooltip=self.tr_("editor_apply_hint"),
                                      object_name="Primary")
         self.btn_apply.setIcon(icons.icon("check", 18, halo=False))
@@ -361,8 +362,8 @@ class PhotoEditor(QWidget):
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
         self._build_adjust_dock()
-        self.crop_tools = _row(self.crop_group, self.adjust_group, self.btn_compare, self.apply_group,
-                               spacing=0, parent=self)
+        self.crop_tools = _row(self.history_group, self.crop_group, self.adjust_group, self.btn_compare,
+                               self.btn_reset, self.apply_group, spacing=0, parent=self)
         self.btn_compare.pressed.connect(lambda: self._set_compare(True))
         self.btn_compare.released.connect(lambda: self._set_compare(False))
         self.btn_apply.clicked.connect(self._apply_crop)
@@ -444,7 +445,8 @@ class PhotoEditor(QWidget):
     def _layout_overlays(self):
         w, h = self.width(), self.height()
         self.stack.setGeometry(0, 0, w, h)
-        self.rail.move(EDGE - 4, EDGE)
+        self.tabs.adjustSize()
+        self.tabs.move(EDGE, EDGE)
         self.actions.adjustSize()
         self.actions.move(w - self.actions.width() - EDGE, EDGE)
         self.crop_tools.adjustSize()
@@ -452,14 +454,14 @@ class PhotoEditor(QWidget):
         self.crop_tools.move((w - self.crop_tools.width()) // 2, tools_y)
         self.aspect_card.adjustSize()
         self.aspect_card.move((w - self.aspect_card.width()) // 2, tools_y - self.aspect_card.height() - 8)
-        top = EDGE + self.actions.height() + 8
+        top = EDGE + max(self.actions.height(), self.tabs.height()) + 8
         dial_y = tools_y - self.dial.height() - 2
         self.dial.move((w - self.dial.width()) // 2, dial_y)
         bottom = h - (dial_y if self._tab == "adjust" else tools_y) + 4
-        left = EDGE + self.rail.width() + 8
+        left = EDGE  # SPEC-004 ED-6: no rail, so the photo only keeps the edge gap on both sides
         self.crop_canvas.set_insets(left, top - 8, left, h - tools_y + 4)
         self.adjust_canvas.set_insets(left, top - 8, left, bottom)
-        for overlay in (self.rail, self.actions, self.crop_tools, self.dial, self.aspect_card):
+        for overlay in (self.tabs, self.actions, self.crop_tools, self.dial, self.aspect_card):
             overlay.raise_()
 
     def resizeEvent(self, e):
@@ -615,6 +617,7 @@ class PhotoEditor(QWidget):
         self._tab = tab
         self.tab_crop.setChecked(crop)
         self.tab_adjust.setChecked(tab == "adjust")
+        self._set_save_accent(not crop)
         self.stack.setCurrentWidget(self.crop_canvas if crop else self.adjust_canvas)
         self.crop_group.setVisible(crop)
         self.apply_group.setVisible(crop)
@@ -627,6 +630,14 @@ class PhotoEditor(QWidget):
             self.adjust_canvas.fit()
         (self.crop_canvas if crop else self.dial if tab == "adjust" else self.adjust_canvas).setFocus()
         QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
+
+    def _set_save_accent(self, accent: bool):
+        """SPEC-004 ED-5: while cropping, Listo is the only accent button; Guardar goes plain."""
+        name = "Primary" if accent else "Secondary"
+        if self.btn_save.objectName() != name:
+            self.btn_save.setObjectName(name)
+            self.btn_save.style().unpolish(self.btn_save)
+            self.btn_save.style().polish(self.btn_save)
 
     def _apply_crop(self):
         """Done: accept the crop and show the finished photo.

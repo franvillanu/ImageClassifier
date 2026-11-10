@@ -1,4 +1,4 @@
-"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1, ED-2)."""
+"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-6)."""
 import time
 
 import numpy as np
@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6"]
 
 
 def _wait(pred, timeout=10.0):
@@ -164,3 +164,68 @@ def test_ed2_mouse_release_keeps_background_and_insets(editor):
     _mouse(c, QEvent.Type.MouseButtonRelease, mid)
     assert c._insets == insets and c._bg.name() == bg
     assert c.image_rect() == rect
+
+
+def _in_editor(ed, w):
+    """Widget geometry in editor coordinates."""
+    return w.rect().translated(w.mapTo(ed, QPoint(0, 0)))
+
+
+def test_ed3_modes_are_text_tabs_top_left_and_no_rail(editor):
+    """ED-3: Recortar/Ajuste are labelled tabs in the top-left corner; no icon rail on the left edge."""
+    ed = editor
+    assert not hasattr(ed, "rail")
+    assert _in_editor(ed, ed.tab_crop).left() < 60
+    for tab, label in ((ed.tab_crop, "Recortar"), (ed.tab_adjust, "Ajuste")):
+        r = _in_editor(ed, tab)
+        assert tab.text() == label
+        assert r.right() < ed.width() / 3 and r.top() < 40, r
+    assert _in_editor(ed, ed.tab_crop).right() < _in_editor(ed, ed.tab_adjust).left()  # side by side
+    assert ed.tab_crop.isChecked() and not ed.tab_adjust.isChecked()
+    ed._switch_tab("adjust")
+    assert ed.tab_adjust.isChecked() and not ed.tab_crop.isChecked()
+
+
+@pytest.mark.parametrize("tab", ["crop", "adjust", "result"])
+def test_ed4_history_and_compare_live_in_the_bottom_row(editor, tab):
+    """ED-4: undo, redo, reset and compare are in the bottom row on every tab; undo/redo start it."""
+    ed = editor
+    if tab == "result":
+        ed._set_aspect(1.0)
+        ed._apply_crop()
+    else:
+        ed._switch_tab(tab)
+    QApplication.processEvents()
+    row = _in_editor(ed, ed.crop_tools)
+    assert row.top() > ed.height() * 0.75
+    for b in (ed.btn_undo, ed.btn_redo, ed.btn_reset, ed.btn_compare):
+        assert ed.crop_tools.isAncestorOf(b) and b.isVisible()
+    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
+    first_x = min(_in_editor(ed, w).left() for w in shown)
+    assert _in_editor(ed, ed.btn_undo).left() == first_x
+    assert _in_editor(ed, ed.btn_undo).right() < _in_editor(ed, ed.btn_redo).left()
+
+
+def test_ed5_save_is_not_an_accent_button_while_cropping(editor):
+    """ED-5: on Recortar only Listo is the accent button; Guardar becomes the accent again elsewhere."""
+    ed = editor
+    assert ed.btn_apply.objectName() == "Primary"
+    assert ed.btn_save.objectName() != "Primary"
+    ed._switch_tab("adjust")
+    assert ed.btn_save.objectName() == "Primary"
+    ed._switch_tab("crop")
+    assert ed.btn_save.objectName() != "Primary"
+    ed._set_aspect(1.0)
+    ed._apply_crop()
+    assert ed.btn_save.objectName() == "Primary"
+
+
+def test_ed6_photo_area_uses_the_full_width(editor):
+    """ED-6: left and right insets are equal and only the edge gap on both canvases and tabs."""
+    from image_classifier.editor.editor_window import EDGE
+    ed = editor
+    for tab in ("crop", "adjust"):
+        ed._switch_tab(tab)
+        for c in (ed.crop_canvas, ed.adjust_canvas):
+            left, _, right, _ = c._insets
+            assert left == right <= EDGE + 8, (tab, c._insets)
