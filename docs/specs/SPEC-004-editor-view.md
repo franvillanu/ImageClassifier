@@ -14,6 +14,7 @@ Tests: `tests/test_spec_editor_view.py`
 | ED-4 | Deshacer, Rehacer, Restablecer and Comparar are in the bottom tool row on every tab (Recortar, Ajuste and the result after Listo), after the current tab's tools. | They are the most frequently used actions, so they sit next to the slider and the tools the hand is already on, not in the far-left rail. |
 | ED-5 | The bottom row ends in exactly one accent button: Listo while cropping, Guardar on the other tabs (Guardar is hidden while cropping). Guardar's options open above it when there is no room below. | One finishing button in one fixed spot: it is always clear which button ends the current step, and Guardar sits with the other tools instead of in the far corner. |
 | ED-7 | The bottom row fits inside windows down to 1280 px wide on every tab: when it would not fit, the Recortar/Ajuste tabs first drop their labels (the name stays in the tooltip), then the straighten ruler narrows (not below 200 px). In wider windows the labels and the full ruler come back. | With the tabs and Guardar in it (ED-3, ED-5) the row is about 1510 px when cropping and 1420 px on Ajuste, wider than 1280–1366 px laptop screens, so its ends would be cut off. |
+| ED-8 | The bottom row sits on a near-opaque rounded grey dock, with thin dividers between its groups, and the selected adjustment is shown as a filled blue-grey rounded square. A zoomed photo under the dock never shows through it. | User (2026-11-10, screenshot): the row floated transparently over the photo, so after zooming in the icons and labels got lost in the picture; the design mock-up had a smooth rounded grey container. |
 | ED-6 | Without the rail, the space kept free on the photo's left and right is the same and only the edge gap, so the photo is centred and can use the full width. | The rail's width was reserved on both sides, shrinking wide photos for no reason. |
 
 ## Evidence
@@ -40,6 +41,10 @@ Tests: `tests/test_spec_editor_view.py`
   at full size. Fitted: 1366 px window → crop 1293 (ruler 360, icon tabs), Ajuste 1207 (icon tabs);
   1280 px → crop 1248 (ruler 315), Ajuste 1207. Below about 1240 px the Ajuste row still overflows. The three
   ED-7 tests fail on layout C's code (no compact tabs) and pass with the fit.
+- 2026-11-10 — ED-8: screenshot of the transparent row over a zoomed, light photo. Proof: rendering the editor
+  over an all-white photo zoomed 4×, a pixel inside the row's margin is #ffffff (old: the photo shows through)
+  and #232326 (new); the selected adjustment's corner pixel is #efefef (old, photo) and #263449 (new). The ED-8
+  test also fails on the old code (no `Divider`).
 
 ## Decision log
 

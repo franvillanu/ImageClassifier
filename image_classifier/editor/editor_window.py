@@ -40,7 +40,7 @@ from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
 from image_classifier.editor.state import Adjustments, EditState
 from image_classifier.editor.widgets import (
-    STYLE, AdjustDockButton, AspectStrip, Card, HaloButton, HaloTextButton, Popover, StraightenRuler, ValueDial,
+    STYLE, AdjustDockButton, AspectStrip, Card, Divider, HaloButton, HaloTextButton, Popover, StraightenRuler, ValueDial,
     tool_button,
 )
 from image_classifier.i18n.translations import translations
@@ -59,6 +59,7 @@ ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
 
 PROXY_MIN, PROXY_MAX = 2048, 4096
 EDGE = 16  # gap between floating controls and the window edge
+DOCK_FILL = (26, 26, 29, 245)  # bottom dock: near-opaque grey, like the design mock-up
 
 
 class _Task(QThread):
@@ -303,7 +304,7 @@ class PhotoEditor(QWidget):
         for b in (self.tab_crop, self.tab_adjust):
             b.setCheckable(True)
             b.setToolTip(b.text())  # the name stays reachable when the tab is icon-only (ED-7)
-        self.tabs = _row(self.tab_crop, self.tab_adjust, 18, spacing=4)
+        self.tabs = _row(self.tab_crop, self.tab_adjust, Divider(), spacing=4)
         self.tab_crop.clicked.connect(lambda: self._switch_tab("crop"))
         self.tab_adjust.clicked.connect(lambda: self._switch_tab("adjust"))
 
@@ -346,14 +347,14 @@ class PhotoEditor(QWidget):
         self.btn_aspect.setCheckable(True)
         self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=30, box=46)
         self.crop_group = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
-                               self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, 10,
+                               self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, Divider(),
                                spacing=2)
         self.btn_compare = HaloButton("compare", self.tr_("editor_compare"), size=30, box=46)
         # SPEC-004 ED-4: history stays in the row on every tab, after the tools in use
         self.btn_undo = HaloButton("undo", self.tr_("editor_undo"), size=30, box=46)
         self.btn_redo = HaloButton("redo", self.tr_("editor_redo"), size=30, box=46)
         self.btn_reset = HaloButton("reset", self.tr_("editor_reset"), size=30, box=46)
-        self.history_group = _row(self.btn_undo, self.btn_redo, spacing=2)
+        self.history_group = _row(Divider(), self.btn_undo, self.btn_redo, spacing=2)
         self.btn_undo.clicked.connect(self._undo)
         self.btn_redo.clicked.connect(self._redo)
         self.btn_reset.clicked.connect(self._reset)
@@ -364,9 +365,13 @@ class PhotoEditor(QWidget):
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
         self._build_adjust_dock()
-        self.crop_tools = _row(self.tabs, self.crop_group, self.adjust_group, self.btn_compare,
-                               self.history_group, self.btn_reset, self.apply_group, self.save_group,
-                               spacing=0, parent=self)
+        self._tool_row = _row(self.tabs, self.crop_group, self.adjust_group, self.btn_compare,
+                              self.history_group, self.btn_reset, self.apply_group, self.save_group, spacing=0)
+        # SPEC-004 ED-8: an opaque rounded grey dock, so the controls stay readable over a zoomed photo
+        self.crop_tools = Card(self, radius=16, fill=QColor(*DOCK_FILL))
+        dock = QHBoxLayout(self.crop_tools)
+        dock.setContentsMargins(10, 4, 10, 4)
+        dock.addWidget(self._tool_row)
         self.btn_compare.pressed.connect(lambda: self._set_compare(True))
         self.btn_compare.released.connect(lambda: self._set_compare(False))
         self.btn_apply.clicked.connect(self._apply_crop)
@@ -406,13 +411,13 @@ class PhotoEditor(QWidget):
         widgets = [self.btn_enhance, 14]
         for name in ADJUSTMENTS:
             if name == COLOR[0]:
-                widgets.append(16)  # small gap between the light and colour groups
+                widgets.append(Divider())  # between the light and colour groups
             b = AdjustDockButton(f"adj_{name}", self.tr_(f"editor_adj_{name}"))
             b.clicked.connect(lambda _=False, n=name: self._select_adjust(n))
             b.doubleClicked.connect(lambda n=name: self._apply_adjust(n, 0))
             self.adjust_buttons[name] = b
             widgets.append(b)
-        widgets.append(14)
+        widgets.append(Divider())
         self.adjust_group = _row(*widgets, spacing=2)
         self.dial = ValueDial(self)
         self.dial.setFixedWidth(560)
@@ -474,7 +479,7 @@ class PhotoEditor(QWidget):
         The full width is worked out from the current one plus the known size changes:
         a nested layout's size hint lags behind a fixed-width change made in the same call.
         """
-        for holder in (self.tabs, self.crop_group, self.crop_tools):
+        for holder in (self.tabs, self.crop_group, self._tool_row, self.crop_tools):
             holder.layout().invalidate()
         current = self.crop_tools.layout().sizeHint().width()
         tabs = (self.tab_crop, self.tab_adjust)
@@ -492,7 +497,7 @@ class PhotoEditor(QWidget):
         if excess > 0 and cropping:
             ruler = max(self.RULER_MIN, self.RULER_MAX - excess)
         self.ruler.setFixedWidth(ruler)
-        for holder in (self.tabs, self.crop_group, self.crop_tools):
+        for holder in (self.tabs, self.crop_group, self._tool_row, self.crop_tools):
             holder.layout().invalidate()
             holder.adjustSize()
 

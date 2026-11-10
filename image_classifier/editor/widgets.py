@@ -22,6 +22,7 @@ DANGER = "#DC3545"  # the app's close/destructive red
 DANGER_HOVER = "#B22222"
 CARD = QColor(12, 12, 14, 214)
 CARD_LINE = QColor(255, 255, 255, 26)
+SELECTED_FILL = QColor(38, 52, 73)  # selected adjustment in the dock (mock-up #263449)
 FONT = '"Segoe UI Variable Text", "Segoe UI", sans-serif'
 
 STYLE = f"""
@@ -665,7 +666,7 @@ class AdjustDockButton(QAbstractButton):
 
     The ring fills clockwise for positive values and anticlockwise for negative
     ones, so every adjustment's state is readable at a glance. The selected one
-    gets the accent bar underneath. Double-click resets it.
+    sits on a filled blue-grey rounded square. Double-click resets it.
     """
 
     doubleClicked = pyqtSignal()
@@ -707,6 +708,11 @@ class AdjustDockButton(QAbstractButton):
         r = self.RING
         ring = QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r)
         active = self.isChecked() or self._hover
+        if self.isChecked():  # SPEC-004 ED-8: selected = filled rounded square, as in the mock-up
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(SELECTED_FILL)
+            h = self.BOX / 2.0 - 1
+            p.drawRoundedRect(QRectF(c.x() - h, c.y() - h, 2 * h, 2 * h), 10, 10)
         p.setPen(QPen(QColor(255, 255, 255, 46 if active else 28), 2))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(ring)
@@ -718,9 +724,18 @@ class AdjustDockButton(QAbstractButton):
             p.setOpacity(0.78)
         s = 24
         icons.icon(self.name, s).paint(p, QRectF(c.x() - s / 2, c.y() - s / 2, s, s).toRect())
-        if self.isChecked():
-            p.setOpacity(1.0)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(ACCENT))
-            p.drawRoundedRect(QRectF(c.x() - 9, self.height() - 3, 18, 3), 1.5, 1.5)
+        p.end()
+
+
+class Divider(QWidget):
+    """Thin vertical line between groups of the bottom dock (SPEC-004 ED-8)."""
+
+    def __init__(self, height: int = 26, margin: int = 8, parent=None):
+        super().__init__(parent)
+        self._h = height
+        self.setFixedSize(2 * margin + 1, height)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.fillRect(self.width() // 2, 0, 1, self._h, QColor(255, 255, 255, 40))
         p.end()

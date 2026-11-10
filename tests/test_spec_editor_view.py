@@ -1,11 +1,11 @@
-"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-7)."""
+"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-8)."""
 import time
 
 import numpy as np
 import pytest
 from PIL import Image
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QImage, QMouseEvent
+from PyQt6.QtGui import QColor, QImage, QMouseEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from image_classifier.editor import geometry as g
@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8"]
 
 
 def _wait(pred, timeout=10.0):
@@ -265,3 +265,34 @@ def test_ed7_bottom_row_fits_the_window(editor, width):
     ed._switch_tab("crop")
     QApplication.processEvents()
     assert not ed.tab_crop._compact and ed.ruler.width() == 360  # wider again: everything comes back
+
+
+def test_ed8_dock_is_an_opaque_rounded_card_over_a_zoomed_photo(qapp, tmp_path):
+    """ED-8: over a white photo zoomed in, the dock stays dark grey; dividers; selected = filled square."""
+    from image_classifier.editor.widgets import Divider
+    path = tmp_path / "white.png"
+    Image.fromarray(np.full((800, 1200, 3), 255, np.uint8)).save(path)
+    host = QWidget()
+    host.resize(1920, 1000)
+    host.show()
+    ed = PhotoEditor(host, QImage(str(path)), str(path), language="es")
+    try:
+        ed._switch_tab("adjust")
+        c = ed.adjust_canvas
+        assert _wait(lambda: c._image is not None)
+        c.zoom_by(4.0)
+        QApplication.processEvents()
+        shot = ed.grab().toImage()
+        dock = _in_editor(ed, ed.crop_tools)
+        px = QColor(shot.pixel(dock.left() + 5, dock.center().y()))  # inside the dock's margin
+        assert px.red() < 60 and px.green() < 60 and px.blue() < 60, px.name()
+        assert sum(d.isVisible() for d in ed.crop_tools.findChildren(Divider)) >= 3
+        b = ed.adjust_buttons["brightness"]
+        assert b.isChecked()
+        btn = b.grab().toImage()
+        corner = QColor(btn.pixel(5, 6))  # inside the rounded square, outside the value ring
+        assert corner.alpha() > 200 and corner.blue() > corner.red() + 15, corner.name()
+    finally:
+        ed._close()
+        host.deleteLater()
+        QApplication.processEvents()
