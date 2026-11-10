@@ -366,6 +366,21 @@ def orientation_matrix(orientation: Orientation, source_size: Size) -> tuple[tup
     return (tuple(float(v) for v in m[0]), tuple(float(v) for v in m[1]), (0.0, 0.0, 1.0))
 
 
+def oriented_to_source(state: EditState, p: Point) -> Point:
+    """O point -> continuous S point (inverse of ``orientation_matrix``, which is a rigid map)."""
+    m = orientation_matrix(state.orientation, state.source_size)
+    x, y = p[0] - m[0][2], p[1] - m[1][2]
+    return m[0][0] * x + m[1][0] * y, m[0][1] * x + m[1][1] * y
+
+
+def output_to_source(state: EditState, n: Point) -> Point:
+    """Normalised output point (0..1 across the crop frame) -> continuous S point."""
+    c = state.crop
+    ux, uy = frame_axes(c.angle)
+    u, v = (n[0] - 0.5) * c.w, (n[1] - 0.5) * c.h
+    return oriented_to_source(state, (c.cx + ux[0] * u + uy[0] * v, c.cy + ux[1] * u + uy[1] * v))
+
+
 # --------------------------------------------------------------------------- view
 
 @dataclass(frozen=True)

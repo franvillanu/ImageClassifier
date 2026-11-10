@@ -673,8 +673,16 @@ class PhotoEditor(QWidget):
         if on:
             self._compare_return = shown = self.stack.currentWidget()
             view = getattr(self.crop_canvas, "_view", None) if shown is self.crop_canvas else None
-            zoom = view.zoom if view is not None else self.adjust_canvas.zoom()  # what the edit is shown at
-            self.adjust_canvas.set_compare((self._orig_qimage, self._size), zoom)
+            # SPEC-004 ED-1: same scale, and the source point at the view centre stays put
+            if view is not None:
+                mid = self.adjust_canvas.area_center()  # both canvases share the stack's geometry
+                zoom = view.zoom
+                focus = g.oriented_to_source(self._state, view.to_image((mid.x(), mid.y())))
+            else:
+                zoom = self.adjust_canvas.zoom()
+                c = self.adjust_canvas.view_center()
+                focus = g.output_to_source(self._state, (c.x(), c.y()))
+            self.adjust_canvas.set_compare((self._orig_qimage, self._size), zoom, focus)
             self.stack.setCurrentWidget(self.adjust_canvas)
         else:
             self.adjust_canvas.set_compare(None)
