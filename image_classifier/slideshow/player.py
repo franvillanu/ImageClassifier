@@ -264,6 +264,7 @@ class PlayerWindow(QDialog):
 
     ZOOM_STEP = 1.25  # per wheel notch (SZ-1)
     ZOOM_MAX = 5.0
+    ZOOM_MIN = 0.5  # below the normal framing: the photo smaller, centred, black around it (SZ-8)
 
     def _clamp_pan(self, x, y, zoom=None):
         zoom = self._zoom_target if zoom is None else zoom
@@ -283,7 +284,7 @@ class PlayerWindow(QDialog):
         if not notches:
             return True
         z0 = self._zoom_target
-        z1 = max(1.0, min(self.ZOOM_MAX, z0 * self.ZOOM_STEP ** notches))
+        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, z0 * self.ZOOM_STEP ** notches))
         if z1 == z0:
             return True
         point = self.surface.mapFromGlobal(event.globalPosition().toPoint())
@@ -318,7 +319,7 @@ class PlayerWindow(QDialog):
 
     def _zoom_step(self, direction):
         """One keyboard zoom step toward the screen centre (SZ-6, SZ-7)."""
-        z1 = max(1.0, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
+        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
         if z1 != self._zoom_target:
             self._zoom_to(z1)
 

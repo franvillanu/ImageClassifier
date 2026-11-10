@@ -14,7 +14,7 @@ from image_classifier.slideshow.player import PlayerWindow
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.surface import panned_bounds
 
-REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6", "SZ-7"]
+REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6", "SZ-7", "SZ-8"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -56,7 +56,7 @@ def _settled(qapp, player):
 
 
 def test_sz1_wheel_zooms_smoothly_by_125_percent_per_notch_within_range(player, qapp):
-    """SZ-1: one notch -> x1.25 reached over several frames; never below 1x or above 5x; playback continues."""
+    """SZ-1: one notch -> x1.25 reached over several frames; between 0.5x and 5x; playback continues."""
     steps = []
     original = player.surface.set_zoom
     player.surface.set_zoom = lambda z: (steps.append(z), original(z))
@@ -71,7 +71,7 @@ def test_sz1_wheel_zooms_smoothly_by_125_percent_per_notch_within_range(player, 
     for _ in range(30):
         _wheel(player, -1)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.0, abs=0.003)
+    assert player.surface.zoom == pytest.approx(0.5, abs=0.003)  # SZ-8: the lower limit
     assert player.controller.playing
 
 
@@ -196,14 +196,14 @@ def test_sz6_plus_keys_zoom_in_smoothly_toward_the_centre(player, qapp, key, mod
 @pytest.mark.parametrize("mods", [Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ControlModifier,
                                   Qt.KeyboardModifier.KeypadModifier])
 def test_sz6_minus_keys_zoom_out_and_stop_at_normal(player, qapp, mods):
-    """SZ-6: - zooms back out and never below the normal framing."""
+    """SZ-6: - zooms back out, past the normal framing (SZ-8)."""
     QTest.keyClick(player, Qt.Key.Key_Plus)
     QTest.keyClick(player, Qt.Key.Key_Plus)
     _settled(qapp, player)
     for _ in range(4):
         QTest.keyClick(player, Qt.Key.Key_Minus, mods)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.0, abs=0.003)
+    assert player.surface.zoom == pytest.approx(1.25 ** -2, abs=0.003)
 
 
 def test_sz6_ctrl_zero_resets_and_both_pan_modifiers_still_pan(player, qapp):
@@ -236,7 +236,7 @@ SHIFT = Qt.KeyboardModifier.ShiftModifier
 
 
 def test_sz7_shift_up_zooms_in_and_shift_down_out_toward_the_centre(player, qapp):
-    """SZ-7: Shift+Up x1.25, Shift+Down back, within 1x..5x, pan untouched, playback continues."""
+    """SZ-7: Shift+Up x1.25, Shift+Down back, within 0.5x..5x, pan untouched, playback continues."""
     QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
     _settled(qapp, player)
     assert player.surface.zoom == pytest.approx(1.25, abs=0.003)
@@ -244,7 +244,7 @@ def test_sz7_shift_up_zooms_in_and_shift_down_out_toward_the_centre(player, qapp
     QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
     QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.0, abs=0.003)  # never below the normal framing
+    assert player.surface.zoom == pytest.approx(0.8, abs=0.003)  # past the normal framing (SZ-8)
     for _ in range(20):
         QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
     _settled(qapp, player)
@@ -280,3 +280,25 @@ def test_sz7_keys_listed_in_sheet_and_help():
     assert "Shift ↑↓" in inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
     for lang in ("en", "es"):
         assert "Shift" in translations[lang]["shortcut_slideshow_zoom_keys_key"]
+
+
+def test_sz8_zoom_out_goes_below_fit_and_stops_at_half(player, qapp):
+    """SZ-8: from the normal view, - / Shift+Down / wheel reach 0.8x, 0.64x, 0.512x, then stop at 0.5x; 0 returns to 1x."""
+    for expected in (0.8, 0.64, 0.512, 0.5, 0.5):
+        QTest.keyClick(player, Qt.Key.Key_Minus)
+        _settled(qapp, player)
+        assert player.surface.zoom == pytest.approx(expected, abs=0.003)
+    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
+    QTest.keyClick(player, Qt.Key.Key_0)
+    _settled(qapp, player)
+    assert player.surface.zoom == 1.0
+    for _ in range(5):
+        QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(0.5, abs=0.003)
+    QTest.keyClick(player, Qt.Key.Key_0)
+    _settled(qapp, player)
+    _wheel(player, -5)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(0.5, abs=0.003)
+    assert player.controller.playing
