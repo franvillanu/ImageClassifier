@@ -49,6 +49,9 @@ In the slideshow, any interaction with the floating control bar caused complete 
 | SD-7 | The panel has its own close button (accessible name "Close panel" / "Cerrar panel") that does the same as the row, and Esc still closes the dialog, not only the panel. | A panel that can only be closed from the row it covers feels trapped; Esc keeps its existing meaning. |
 | SD-3 | The toggle works from the keyboard (focusable, Space toggles) and has an accessible name. | Same reach as the rest of the dialog. |
 | SD-4 | The settings dialog opened during playback has no "Changes apply to the next slide" note. | User request: the note was unnecessary and added height. |
+| SE-1 | A slide's fade in and out applies only while the slideshow is playing. Whenever it is not playing (paused, or finished), the photo on screen is drawn fully visible, wherever its motion is. | User report: with Repeat off the show ended on a black screen that stayed black even going backwards. Every motion has opacity 0 at progress 0 and 1, so a slide frozen at either end was invisible. |
+| SE-2 | With Repeat off, when the last photo's time runs out the show stops on that photo, visible at its final position, and Previous / ← shows the earlier photo (visible, paused). | Same report: the end of the show must leave the last photo to look at, and going back must work. |
+| SE-3 | While playing, the fade in and out is unchanged (opacity 0 at the very start of a slide). | The fix must not remove the transition between photos. |
 
 ## Evidence (2026-11-09, real GL window, fullscreen, 2560×1440 @150%)
 
@@ -84,7 +87,14 @@ User saw the old photo for ~500 ms after closing. Real-app timeline: frame hande
 
 Frame intervals while playing: 1x median 16.7 ms / p95 16.8 / max 20.5; while zooming 16.7 / 16.8 / 17.7; held at 5x 16.7 / 16.8 / 17.1. No measurable cost: the zoom only changes the rectangle the motion already draws.
 
+### Black screen at the end of the show (2026-11-10)
+
+User report: Repeat off, the slideshow ends on black and stays black, also after going back. Measured `MotionEffect.evaluate(...).opacity` at progress 0 / 0.05 / 0.5 / 0.95 / 1: 0.0 / 0.42 / 1.0 / 0.42 / 0.0. Code path: `controller.next()` at the end sets `_elapsed = duration` (progress 1) and `playing = False`; `previous()` → `_navigate()` restarts the slide at progress 0 paused. `paint_slide` always applied the motion's opacity, so both frozen states drew an invisible photo.
+Diagnosis state: **direct causal evidence** for the mechanism (measured opacity, code path); the report itself was not reproduced in the GUI. The new test shows the old code paints black.
+
 ## Decision log
+
+- 2026-11-10 — Fade only while playing (SE-1). Alternatives: hold the last frame only at the end (leaves paused-then-Previous black), or start paused slides at a mid-motion progress (changes the clock, the pan and the history tests). Cost accepted: pausing during a fade makes the photo jump to full brightness.
 
 - 2026-11-09 — Exit lands on the photo being watched (SX-1). The previous verification note "Escape back to the unchanged classifier selection" is superseded by user request; the classifier state is still untouched when the slideshow ends on its starting photo (SX-2).
 

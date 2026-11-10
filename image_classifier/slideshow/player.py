@@ -429,12 +429,13 @@ class PlayerWindow(QDialog):
         self._message(self._status)
 
     def _refresh(self):
+        fade = self.controller.playing  # a paused or finished slide is never drawn faded out (SE-1)
         if self.controller._waiting:
-            self.surface.refresh(self._frozen_progress, self._frozen_strength)
+            self.surface.refresh(self._frozen_progress, self._frozen_strength, fade)
         else:
             self._frozen_progress = self.controller.progress
             self._frozen_strength = self.controller.active_settings.strength
-            self.surface.refresh(self._frozen_progress, self._frozen_strength)
+            self.surface.refresh(self._frozen_progress, self._frozen_strength, fade)
 
     def _state_changed(self, state):
         label = self.t["slideshow_pause" if self.controller.playing else "slideshow_play"]
