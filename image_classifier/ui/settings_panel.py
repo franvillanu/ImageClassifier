@@ -28,9 +28,9 @@ STYLE = f"""
     #SettingsContainer QWidget {{ background: transparent; }}
     #SettingsContainer QLabel {{ color: #e8eaed; font-size: 15px; border: none; padding: 0; }}
     #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
-    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 12px; font-weight: bold; padding: 0; }}
+    #SettingsContainer QLabel#groupTitle {{ color: #8cc4ff; font-size: 12px; font-weight: bold; padding: 0; }}
     #SettingsContainer QFrame#rule {{ background-color: #2c3036; border: none; }}
-    #SettingsContainer QFrame#titleRule {{ background-color: {SWITCH_ON}; border: none; }}
+    #SettingsContainer QFrame#titleRule {{ background-color: #3a3d44; border: none; }}
     #SettingsContainer QWidget#Card {{ background-color: #1e2024; border: 1px solid #2c3036; border-radius: 10px; }}
     #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #25282d; }}
     #SettingsContainer QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}

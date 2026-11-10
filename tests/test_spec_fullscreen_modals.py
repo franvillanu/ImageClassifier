@@ -204,7 +204,10 @@ def test_ov5_every_section_title_is_followed_by_a_line(window, qapp):
         line = lines[0]
         shot = line.grab().toImage()
         colour = shot.pixelColor(shot.width() // 2, 0)
-        assert (colour.red(), colour.green(), colour.blue()) == (0x34, 0x98, 0xDB)  # the app's blue
+        assert (colour.red(), colour.green(), colour.blue()) == (0x3A, 0x3D, 0x44)  # grey line
+        text = title.grab().toImage()
+        blue = [text.pixelColor(x, y) for x in range(text.width()) for y in range(text.height())]
+        assert any(c.blue() > 220 and c.red() < 170 and c.green() > 160 for c in blue)  # light-blue title text
         assert line.geometry().left() > title.geometry().right()  # after the title, on the same row
         assert abs(line.geometry().center().y() - title.geometry().center().y()) <= 12
     assert panel.width() == 360
