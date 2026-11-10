@@ -28,7 +28,7 @@ STYLE = f"""
     #SettingsContainer QWidget {{ background: transparent; }}
     #SettingsContainer QLabel {{ color: #e8eaed; font-size: 15px; border: none; padding: 0; }}
     #SettingsContainer QLabel#panelTitle {{ color: white; font-size: 16px; font-weight: bold; }}
-    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 12px; font-weight: bold; padding: 18px 6px 8px 6px; }}
+    #SettingsContainer QLabel#groupTitle {{ color: #9aa1ab; font-size: 12px; font-weight: bold; padding: 0; }}
     #SettingsContainer QFrame#rule {{ background-color: #2c3036; border: none; }}
     #SettingsContainer QWidget#Card {{ background-color: #1e2024; border: 1px solid #2c3036; border-radius: 10px; }}
     #SettingsContainer QWidget#ToggleRow:hover {{ background-color: #25282d; }}
@@ -235,9 +235,15 @@ class SettingsPanel(QWidget):
     # -- body builders ---------------------------------------------------
     def add_group_title(self, text):
         """Start a new group: a small caption, then a rounded card that the next rows go into."""
-        label = QLabel(text.upper(), self.body)
+        header = QWidget(self.body)
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(px(6, self.scale), px(18, self.scale), px(6, self.scale), px(8, self.scale))
+        header_row.setSpacing(px(10, self.scale))
+        label = QLabel(text.upper(), header)
         label.setObjectName("groupTitle")
-        self.body_layout.addWidget(label)
+        header_row.addWidget(label)
+        header_row.addWidget(_rule(header), 1, Qt.AlignmentFlag.AlignVCenter)  # OV-5: GENERAL ──────
+        self.body_layout.addWidget(header)
         self._card_widget = QWidget(self.body)
         self._card_widget.setObjectName("Card")
         self._card_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
