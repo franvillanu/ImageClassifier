@@ -87,9 +87,9 @@ def test_sp1_holding_moves_continuously_and_stops_on_release(player, qapp):
 
 def test_sp1_releasing_ctrl_first_still_stops(player, qapp):
     """SP-1: arrow released without Ctrl (Ctrl let go first) ends the hold."""
-    QTest.keyPress(player, Qt.Key.Key_Down, CTRL)
+    QTest.keyPress(player, Qt.Key.Key_Right, CTRL)
     _run(qapp, 0.1)
-    QTest.keyRelease(player, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    QTest.keyRelease(player, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier)
     _settled(qapp, player)
     assert player._pan_held == set()
 
@@ -192,18 +192,18 @@ def test_sp5_shift_hold_moves_continuously_and_stops_on_release(player, qapp):
     assert player.controller.playing
 
 
-def test_sp5_shift_up_down_do_not_pan_but_ctrl_and_ctrl_shift_do(player, qapp):
-    """SP-5: Shift+Up/Down no longer pan (they zoom, SZ-7); Ctrl+Down and Ctrl+Shift+Up still pan vertically."""
+def test_sp5_shift_up_down_pan_and_ctrl_up_down_do_not(player, qapp):
+    """SP-5: Shift+Down / Shift+Up pan vertically; Ctrl+Up / Ctrl+Down do not pan (they zoom, SZ-7)."""
     QTest.keyClick(player, Qt.Key.Key_Down, SHIFT)
-    QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
-    _settled(qapp, player)
-    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
-    QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
     _settled(qapp, player)
     assert player.surface.pan[1] < 0
-    QTest.keyClick(player, Qt.Key.Key_Up, CTRL | SHIFT)
+    QTest.keyClick(player, Qt.Key.Key_Up, SHIFT)
     _settled(qapp, player)
     assert player.surface.pan[1] == pytest.approx(0, abs=0.6)
+    QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
+    QTest.keyClick(player, Qt.Key.Key_Up, CTRL)
+    _settled(qapp, player)
+    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
 
 
 def test_sp5_sheet_and_help_name_both_modifiers():
@@ -212,7 +212,7 @@ def test_sp5_sheet_and_help_name_both_modifiers():
     from image_classifier.slideshow import settings_dialog
 
     source = inspect.getsource(settings_dialog.SettingsDialog._shortcuts)
-    assert "Ctrl ←↑↓→" in source and "Shift ←→" in source
+    assert "Shift ←↑↓→" in source and "Ctrl ←→" in source
     for lang in ("en", "es"):
         key = translations[lang]["shortcut_slideshow_pan_key"]
         assert "Ctrl" in key and "Shift" in key
