@@ -74,8 +74,11 @@ _PATHS = {
     # frame with resize corners
     "aspect": ['<rect x="6" y="11" width="36" height="26" rx="5"/>',
                '<path d="M13 22V17H19M35 26V31H29"/>'],
-    # a real wand: rounded body, tip band, curved sparkles
-    "auto": ['<path d="M8.6 39.4L25.5 22.5L29.5 26.5L12.6 43.4A2.8 2.8 0 0 1 8.6 43.4A2.8 2.8 0 0 1 8.6 39.4Z"/>',
+    # automatic straighten: a tilted frame over a level horizon line
+    "straighten": ['<rect x="11" y="13" width="26" height="22" rx="4" transform="rotate(-14 24 24)"/>',
+                   '<path d="M3 24H45"/>'],
+    # auto-adjust: a real wand (rounded body, tip band, curved sparkles)
+    "wand": ['<path d="M8.6 39.4L25.5 22.5L29.5 26.5L12.6 43.4A2.8 2.8 0 0 1 8.6 43.4A2.8 2.8 0 0 1 8.6 39.4Z"/>',
              '<path d="M25.5 22.5L28.5 19.5A2.8 2.8 0 0 1 32.5 23.5L29.5 26.5"/>',
              '<path d="M36 5Q37 10.5 42 11.5Q37 12.5 36 18Q35 12.5 30 11.5Q35 10.5 36 5Z" fill="white"/>',
              '<path d="M20 6Q20.6 9.2 23.5 9.8Q20.6 10.4 20 13.6Q19.4 10.4 16.5 9.8Q19.4 9.2 20 6Z" fill="white"/>',

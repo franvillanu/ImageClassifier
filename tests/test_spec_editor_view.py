@@ -1,11 +1,11 @@
-"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1, ED-2)."""
+"""Executable form of docs/specs/SPEC-004-editor-view.md (ED-1 to ED-8)."""
 import time
 
 import numpy as np
 import pytest
 from PIL import Image
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QImage, QMouseEvent
+from PyQt6.QtGui import QColor, QImage, QMouseEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from image_classifier.editor import geometry as g
@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9"]
 
 
 def _wait(pred, timeout=10.0):
@@ -164,3 +164,143 @@ def test_ed2_mouse_release_keeps_background_and_insets(editor):
     _mouse(c, QEvent.Type.MouseButtonRelease, mid)
     assert c._insets == insets and c._bg.name() == bg
     assert c.image_rect() == rect
+
+
+def _in_editor(ed, w):
+    """Widget geometry in editor coordinates."""
+    return w.rect().translated(w.mapTo(ed, QPoint(0, 0)))
+
+
+def test_ed3_modes_are_tabs_at_the_start_of_the_bottom_row(editor):
+    """ED-3: Recortar/Ajuste are labelled tabs that start the bottom row; no rail, only close at the top."""
+    ed = editor
+    assert not hasattr(ed, "rail")
+    for tab, label in ((ed.tab_crop, "Recortar"), (ed.tab_adjust, "Ajuste")):
+        assert tab.text() == label and ed.crop_tools.isAncestorOf(tab)
+    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
+    assert _in_editor(ed, ed.tab_crop).left() == min(_in_editor(ed, w).left() for w in shown)
+    assert _in_editor(ed, ed.tab_crop).right() < _in_editor(ed, ed.tab_adjust).left()
+    assert not ed.actions.isAncestorOf(ed.btn_save) and ed.actions.isAncestorOf(ed.btn_cancel)
+    assert ed.tab_crop.isChecked() and not ed.tab_adjust.isChecked()
+    ed._switch_tab("adjust")
+    assert ed.tab_adjust.isChecked() and not ed.tab_crop.isChecked()
+
+
+@pytest.mark.parametrize("tab", ["crop", "adjust", "result"])
+def test_ed4_history_and_compare_live_in_the_bottom_row(editor, tab):
+    """ED-4: undo, redo, reset and compare are in the bottom row on every tab, after the tab's tools."""
+    ed = editor
+    if tab == "result":
+        ed._set_aspect(1.0)
+        ed._apply_crop()
+    else:
+        ed._switch_tab(tab)
+    QApplication.processEvents()
+    assert _in_editor(ed, ed.crop_tools).top() > ed.height() * 0.75
+    for b in (ed.btn_undo, ed.btn_redo, ed.btn_reset, ed.btn_compare):
+        assert ed.crop_tools.isAncestorOf(b) and b.isVisible()
+    tools = ed.crop_group if tab == "crop" else ed.adjust_group if tab == "adjust" else None
+    if tools is not None:
+        assert _in_editor(ed, tools).right() < _in_editor(ed, ed.btn_undo).left()
+    assert _in_editor(ed, ed.btn_undo).right() < _in_editor(ed, ed.btn_redo).left()
+
+
+@pytest.mark.parametrize("tab", ["crop", "adjust", "result"])
+def test_ed5_the_row_ends_in_one_accent_button(editor, tab):
+    """ED-5: Listo while cropping, Guardar elsewhere: one accent button, last in the bottom row."""
+    ed = editor
+    if tab == "result":
+        ed._set_aspect(1.0)
+        ed._apply_crop()
+    else:
+        ed._switch_tab(tab)
+        ed._set_aspect(1.0)  # so both would be enabled
+    QApplication.processEvents()
+    expected = ed.btn_apply if tab == "crop" else ed.btn_save
+    other = ed.btn_save if tab == "crop" else ed.btn_apply
+    assert expected.isVisible() and not other.isVisible()
+    assert expected.objectName() == "Primary" and ed.crop_tools.isAncestorOf(expected)
+    shown = [w for w in ed.crop_tools.findChildren(QWidget) if w.isVisible() and w.width() > 0]
+    assert _in_editor(ed, expected).right() == max(_in_editor(ed, w).right() for w in shown)
+
+
+def test_ed5_save_options_open_above_the_bottom_row(editor):
+    """ED-5: Guardar sits at the bottom, so its options open above it, fully inside the editor."""
+    ed = editor
+    ed._set_aspect(1.0)
+    ed._switch_tab("adjust")
+    ed.btn_save.click()
+    menu = ed.save_menu
+    assert _wait(lambda: menu._slide.state() == menu._slide.State.Stopped, timeout=2)
+    card = menu.card.geometry()
+    assert card.bottom() < _in_editor(ed, ed.btn_save).top() and card.top() >= 0
+    menu.close_menu()
+
+
+def test_ed6_photo_area_uses_the_full_width(editor):
+    """ED-6: left and right insets are equal and only the edge gap on both canvases and tabs."""
+    from image_classifier.editor.editor_window import EDGE
+    ed = editor
+    for tab in ("crop", "adjust"):
+        ed._switch_tab(tab)
+        for c in (ed.crop_canvas, ed.adjust_canvas):
+            left, _, right, _ = c._insets
+            assert left == right <= EDGE + 8, (tab, c._insets)
+
+
+@pytest.mark.parametrize("width", [1920, 1366, 1280])
+def test_ed7_bottom_row_fits_the_window(editor, width):
+    """ED-7: on every tab the row stays inside the window; labels go first, then the ruler narrows."""
+    ed = editor
+    ed.parent().resize(width, 900)
+    for tab in ("crop", "adjust", "result"):
+        ed._switch_tab(tab)
+        QApplication.processEvents()
+        r = _in_editor(ed, ed.crop_tools)
+        assert r.left() >= 0 and r.right() < ed.width(), (width, tab, r)
+        assert ed.ruler.width() >= 200
+        if width == 1920:
+            assert not ed.tab_crop._compact and ed.ruler.width() == 360
+    ed.parent().resize(1920, 900)
+    ed._switch_tab("crop")
+    QApplication.processEvents()
+    assert not ed.tab_crop._compact and ed.ruler.width() == 360  # wider again: everything comes back
+
+
+def test_ed8_dock_is_an_opaque_rounded_card_over_a_zoomed_photo(qapp, tmp_path):
+    """ED-8: over a white photo zoomed in, the dock stays dark grey; dividers; selected = filled square."""
+    from image_classifier.editor.widgets import Divider
+    path = tmp_path / "white.png"
+    Image.fromarray(np.full((800, 1200, 3), 255, np.uint8)).save(path)
+    host = QWidget()
+    host.resize(1920, 1000)
+    host.show()
+    ed = PhotoEditor(host, QImage(str(path)), str(path), language="es")
+    try:
+        ed._switch_tab("adjust")
+        c = ed.adjust_canvas
+        assert _wait(lambda: c._image is not None)
+        c.zoom_by(4.0)
+        QApplication.processEvents()
+        shot = ed.grab().toImage()
+        dock = _in_editor(ed, ed.crop_tools)
+        px = QColor(shot.pixel(dock.left() + 5, dock.center().y()))  # inside the dock's margin
+        assert px.red() < 60 and px.green() < 60 and px.blue() < 60, px.name()
+        assert sum(d.isVisible() for d in ed.crop_tools.findChildren(Divider)) >= 3
+        b = ed.adjust_buttons["brightness"]
+        assert b.isChecked()
+        btn = b.grab().toImage()
+        corner = QColor(btn.pixel(5, 6))  # inside the rounded square, outside the value ring
+        assert corner.alpha() > 200 and corner.blue() > corner.red() + 15, corner.name()
+    finally:
+        ed._close()
+        host.deleteLater()
+        QApplication.processEvents()
+
+
+def test_ed9_wand_on_auto_adjust_and_own_icon_on_auto_straighten(editor):
+    """ED-9: the wand marks auto-adjust; auto-straighten has its own, different straighten icon."""
+    from image_classifier.editor import icons
+    assert editor.btn_enhance._name == "wand"
+    assert editor.btn_auto._name == "straighten"
+    assert icons._PATHS["straighten"] not in (icons._PATHS["wand"], icons._PATHS["enhance"])
