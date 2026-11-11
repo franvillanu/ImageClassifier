@@ -345,7 +345,7 @@ class PhotoEditor(QWidget):
             "aspect", self.tr_("editor_aspect_free"), self.tr_("editor_aspect_title"), size=28, height=46,
             reserve=[self.tr_(k) if k.startswith("editor_") else k for k, _ in ASPECTS])
         self.btn_aspect.setCheckable(True)
-        self.btn_auto = HaloButton("auto", self.tr_("editor_auto_straighten"), size=30, box=46)
+        self.btn_auto = HaloButton("straighten", self.tr_("editor_auto_straighten"), size=30, box=46)
         self.crop_group = _row(self.btn_rot_left, self.btn_rot_right, 14, self.ruler, 14,
                                self.btn_flip_h, self.btn_flip_v, 18, self.btn_aspect, self.btn_auto, Divider(),
                                spacing=2)
@@ -405,7 +405,7 @@ class PhotoEditor(QWidget):
     def _build_adjust_dock(self):
         """Ajuste: one icon per adjustment (ring = its value) and a single dial for the selected one."""
         self.adjust_buttons: dict[str, AdjustDockButton] = {}
-        self.btn_enhance = HaloTextButton("enhance", self.tr_("editor_auto_enhance"),
+        self.btn_enhance = HaloTextButton("wand", self.tr_("editor_auto_enhance"),
                                           self.tr_("editor_auto_enhance_tip"), size=26, height=54)
         self.btn_enhance.clicked.connect(self._auto_enhance)
         widgets = [self.btn_enhance, 14]

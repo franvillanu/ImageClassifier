@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9"]
 
 
 def _wait(pred, timeout=10.0):
@@ -296,3 +296,11 @@ def test_ed8_dock_is_an_opaque_rounded_card_over_a_zoomed_photo(qapp, tmp_path):
         ed._close()
         host.deleteLater()
         QApplication.processEvents()
+
+
+def test_ed9_wand_on_auto_adjust_and_own_icon_on_auto_straighten(editor):
+    """ED-9: the wand marks auto-adjust; auto-straighten has its own, different straighten icon."""
+    from image_classifier.editor import icons
+    assert editor.btn_enhance._name == "wand"
+    assert editor.btn_auto._name == "straighten"
+    assert icons._PATHS["straighten"] not in (icons._PATHS["wand"], icons._PATHS["enhance"])
