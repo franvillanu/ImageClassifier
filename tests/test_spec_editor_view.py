@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9", "ED-10"]
 
 
 def _wait(pred, timeout=10.0):
@@ -304,3 +304,11 @@ def test_ed9_wand_on_auto_adjust_and_own_icon_on_auto_straighten(editor):
     assert editor.btn_enhance._name == "wand"
     assert editor.btn_auto._name == "straighten"
     assert icons._PATHS["straighten"] not in (icons._PATHS["wand"], icons._PATHS["enhance"])
+
+
+def test_ed10_straighten_ruler_has_a_tick_every_five_degrees(editor):
+    """ED-10: 19 ticks from -45 to 45, labelled ones (every 15) major, no 1-degree ticks."""
+    r = editor.ruler
+    units = r.tick_units()
+    assert units == list(range(-45, 46, 5))
+    assert [u for u in units if r.is_major(u)] == list(range(-45, 46, 15))
