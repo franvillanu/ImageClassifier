@@ -430,6 +430,12 @@ class TickDial(QWidget):
         return self.MARGIN + (v + self.LIMIT) * self.px_per_unit()
 
     # ------------------------------------------------------------------ painting
+    def tick_units(self) -> list:
+        return list(range(-self.LIMIT, self.LIMIT + 1, self.MINOR))
+
+    def is_major(self, unit) -> bool:
+        return unit % self.MAJOR == 0
+
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -440,9 +446,9 @@ class TickDial(QWidget):
         p.drawLine(QPointF(self._x(-self.LIMIT), base), QPointF(self._x(self.LIMIT), base))
         # ticks above the track, labels below it
         p.setFont(ui_font(11))
-        for unit in range(-self.LIMIT, self.LIMIT + 1, self.MINOR):
+        for unit in self.tick_units():
             x = round(self._x(unit)) + 0.5
-            major = unit % self.MAJOR == 0
+            major = self.is_major(unit)
             length = 10.0 if unit == 0 else 7.0 if major else 4.0
             p.setPen(QPen(QColor(255, 255, 255, 190 if unit == 0 else 120 if major else 60), 1))
             p.drawLine(QPointF(x, base - 3 - length), QPointF(x, base - 3))
@@ -534,7 +540,7 @@ class StraightenRuler(TickDial):
     """Straighten angle, -45..45 degrees in 0.1 steps (positive turns the photo clockwise)."""
 
     LIMIT = int(ANGLE_LIMIT)
-    MINOR, MAJOR, LABEL_EVERY = 1, 5, 15
+    MINOR, MAJOR, LABEL_EVERY = 5, 15, 15  # ED-10: a tick every 5 degrees, not every degree
     DECIMALS = 1
     SNAP = 0.3
     STEP, BIG_STEP = 0.1, 1.0
