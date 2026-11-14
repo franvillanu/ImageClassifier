@@ -9,7 +9,7 @@ from image_classifier.imaging.loader import ImageFrame, ImageLoaderRunnable
 from image_classifier.ui.image_viewer import AdvancedGraphicsImageViewer
 from tests.test_spec_classifier_view import window  # noqa: F401 (shared app fixture)
 
-REQUIRES = ["CV-5", "CV-6", "CV-7", "CV-8"]
+REQUIRES = ["CV-5", "CV-6", "CV-7", "CV-8", "CV-9"]
 
 
 @pytest.fixture
@@ -251,3 +251,41 @@ def test_cv6_clear_invalidates_late_frames_and_source(view):
     assert view.pixmap_item.pixmap().isNull()
     assert not view.full_resolution_ready
     assert not view._full_request_timer.isActive()
+
+
+def _shown_longest(v):
+    pix = v.pixmap_item.pixmap()
+    return max(pix.width(), pix.height())
+
+
+def test_cv9_full_upgrade_after_window_grew_rerenders_fit_frame(view, qapp):
+    """CV-9: startup shows a preview sized for the small window, the window then grows, and the
+    full frame arrives: the fit display must be rebuilt, not left as the stretched preview."""
+    preview = QPixmap(1024, 640)
+    preview.fill(Qt.GlobalColor.gray)
+    view.onImageLoaded(preview, True, False, view.current_load_id,
+                       full_resolution=False, source_size=(3200, 2000))
+    assert view.auto_fit and _shown_longest(view) == 1024
+    view.resize(1800, 1100)  # saved window geometry applied after the first image
+    qapp.processEvents()
+    needed = view.preview_dimension()
+    assert needed > 1100
+    full = QPixmap(3200, 2000)
+    full.fill(Qt.GlobalColor.gray)
+    view._attach_full_resolution(full, view.current_load_id)
+    assert _shown_longest(view) >= needed - 2
+    assert view.auto_fit  # still fitted: no zoom involved
+
+
+def test_cv9_resize_before_full_frame_does_not_leave_blur_on_screen(view, qapp):
+    """CV-9: also when the full frame is decoded in the background after the resize."""
+    preview = QPixmap(1024, 640)
+    preview.fill(Qt.GlobalColor.gray)
+    view.onImageLoaded(preview, True, False, view.current_load_id,
+                       full_resolution=False, source_size=(3200, 2000))
+    view.resize(1800, 1100)
+    qapp.processEvents()
+    full = QPixmap(3200, 2000)
+    full.fill(Qt.GlobalColor.gray)
+    view._on_full_frame(ImageFrame("x.jpg", full.toImage(), True), view.current_load_id)
+    assert _shown_longest(view) >= view.preview_dimension() - 2
