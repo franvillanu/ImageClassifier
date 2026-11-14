@@ -12,6 +12,7 @@ import numpy as np
 
 from image_classifier.editor import adjust
 from image_classifier.editor.geometry import frame_axes, orientation_matrix
+from image_classifier.editor.removal import apply_removals
 from image_classifier.editor.state import EditState, Orientation
 
 STRIP_ROWS = 1024
@@ -102,14 +103,20 @@ def adjust_rgba(rgba: np.ndarray, adj, *, vignette: bool = True, strip_rows: int
     return out
 
 
+def clean_source(src: np.ndarray, state: EditState) -> np.ndarray:
+    """``src`` with the state's removed objects filled in (SPEC-005); ``src`` itself when there are none."""
+    return apply_removals(src, state.removals, state.source_size)
+
+
 def render(src: np.ndarray, state: EditState, *, scale: float = 1.0, interpolation=cv2.INTER_LANCZOS4,
            vignette: bool = True) -> np.ndarray:
     """Final pixels for ``state``: oriented, straightened, cropped and adjusted.
 
+    Removed objects are filled in first, in source space, so they follow later crops and turns (RM-5).
     ``src`` may be a downscaled proxy of the state's source; ``scale`` sizes the
     output relative to the crop's full-resolution size.
     """
-    out = warp(src, state, output_size(state, scale), interpolation=interpolation)
+    out = warp(clean_source(src, state), state, output_size(state, scale), interpolation=interpolation)
     return adjust_rgba(out, state.adjust, vignette=vignette)
 
 

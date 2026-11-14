@@ -17,6 +17,8 @@ Tests: `tests/test_spec_editor_view.py`
 | ED-8 | The bottom row sits on a near-opaque rounded grey dock, with thin dividers between its groups, and the selected adjustment is shown as a filled blue-grey rounded square. A zoomed photo under the dock never shows through it. | User (2026-11-10, screenshot): the row floated transparently over the photo, so after zooming in the icons and labels got lost in the picture; the design mock-up had a smooth rounded grey container. |
 | ED-9 | The automatic-adjustment button (Ajuste automático) shows the magic wand, and the automatic straighten button shows its own straighten icon (a tilted frame over a level line), different from the wand and from the sparkles. | User (2026-11-11): the wand was on auto-straighten, where it says nothing about straightening, while auto-adjust (the real "magic" action) had plain sparkles. |
 | ED-10 | The straighten ruler draws one tick every 5° (19 ticks from −45° to 45°); the labelled ticks (every 15°) are longer and the 0° tick is the longest. There are no 1° ticks. | User (2026-11-11, screenshot): with a tick every degree (91 lines) plus labels, the crop bar's ruler looked like a barcode and hurt the eye. Fine angles are still set by dragging, the arrow keys (0.1°) and the readout. |
+| ED-11 | The dial that sets the selected adjustment (Nitidez, Brillo…) sits on the same near-opaque rounded grey container as the bottom row, directly above it, so its label, ticks and value are readable over any photo; the photo keeps the space above the dial's container. | User (2026-11-14, screenshot): the dial floated bare over a light, textured pavement and its ticks and "Nitidez +30" got lost; ED-8 had only given the bottom row a container. |
+| ED-12 | The viewer's floating menu has one Editar button (sliders icon) that opens the editor on the Ajuste tab, in place of the separate Brillo and Nitidez buttons (both opened the same tab); Recortar stays. | User (2026-11-14): "Brillo y nitidez lo reemplazaría por un único icono de editar"; two buttons for one destination only added clutter. |
 | ED-6 | Without the rail, the space kept free on the photo's left and right is the same and only the edge gap, so the photo is centred and can use the full width. | The rail's width was reserved on both sides, shrinking wide photos for no reason. |
 
 ## Evidence
@@ -51,6 +53,8 @@ Tests: `tests/test_spec_editor_view.py`
   `enhance` (sparkles). The ED-9 test fails on that code and passes with the swap.
 - 2026-11-11 — ED-10: `StraightenRuler` had MINOR=1, MAJOR=5, so 91 ticks in about 360 px (one every 4 px).
   The ED-10 test fails on that code (91 ticks) and passes with 19.
+
+- 2026-11-14 — ED-11: the `ValueDial` was a bare widget over the photo (screenshot). The ED-11 test fails on that layout (no container behind the dial) and passes with the container.
 
 ## Decision log
 

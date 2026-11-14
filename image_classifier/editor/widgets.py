@@ -567,6 +567,82 @@ class ValueDial(TickDial):
     """One adjustment, -100..100."""
 
 
+class BrushSizeSlider(QWidget):
+    """Brush size for Eliminar: a thin track with a round knob, and a dot showing the size at the end."""
+
+    valueChanged = pyqtSignal(int)
+    MIN, MAX = 8, 160  # brush diameter on screen, px
+
+    def __init__(self, label: str = "", parent=None):
+        super().__init__(parent)
+        self._label = label
+        self._value = 40
+        self._font = ui_font(13)
+        from PyQt6.QtGui import QFontMetricsF
+        self._label_w = int(QFontMetricsF(self._font).horizontalAdvance(label)) + 12 if label else 0
+        self.setFixedSize(self._label_w + 150 + 56, 46)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(label)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, v: int):
+        v = max(self.MIN, min(self.MAX, int(v)))
+        if v != self._value:
+            self._value = v
+            self.update()
+            self.valueChanged.emit(v)
+
+    def _track(self):
+        x0 = self._label_w + 6
+        return x0, x0 + 138
+
+    def _set_from_x(self, x: float):
+        a, b = self._track()
+        t = max(0.0, min(1.0, (x - a) / (b - a)))
+        self.setValue(round(self.MIN + t * (self.MAX - self.MIN)))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        cy = self.height() / 2.0
+        if self._label:
+            p.setFont(self._font)
+            p.setPen(QColor(TEXT_DIM))
+            p.drawText(QRectF(0, 0, self._label_w, self.height()),
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+        a, b = self._track()
+        t = (self._value - self.MIN) / (self.MAX - self.MIN)
+        x = a + t * (b - a)
+        p.setPen(_round_pen(QColor(255, 255, 255, 50), 3))
+        p.drawLine(QPointF(a, cy), QPointF(b, cy))
+        p.setPen(_round_pen(QColor(ACCENT_HOVER), 3))
+        p.drawLine(QPointF(a, cy), QPointF(x, cy))
+        p.setPen(QPen(QColor(0, 0, 0, 140), 1))
+        p.setBrush(QColor(TEXT))
+        p.drawEllipse(QPointF(x, cy), 6.5, 6.5)
+        # the brush itself, drawn at its true diameter (capped to the space) in the circle at the right
+        d = min(self._value, 36)
+        p.setPen(QPen(QColor(255, 255, 255, 220), 1.5))
+        p.setBrush(QColor(255, 60, 60, 90))
+        p.drawEllipse(QPointF(b + 28, cy), d / 2.0, d / 2.0)
+        p.end()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._set_from_x(e.position().x())
+
+    def mouseMoveEvent(self, e):
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self._set_from_x(e.position().x())
+
+    def wheelEvent(self, e):
+        self.setValue(self._value + (6 if e.angleDelta().y() > 0 else -6))
+        e.accept()
+
+
 class AspectStrip(QWidget):
     """Row of aspect-ratio choices, each drawn at its true proportions.
 

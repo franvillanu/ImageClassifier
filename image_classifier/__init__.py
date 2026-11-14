@@ -1,7 +1,7 @@
 # Image Classifier package
 """Image Classifier – desktop app for organizing photos and choosing favorites."""
 
-__version__ = "2.0.29"
+__version__ = "2.0.30"
 
 
 def run():

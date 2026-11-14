@@ -93,12 +93,27 @@ def full_crop(size: tuple[int, int]) -> CropGeometry:
 
 
 @dataclass(frozen=True)
+class Removal:
+    """One brush stroke of "remove object", in source pixels (S space): the polyline the brush
+    followed and its radius. Filled from the rest of the photo when rendering (see ``removal.py``)."""
+
+    points: tuple[tuple[float, float], ...]
+    radius: float
+    extra: tuple = ()  # more strokes painted in the same go: ((points, radius), ...)
+
+    def strokes(self) -> tuple:
+        """Every stroke of this removal as ``(points, radius)``; they are filled together, in one pass."""
+        return ((self.points, self.radius),) + tuple(self.extra)
+
+
+@dataclass(frozen=True)
 class EditState:
     source_size: tuple[int, int]
     orientation: Orientation = field(default_factory=Orientation)
     crop: CropGeometry | None = None
     adjust: Adjustments = field(default_factory=Adjustments)
     aspect: float | None = None  # locked w/h ratio of the crop frame; None = free
+    removals: tuple[Removal, ...] = ()  # SPEC-005: strokes painted over objects to remove, in order
 
     def __post_init__(self):
         w, h = self.source_size
@@ -137,10 +152,13 @@ class EditState:
 
     @property
     def is_identity(self) -> bool:
-        return self.is_geometry_identity and self.adjust.is_identity
+        return self.is_geometry_identity and self.adjust.is_identity and not self.removals
 
     def with_crop(self, crop: CropGeometry) -> "EditState":
         return replace(self, crop=crop)
+
+    def with_removal(self, removal: Removal) -> "EditState":
+        return replace(self, removals=self.removals + (removal,))
 
     def with_adjust(self, **values) -> "EditState":
         return replace(self, adjust=replace(self.adjust, **values))

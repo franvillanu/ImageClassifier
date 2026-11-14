@@ -71,18 +71,14 @@ class FloatingMenu(QWidget):
         self.rotate_button.setIconSize(QSize(36, 36))
         self.rotate_button.setFixedSize(50, 50)
 
-        self.brightness_button = QPushButton()
-        self._set_tooltip(self.brightness_button, t, "brightness")
-        self.brightness_button.setIcon(IconFactory.get_icon("brightness", 36))
-        self.brightness_button.setIconSize(QSize(36, 36))
-        self.brightness_button.setFixedSize(50, 50)
-
-        self.sharpness_button = QPushButton()
-        self._set_tooltip(self.sharpness_button, t, "sharpness")
-        self.sharpness_button.setIcon(IconFactory.get_icon("sharpness", 36))
-        self.sharpness_button.setIconSize(QSize(36, 36))
-        self.sharpness_button.setFixedSize(50, 50)
-        self.sharpness_button.clicked.connect(lambda: self.parent().open_editor("adjust"))
+        # One "Edit" button replaces the old Brightness and Sharpness ones: both opened the editor's Ajuste tab.
+        self.edit_button = QPushButton()
+        self._set_tooltip(self.edit_button, t, "editor_open")
+        self.edit_button.setIcon(IconFactory.get_icon("edit", 36))
+        self.edit_button.setIconSize(QSize(36, 36))
+        self.edit_button.setFixedSize(50, 50)
+        self.edit_button.clicked.connect(lambda: self.parent().open_editor("adjust"))
+        self.brightness_button = self.sharpness_button = self.edit_button  # names other code still uses
 
         self.fullscreen_button = QPushButton()
         self._set_tooltip(self.fullscreen_button, t, "fullscreen")
@@ -120,8 +116,7 @@ class FloatingMenu(QWidget):
             self.open_button,
             self.export_button,
             self.crop_button,
-            self.brightness_button,
-            self.sharpness_button,
+            self.edit_button,
             self.rotate_button,
             self.fullscreen_button,
             self.slideshow_button,
@@ -139,8 +134,7 @@ class FloatingMenu(QWidget):
         self._set_tooltip(self.export_button, t, "export_favorites")
         self._set_tooltip(self.rotate_button, t, "rotate")
         self._set_tooltip(self.crop_button, t, "crop")
-        self._set_tooltip(self.brightness_button, t, "brightness")
-        self._set_tooltip(self.sharpness_button, t, "sharpness")
+        self._set_tooltip(self.edit_button, t, "editor_open")
         self._set_tooltip(self.fullscreen_button, t, "fullscreen")
         self._set_tooltip(self.filter_button, t, "filter")
         self._set_tooltip(self.settings_button, t, "settings")

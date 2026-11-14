@@ -13,7 +13,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import output_to_source_matrix
 from image_classifier.editor.state import CropGeometry, EditState, Orientation
 
-REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9", "ED-10"]
+REQUIRES = ["ED-1", "ED-2", "ED-3", "ED-4", "ED-5", "ED-6", "ED-7", "ED-8", "ED-9", "ED-10", "ED-11", "ED-12"]
 
 
 def _wait(pred, timeout=10.0):
@@ -312,3 +312,51 @@ def test_ed10_straighten_ruler_has_a_tick_every_five_degrees(editor):
     units = r.tick_units()
     assert units == list(range(-45, 46, 5))
     assert [u for u in units if r.is_major(u)] == list(range(-45, 46, 15))
+
+
+def test_ed11_the_dial_sits_on_a_dark_container_above_the_row(qapp, tmp_path):
+    """ED-11: over a white zoomed photo the dial's background is the dock's dark grey, right above the row."""
+    path = tmp_path / "white.png"
+    Image.fromarray(np.full((800, 1200, 3), 255, np.uint8)).save(path)
+    host = QWidget()
+    host.resize(1920, 1000)
+    host.show()
+    ed = PhotoEditor(host, QImage(str(path)), str(path), language="es")
+    try:
+        ed._switch_tab("adjust")
+        c = ed.adjust_canvas
+        assert _wait(lambda: c._image is not None)
+        c.zoom_by(4.0)
+        QApplication.processEvents()
+        card = _in_editor(ed, ed.dial_card)
+        dock = _in_editor(ed, ed.crop_tools)
+        assert ed.dial.parent() is ed.dial_card and ed.dial_card.isVisible()
+        assert 0 < dock.top() - card.bottom() <= 12 and card.width() > ed.dial.width()
+        shot = ed.grab().toImage()
+        px = QColor(shot.pixel(card.left() + 6, card.center().y()))  # the card's margin, left of the dial
+        assert px.red() < 60 and px.green() < 60 and px.blue() < 60, px.name()
+        assert c._insets[3] >= ed.height() - card.top()  # the photo keeps clear of the container
+    finally:
+        ed._close()
+        host.deleteLater()
+        QApplication.processEvents()
+
+
+def test_ed12_one_edit_button_replaces_brightness_and_sharpness(qapp):
+    """ED-12: the floating menu has a single Editar button that opens the editor on Ajuste."""
+    from image_classifier.ui.floating_menu import FloatingMenu
+
+    class Host(QWidget):
+        opened = []
+
+        def open_editor(self, tab="crop"):
+            self.opened.append(tab)
+
+    host = Host()
+    menu = FloatingMenu(host)
+    buttons = menu.findChildren(type(menu.edit_button))
+    assert menu.edit_button in buttons and menu.crop_button in buttons
+    assert menu.brightness_button is menu.edit_button and menu.sharpness_button is menu.edit_button
+    assert len(buttons) == 9  # open, export, crop, edit, rotate, fullscreen, slideshow, filter, settings (was 10)
+    menu.edit_button.click()
+    assert Host.opened == ["adjust"]

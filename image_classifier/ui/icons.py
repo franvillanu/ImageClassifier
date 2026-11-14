@@ -201,6 +201,18 @@ class IconFactory:
           <path d="M14 4V30C14 32 16 34 18 34H44" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         """,
+        "edit": """
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 7V17M12 25V41M24 7V27M24 35V41M36 7V11M36 19V41" stroke="black" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="12" cy="21" r="4" stroke="black" stroke-width="4"/>
+          <circle cx="24" cy="31" r="4" stroke="black" stroke-width="4"/>
+          <circle cx="36" cy="15" r="4" stroke="black" stroke-width="4"/>
+          <path d="M12 7V17M12 25V41M24 7V27M24 35V41M36 7V11M36 19V41" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="21" r="4" stroke="white" stroke-width="2"/>
+          <circle cx="24" cy="31" r="4" stroke="white" stroke-width="2"/>
+          <circle cx="36" cy="15" r="4" stroke="white" stroke-width="2"/>
+        </svg>
+        """,
         "sharpness": """
         <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none">
           <path d="M8 40 L22 40 L22 8 Z"

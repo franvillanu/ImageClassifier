@@ -210,7 +210,6 @@ class PhotoViewer(QMainWindow):
         self.update_favorite_count()
         self.setup_shortcuts()
         self.floating_menu.settings_button.clicked.connect(self.open_settings_overlay)
-        self.floating_menu.brightness_button.clicked.connect(lambda: self.open_editor("adjust"))
         # Before the first show: fullscreen keeps a 1px border so Windows never blacks out the screen (SPEC-001 FS-7)
         enable_border_in_fullscreen(self)
         self.show()
