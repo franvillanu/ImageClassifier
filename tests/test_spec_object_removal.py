@@ -14,7 +14,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import render
 from image_classifier.editor.state import CropGeometry, EditState, Orientation, Removal
 
-REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11"]
+REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11", "RM-12"]
 
 W, H = 480, 320
 PERIOD = 24
@@ -415,3 +415,43 @@ def test_rm11_moving_and_painting_repaint_only_a_small_area(editor):
         c._tick()
         QApplication.processEvents()
     assert log.areas and max(log.areas) < 0.1 * log.full, (max(log.areas), log.full)
+
+
+def _plan_offsets(**settings):
+    """Fill plan for a big stroke over noise (every place looks as good as any other) and its offsets."""
+    rng = np.random.default_rng(5)
+    rgb = np.clip(rng.normal(128, 40, (320, 480, 3)), 0, 255).astype(np.uint8)
+    big = Removal(points=((150.0, 160.0), (330.0, 160.0)), radius=50.0)
+    old = {k: getattr(rm, k) for k in settings}
+    try:
+        for k, v in settings.items():
+            setattr(rm, k, v)
+        plan = rm.fill_plan(_rgba(rgb), big, (480, 320))
+    finally:
+        for k, v in old.items():
+            setattr(rm, k, v)
+    hole = rm.stroke_mask(plan.work[::-1], big, plan.work[0] / (plan.box[2] - plan.box[0]), (plan.box[0], plan.box[1]),
+                          rm.MARGIN_WORK) > 0
+    return plan, hole
+
+
+def test_rm12_the_fill_comes_from_near_the_painted_area_in_coherent_chunks():
+    """RM-12: bounded source distance, and neighbouring filled pixels share their offset."""
+    plan, hole = _plan_offsets()
+    assert plan.offsets is not None
+    ys, xs = np.nonzero(hole)
+    size = max(np.ptp(ys), np.ptp(xs)) + 1
+    bound = max(rm.RADIUS * size, 3 * rm.PATCH) + rm.PATCH  # a patch's own extent on top of the centre distance
+    dist = np.hypot(plan.offsets[..., 0], plan.offsets[..., 1])[hole]
+    assert dist.max() <= bound * 1.5, (dist.max(), bound)
+    same = (plan.offsets[:, 1:] == plan.offsets[:, :-1]).all(-1) & hole[:, 1:] & hole[:, :-1]
+    assert same.sum() / max(1, (hole[:, 1:] & hole[:, :-1]).sum()) > 0.7  # most neighbours copy from the same offset
+
+
+def test_rm12_control_without_any_limit_the_sources_are_far():
+    """RM-12 (control): with every limit off the sources are far from the hole, so the bound above measures something."""
+    plan, hole = _plan_offsets(RADIUS=0.0, COH_W=0.0, CTX_W=0.0, NEAR=0.0)
+    ys, xs = np.nonzero(hole)
+    size = max(np.ptp(ys), np.ptp(xs)) + 1
+    bound = max(rm.RADIUS * size, 3 * rm.PATCH) + rm.PATCH
+    assert np.hypot(plan.offsets[..., 0], plan.offsets[..., 1])[hole].max() > bound * 1.5

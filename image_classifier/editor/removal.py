@@ -27,6 +27,11 @@ WORK = 200  # longest side of the working copy the search runs on
 PATCH = 9
 MARGIN_WORK = 2.0  # working pixels the painted area is grown by, to swallow the object's soft edge
 _FAR = 3e38
+RADIUS = 0.6  # a patch is only copied from within this many hole-sizes of itself (0 = anywhere)
+COH_W = 40.0  # weight of copying from the same place as the already filled neighbours (0 = off)
+COH_CAP = 40000.0
+CTX_W = 40.0  # weight of the surroundings match (below); 0 turns it off
+CTX = 21  # window (working px) whose average colour describes a place's surroundings
 NEAR = 60000.0  # weight of the nearness preference, against a patch SSD of ~1e4..1e5
 
 
@@ -100,6 +105,17 @@ def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int | None = None):
     gray[hole] = 0
     erode_k = np.ones((3, 3), np.uint8)
     yy, xx = np.mgrid[0:H - patch + 1, 0:W - patch + 1].astype(np.float32)
+    # surroundings of every candidate: the average colour of the real pixels around it (a pavement patch
+    # beside the wall should not be used to fill the wall, even if the few known pixels of the hole agree)
+    known0 = (~hole).astype(np.float32)
+    k_sum = cv2.boxFilter(known0, -1, (CTX, CTX), normalize=False, borderType=cv2.BORDER_CONSTANT)
+    ctx_img = cv2.boxFilter(lab * known0[..., None], -1, (CTX, CTX), normalize=False,
+                            borderType=cv2.BORDER_CONSTANT) / np.maximum(k_sum, 1.0)[..., None]
+    ctx_cand = ctx_img[r:H - r, r:W - r]
+    half = CTX // 2
+    hy, hx = np.nonzero(hole)
+    radius2 = (max(RADIUS * max(hy.max() - hy.min() + 1, hx.max() - hx.min() + 1), 3.0 * patch)) ** 2 if RADIUS else 0.0
+    filled = np.zeros((H, W), bool)
     while hole.any():
         hm = hole.astype(np.uint8)
         front = hm - cv2.erode(hm, erode_k, borderType=cv2.BORDER_CONSTANT, borderValue=0)
@@ -125,14 +141,32 @@ def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int | None = None):
         known3 = np.repeat((~unknown)[..., None], nch, 2).astype(np.float32)
         score = cv2.matchTemplate(lab[..., :nch], lab[win][..., :nch], cv2.TM_SQDIFF, mask=known3)
         # prefer sources near the target: far-away patches are what brings in the wrong scenery (walls, benches)
+        if CTX_W:
+            cy, cx = y0 + r, x0 + r
+            sl = (slice(max(0, cy - half), cy + half + 1), slice(max(0, cx - half), cx + half + 1))
+            seen = (~hole[sl]).astype(np.float32)
+            if seen.sum() >= 1:
+                mine = (lab[sl] * seen[..., None]).sum((0, 1)) / seen.sum()
+                score += CTX_W * ((ctx_cand - mine) ** 2).sum(-1)
+        if COH_W:
+            fw = filled[win]
+            if fw.any():  # continue from where the neighbours were copied from: coherent chunks, no stray scraps
+                mdy, mdx = np.median(offsets[win][fw], axis=0)
+                d2 = (yy - y0 - mdy) ** 2 + (xx - x0 - mdx) ** 2
+                score += np.minimum(COH_W * d2, COH_CAP)
         score += NEAR * ((yy - y0) ** 2 + (xx - x0) ** 2) / float(H * H + W * W)
         score[~valid] = _FAR
+        if radius2:  # only the neighbourhood of this patch is a candidate source (RM-3)
+            near = ((yy - y0) ** 2 + (xx - x0) ** 2) <= radius2
+            if (near & valid).any():
+                score[~near] = _FAR
         sy, sx = np.unravel_index(int(np.argmin(score)), score.shape)
         src = (slice(sy, sy + patch), slice(sx, sx + patch))
         img[win][unknown] = img[src][unknown]
         lab[win][unknown] = lab[src][unknown]
         gray[win][unknown] = lab[src][..., 0][unknown]
         offsets[win][unknown] = (sy - y0, sx - x0)
+        filled[win] |= unknown
         conf[win][unknown] = c_box[y, x]
         hole[win] = False
     return offsets

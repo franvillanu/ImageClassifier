@@ -25,6 +25,7 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 | RM-9 | The painted area is shown as one flat tint: where strokes overlap it is exactly as dark as where one stroke passes. | User (2026-11-14): overlapping translucent strokes got darker ("intensities"), so people kept painting to make it uniform. |
 | RM-10 | From the moment strokes are handed over until the filled photo is shown, the painted area pulses and a card with a spinner and "Eliminando…" is drawn over the photo near it; nothing of this remains afterwards. | User (2026-11-14): the fill takes a while and the small message at the top went unnoticed, so it looked like nothing happened. |
 | RM-11 | Painting and moving the brush stay light: a mouse move repaints only a small area around the brush (its ring and the new piece of stroke), never the whole canvas; what was already painted is drawn once into a cached layer, so a repaint does not rebuild it (its cost does not grow with the number of strokes); the busy pulse repaints only the painted area and its card. | User (2026-11-14): "when the user paints or moves the mouse with the removal dot it lags". Every move called `update()` on the whole canvas and every repaint rebuilt the union of all strokes (3.9 of 6.2 ms with 12 strokes), and in the app every repaint recomposes the whole window (ARCHITECTURE.md section 2). |
+| RM-12 | The fill comes from the neighbourhood of the painted area: every filled pixel is copied from a place within a bounded distance of itself (0.6 of the painted area's size, at least three patches), and neighbouring filled pixels mostly come from the same offset (coherent chunks, not scattered scraps). | User (2026-11-14, screenshots): "it brings results that are far from the drawn area" - pieces of bench and wall appeared on the pavement and hillside. Cause: patches in the middle of a hole have few known pixels to compare, so almost any place scores as well as any other and the search picked arbitrary far-away ones. |
 
 ## Evidence
 
@@ -71,6 +72,17 @@ objects over complex scenes can show repeated patterns; the user can undo and re
   after a jump) and the new piece of stroke; the pulse updates only the painted area and its card. After: a move
   repaints ~4,100 px (0.3 % of the canvas), independent of how much is painted, and no layer is rebuilt
   while painting. The real feel is still to be checked in the app.
+- 2026-11-14 — User: the performance work "made the final result less ok" and "it brings results far from the drawn
+  area". Checked on the 549x700 photo and on a 3294x4200 version (6x) with one removal over the whole figure. Two
+  things were true: (1) far-away scraps (bench and wall pieces on the pavement and hillside), because the
+  patch search could copy from anywhere in the working region and interior patches have few known pixels to
+  tell candidates apart; (2) the working size is not the culprit: at 6x, 300 px gave a wall chunk on the pavement
+  and 200 px a cleaner fill, so `WORK` stays 200. Fix, measured on the same photos: copy only from within
+  `RADIUS` (0.6) hole-sizes of the patch, prefer the offset of the neighbours already filled (`COH_W`, so chunks
+  continue instead of scattering), and compare the average colour of the surroundings (`CTX_W`). The weights
+  were chosen from a five-variant sheet; more surroundings weight (150) was worse (tan bits on the pavement).
+  Left: stepped edges on the bench (offsets are quantised at the working size and enlarged), and the bench
+  where it meets the hillside.
 - Real-app check: not run by the agent (GUI); the user verifies by relaunching from the branch.
 
 ## Decision log
