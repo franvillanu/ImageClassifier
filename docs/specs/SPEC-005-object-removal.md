@@ -18,9 +18,12 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 | RM-3 | The painted area is filled with content taken from elsewhere in the photo, not a blur: filling a stroke on a textured photo gives a result whose local detail (standard deviation of the high-pass) inside the area is at least 60 % of the surrounding photo's, and a stripe pattern crossing the area continues through it. | A plain OpenCV inpaint turned a person into a grey smear (measured on the user's photo, 2026-11-14). |
 | RM-4 | The fill is the same at preview and at full resolution: rendering a proxy and the full source gives the same region filled (the fill plan is computed once per stroke in a working size independent of the image's resolution and reused at any scale). | What the user sees while editing is what is saved. |
 | RM-5 | Removals live in source coordinates, so they stay on the same spot when the photo is then cropped, straightened, rotated or flipped, and a crop that excludes the area leaves the output untouched by it. | Edits must be freely combinable and reorderable by the user. |
-| RM-6 | On the Eliminar tab, dragging on the photo paints a stroke and releasing it adds one removal (one undo step) at the dragged place in source coordinates; the brush size is set in the row and the cursor shows it; the mouse wheel still zooms and the middle or right button pans. | A brush is how people select an object; zoom and pan are needed to be precise. |
+| RM-6 | On the Eliminar tab, dragging on the photo paints; everything painted in one go (strokes that follow each other within a short pause, or until Enter) is ONE removal and one undo step, however many strokes it has and however they overlap; the brush size is set in the row and the cursor shows it; the mouse wheel still zooms and the middle or right button pans. Ctrl+Z while strokes are waiting discards them. | A brush is how people select an object; zoom and pan are needed to be precise. User (2026-11-14): painting stroke after stroke to cover a person made one slow fill per stroke; it must be one selection and one fill. |
 | RM-7 | Eliminar is the third tab at the start of the bottom row, with its own icon; its row shows the brush size and the same Comparar / Deshacer / Rehacer / Restablecer / Guardar as the other tabs; the row still fits windows of 1280 px (SPEC-004 ED-7). | One toolbar for every mode. |
 | RM-8 | Comparar shows the original without the removals, and the crop tab and Auto adjust see the photo with the removals applied. | Compare must show what changed; the other tools must work on the current photo. |
+
+| RM-9 | The painted area is shown as one flat tint: where strokes overlap it is exactly as dark as where one stroke passes. | User (2026-11-14): overlapping translucent strokes got darker ("intensities"), so people kept painting to make it uniform. |
+| RM-10 | From the moment strokes are handed over until the filled photo is shown, the painted area pulses and a card with a spinner and "Eliminando…" is drawn over the photo near it; nothing of this remains afterwards. | User (2026-11-14): the fill takes a while and the small message at the top went unnoticed, so it looked like nothing happened. |
 
 ## Evidence
 
@@ -47,6 +50,14 @@ objects over complex scenes can show repeated patterns; the user can undo and re
   300 px work / 3 channels 19.9 s; 300 px / lightness only 6.6 s; **200 px / 3 channels 2.7 s**; 300 px / lightness
   only / 13 px patches 4.0 s; 220 px / lightness only 1.95 s. The fills of all variants look alike (same blocky
   limit at the wall/bench), so `WORK` went from 300 to 200 and colour matching was kept.
+- 2026-11-14 — User: the brush "has intensities" (overlapping translucent strokes got darker, so they kept painting
+  to even it out), each stroke was its own slow fill, and the wait was not noticeable (the only sign was a small
+  toast at the top). Cause in code: `_paint_brush` drew each stroke segment in translucent red on top of the
+  last, and every mouse release created a `Removal`. Fix: one flat fill of the union of all strokes
+  (`QPainterPath.united`), strokes collected until a 900 ms pause or Enter and handed over as one `Removal` with
+  `extra` strokes (one fill, one undo step), and a pulsing area plus a card with a spinner until the picture
+  arrives. Offscreen screenshot of four overlapping passes over the figure: uniform tint, card centred on the
+  area (offscreen has no fonts, so the text shows as boxes there).
 - Real-app check: not run by the agent (GUI); the user verifies by relaunching from the branch.
 
 ## Decision log

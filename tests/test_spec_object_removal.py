@@ -14,7 +14,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import render
 from image_classifier.editor.state import CropGeometry, EditState, Orientation, Removal
 
-REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8"]
+REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10"]
 
 W, H = 480, 320
 PERIOD = 24
@@ -198,6 +198,8 @@ def test_rm6_painting_adds_one_removal_at_the_dragged_place(editor):
     a = QPointF(rect.x() + 300 * z, rect.y() + 300 * z)
     b = QPointF(rect.x() + 420 * z, rect.y() + 300 * z)
     _drag(c, a, b)
+    assert ed._state.removals == ()  # painted, not handed over yet: the user may still add strokes
+    ed._commit_strokes()
     assert len(ed._state.removals) == 1
     r = ed._state.removals[0]
     assert abs(r.points[0][0] - 300) < 3 and abs(r.points[0][1] - 300) < 3
@@ -248,6 +250,7 @@ def test_rm8_compare_shows_the_original_and_other_tools_see_the_removal(editor):
     c = _open_remove(ed)
     rect, z = c.image_rect(), c.zoom()
     _drag(c, QPointF(rect.x() + 300 * z, rect.y() + 300 * z), QPointF(rect.x() + 420 * z, rect.y() + 300 * z))
+    ed._commit_strokes()
     assert _wait(lambda: not c.is_waiting())
     ed._set_compare(True)
     assert c._compare is not None and c._compare[0] is ed._orig_qimage
@@ -258,3 +261,69 @@ def test_rm8_compare_shows_the_original_and_other_tools_see_the_removal(editor):
     shown = ed.crop_canvas._levels[0][0]
     assert shown.size() == ed._orig_qimage.size()
     assert shown != ed._orig_qimage  # the painted area differs from the untouched photo
+
+
+def test_rm6_strokes_in_quick_succession_are_one_removal(editor):
+    """RM-6: several strokes + the pause = ONE removal with all of them; Ctrl+Z before it discards them."""
+    ed = editor
+    c = _open_remove(ed)
+    rect, z = c.image_rect(), c.zoom()
+    for y in (280, 320, 360):
+        _drag(c, QPointF(rect.x() + 300 * z, rect.y() + y * z), QPointF(rect.x() + 420 * z, rect.y() + y * z))
+    assert ed._state.removals == () and c.has_selection()
+    assert _wait(lambda: len(ed._state.removals) == 1, timeout=5)  # the pause timer hands them over
+    r = ed._state.removals[0]
+    assert len(r.strokes()) == 3 and not c.has_selection()
+    assert _wait(lambda: not c.is_waiting())
+    assert len(ed._state.removals) == 1
+    # painting again and undoing at once throws the new strokes away instead of the old removal
+    _drag(c, QPointF(rect.x() + 100 * z, rect.y() + 100 * z), QPointF(rect.x() + 150 * z, rect.y() + 100 * z))
+    ed._undo()
+    assert not c.has_selection() and len(ed._state.removals) == 1
+    ed._undo()
+    assert ed._state.removals == ()
+
+
+def test_rm9_overlapping_strokes_are_as_dark_as_one(editor):
+    """RM-9: the painted area is one flat tint: a pixel under two overlapping strokes equals one under a single stroke."""
+    ed = editor
+    c = _open_remove(ed)
+    c.set_brush_size(60)
+    rect, z = c.image_rect(), c.zoom()
+    y1 = rect.y() + 300 * z
+    x0 = rect.x() + 200 * z
+    probe = (int(x0 + 100), int(y1))
+    plain = c.grab().toImage().pixelColor(*probe)
+    _drag(c, QPointF(x0, y1), QPointF(x0 + 200, y1))
+    c._hover = None
+    once = c.grab().toImage().pixelColor(*probe)
+    _drag(c, QPointF(x0, y1), QPointF(x0 + 200, y1))  # the same place again, and again, slightly off
+    _drag(c, QPointF(x0 + 30, y1 + 5), QPointF(x0 + 190, y1 - 5))
+    c._hover = None
+    twice = c.grab().toImage().pixelColor(*probe)
+    assert once != plain  # it is tinted
+    assert once == twice, (once.name(), twice.name())
+
+
+def test_rm10_a_card_and_pulse_show_while_the_fill_is_worked_out(editor):
+    """RM-10: busy card ("Eliminando...") + pulsing area from hand-over until the new picture arrives, then nothing."""
+    ed = editor
+    c = _open_remove(ed)
+    rect, z = c.image_rect(), c.zoom()
+    _drag(c, QPointF(rect.x() + 300 * z, rect.y() + 300 * z), QPointF(rect.x() + 800 * z, rect.y() + 300 * z))
+    c._hover = None
+    before = c.grab().toImage()
+    ed._worker.stop()  # keep the fill from arriving, to look at the waiting state
+    ed._commit_strokes()
+    assert c.is_waiting() and c._busy_timer.isActive() and c._busy_text == "Eliminando..."
+    seen = {c.grab().toImage().pixelColor(int(rect.x() + 312 * z), int(rect.y() + 300 * z)).name()}
+    for _ in range(12):
+        c._tick()
+        seen.add(c.grab().toImage().pixelColor(int(rect.x() + 312 * z), int(rect.y() + 300 * z)).name())
+    assert len(seen) > 2, seen  # the area pulses
+    card = c.grab().toImage()
+    mid = card.pixelColor(int(rect.x() + 550 * z), int(rect.y() + 300 * z))
+    assert mid.red() < 50 and mid.green() < 50  # the dark card sits over the middle of the painted area
+    assert card != before
+    c.set_image(c._image, c._size)  # the filled picture arrives
+    assert not c.is_waiting() and not c._busy_timer.isActive()

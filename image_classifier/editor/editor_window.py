@@ -60,6 +60,7 @@ ASPECTS = [("editor_aspect_free", None), ("editor_aspect_original", "original"),
 
 PROXY_MIN, PROXY_MAX = 2048, 4096
 EDGE = 16  # gap between floating controls and the window edge
+COMMIT_PAUSE_MS = 900  # pause after the last stroke before the fill starts
 DOCK_FILL = (26, 26, 29, 245)  # bottom dock: near-opaque grey, like the design mock-up
 
 
@@ -218,13 +219,16 @@ class PhotoEditor(QWidget):
         self._straighten_base = None
         self._comparing = False
         self._shown_key = None  # (Adjustments, removals) currently displayed on the crop canvas
-        self._removing = False  # a painted stroke is being filled in
         self._latest = {}
         self._task = None
         self._closing = False
         self._tab = "crop"
         self._crop_session = 0  # history index when the crop tool was entered; "Done" squashes after it
 
+        self._commit_timer = QTimer(self)  # SPEC-005 RM-6: strokes in quick succession are one removal
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.setInterval(COMMIT_PAUSE_MS)
+        self._commit_timer.timeout.connect(self._commit_strokes)
         self._worker = PreviewWorker(self)
         self._worker.ready.connect(self._on_preview)
         app = QGuiApplication.instance()
@@ -275,7 +279,9 @@ class PhotoEditor(QWidget):
         self.crop_canvas.userZoomed.connect(self._flash_zoom)
         self.adjust_canvas.userZoomed.connect(self._flash_zoom)
         self.adjust_canvas.userZoomed.connect(self._request_previews)  # sharper pixels when zoomed in
-        self.adjust_canvas.strokeFinished.connect(self._on_stroke)  # SPEC-005
+        self.adjust_canvas.set_busy_text(self.tr_("editor_removing"))
+        self.adjust_canvas.strokeStarted.connect(lambda: self._commit_timer.stop())  # SPEC-005: still painting
+        self.adjust_canvas.strokeFinished.connect(lambda *_: self._commit_timer.start())
         self.crop_canvas.rotateStarted.connect(self._ruler_pressed)
         self.crop_canvas.rotateChanged.connect(self._ruler_changed)
         self.crop_canvas.rotateFinished.connect(self._ruler_released)
@@ -620,21 +626,25 @@ class PhotoEditor(QWidget):
         else:
             image, size = result
             self.adjust_canvas.set_image(image, size)
-            if self._removing:
-                self._removing = False
-                self._toast.hide()
+
 
     # ================================================================== interactions
     def _on_canvas_state(self, state: EditState, committed: bool):
         self._set_state(state, commit=committed, source="canvas")
 
-    def _on_stroke(self, path, radius: float):
-        """SPEC-005 RM-6: a finished brush stroke becomes one removal, in source pixels (one undo step)."""
+    def _commit_strokes(self):
+        """SPEC-005 RM-6: everything painted so far becomes ONE removal in source pixels (one undo step)."""
+        self._commit_timer.stop()
+        strokes = self.adjust_canvas.take_selection()
+        if not strokes:
+            return
         ow, oh = self._state.output_size  # the canvas draws the output at this size; the geometry wants 0..1
-        points = tuple(tuple(float(v) for v in g.output_to_source(self._state, (x / ow, y / oh))) for x, y in path)
-        self._removing = True
-        self._show_toast(self.tr_("editor_removing"), ms=120000)
-        self._set_state(self._state.with_removal(Removal(points, float(radius))), commit=True, source="remove")
+        done = []
+        for path, radius in strokes:
+            pts = tuple(tuple(float(v) for v in g.output_to_source(self._state, (x / ow, y / oh))) for x, y in path)
+            done.append((pts, float(radius)))
+        removal = Removal(done[0][0], done[0][1], tuple(done[1:]))
+        self._set_state(self._state.with_removal(removal), commit=True, source="remove")
 
     def _ruler_pressed(self):
         if self._straighten_base is None:
@@ -672,6 +682,10 @@ class PhotoEditor(QWidget):
         self._set_state(replace(self._state, aspect=r, crop=crop), commit=True)
 
     def _undo(self):
+        if self.adjust_canvas.has_selection():  # strokes not handed over yet: discard them
+            self._commit_timer.stop()
+            self.adjust_canvas.clear_selection()
+            return
         self._set_state(self._history.undo(), commit=False)
 
     def _redo(self):
@@ -683,6 +697,7 @@ class PhotoEditor(QWidget):
     def _switch_tab(self, tab: str):
         """``crop``, ``adjust``, or ``result`` (the finished photo after Done, no tool selected)."""
         crop = tab == "crop"
+        self._commit_strokes()
         if crop and self._tab != "crop":
             self._crop_session = self._history.index
         self._tab = tab
@@ -802,6 +817,8 @@ class PhotoEditor(QWidget):
             self.brush_size.setValue(self.brush_size.value() + (8 if k == Qt.Key.Key_BracketRight else -8))
         elif k == Qt.Key.Key_Backslash and not e.isAutoRepeat():
             self._set_compare(True)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._tab == "remove" and self.adjust_canvas.has_selection():
+            self._commit_strokes()
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._tab == "crop":
             self._apply_crop()
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.btn_save.isEnabled():
@@ -828,6 +845,7 @@ class PhotoEditor(QWidget):
         return _Modal(self, text)
 
     def _run_final(self, fn, on_done):
+        self._commit_strokes()
         state, src = self._state, self._src
         busy = self._busy(self.tr_("editor_saving"))
         self._task = _Task(lambda: fn(render(src, state)), self)

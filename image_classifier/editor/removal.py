@@ -42,10 +42,11 @@ class Plan:
 # --------------------------------------------------------------------------- geometry
 def _bbox(removal: Removal, source_size: tuple[int, int]) -> tuple[int, int, int, int]:
     """Working region: the stroke's box grown by its own size, so there is somewhere to copy from."""
-    xs = [p[0] for p in removal.points]
-    ys = [p[1] for p in removal.points]
-    r = removal.radius
-    x0, x1, y0, y1 = min(xs) - r, max(xs) + r, min(ys) - r, max(ys) + r
+    x0 = y0 = float("inf")
+    x1 = y1 = float("-inf")
+    for pts, r in removal.strokes():
+        x0, x1 = min(x0, min(p[0] for p in pts) - r), max(x1, max(p[0] for p in pts) + r)
+        y0, y1 = min(y0, min(p[1] for p in pts) - r), max(y1, max(p[1] for p in pts) + r)
     pad = max(x1 - x0, y1 - y0) * 0.9 + 24
     W, H = source_size
     return (max(0, int(x0 - pad)), max(0, int(y0 - pad)), min(W, int(np.ceil(x1 + pad))), min(H, int(np.ceil(y1 + pad))))
@@ -56,16 +57,17 @@ def stroke_mask(shape: tuple[int, int], removal: Removal, scale: float, origin: 
     """uint8 mask (255 = remove) of the brush path on an image of ``shape`` (h, w) at ``scale`` image px per
     source px, whose top-left is source point ``origin``. ``margin`` (image px) grows the painted area."""
     mask = np.zeros(shape, np.uint8)
-    pts = np.array([[(x - origin[0]) * scale, (y - origin[1]) * scale] for x, y in removal.points], np.float32)
-    r = max(0.5, removal.radius * scale + margin)
     shift = 4  # sub-pixel precision for cv2 drawing
     k = 1 << shift
-    ip = np.round(pts * k).astype(np.int32)
-    ir = int(round(r * k))
-    for p in ip:
-        cv2.circle(mask, (int(p[0]), int(p[1])), ir, 255, -1, cv2.LINE_8, shift)
-    if len(ip) > 1:
-        cv2.polylines(mask, [ip.reshape(-1, 1, 2)], False, 255, max(1, int(round(2 * r))), cv2.LINE_8, shift)
+    for points, radius in removal.strokes():
+        pts = np.array([[(x - origin[0]) * scale, (y - origin[1]) * scale] for x, y in points], np.float32)
+        r = max(0.5, radius * scale + margin)
+        ip = np.round(pts * k).astype(np.int32)
+        ir = int(round(r * k))
+        for p in ip:
+            cv2.circle(mask, (int(p[0]), int(p[1])), ir, 255, -1, cv2.LINE_8, shift)
+        if len(ip) > 1:
+            cv2.polylines(mask, [ip.reshape(-1, 1, 2)], False, 255, max(1, int(round(2 * r))), cv2.LINE_8, shift)
     return mask
 
 

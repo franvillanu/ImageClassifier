@@ -99,6 +99,11 @@ class Removal:
 
     points: tuple[tuple[float, float], ...]
     radius: float
+    extra: tuple = ()  # more strokes painted in the same go: ((points, radius), ...)
+
+    def strokes(self) -> tuple:
+        """Every stroke of this removal as ``(points, radius)``; they are filled together, in one pass."""
+        return ((self.points, self.radius),) + tuple(self.extra)
 
 
 @dataclass(frozen=True)
