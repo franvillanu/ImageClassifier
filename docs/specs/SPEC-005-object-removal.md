@@ -24,6 +24,7 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 
 | RM-9 | The painted area is shown as one flat tint: where strokes overlap it is exactly as dark as where one stroke passes. | User (2026-11-14): overlapping translucent strokes got darker ("intensities"), so people kept painting to make it uniform. |
 | RM-10 | From the moment strokes are handed over until the filled photo is shown, the painted area pulses and a card with a spinner and "Eliminando…" is drawn over the photo near it; nothing of this remains afterwards. | User (2026-11-14): the fill takes a while and the small message at the top went unnoticed, so it looked like nothing happened. |
+| RM-11 | Painting and moving the brush stay light: a mouse move repaints only a small area around the brush (its ring and the new piece of stroke), never the whole canvas; what was already painted is drawn once into a cached layer, so a repaint does not rebuild it (its cost does not grow with the number of strokes); the busy pulse repaints only the painted area and its card. | User (2026-11-14): "when the user paints or moves the mouse with the removal dot it lags". Every move called `update()` on the whole canvas and every repaint rebuilt the union of all strokes (3.9 of 6.2 ms with 12 strokes), and in the app every repaint recomposes the whole window (ARCHITECTURE.md section 2). |
 
 ## Evidence
 
@@ -58,6 +59,18 @@ objects over complex scenes can show repeated patterns; the user can undo and re
   `extra` strokes (one fill, one undo step), and a pulsing area plus a card with a spinner until the picture
   arrives. Offscreen screenshot of four overlapping passes over the figure: uniform tint, card centred on the
   area (offscreen has no fonts, so the text shows as boxes there).
+- 2026-11-14 — User: "when the user paints or moves the mouse with the removal dot it lags". Measured offscreen
+  (2100x1650 photo in a 1920x1080 canvas, 12 strokes / 912 points): a repaint cost 1.3 ms with nothing painted and
+  6.2 ms with the selection, 3.9 ms of it rebuilding the union path of all strokes (`QPainterPath.united`) on
+  every repaint, growing with the points painted. Worse, every mouse move (even a bare hover) called `update()`
+  on the whole canvas: the RM-11 test records 1,260,000 px (the full 1400x900 canvas) per move on the old code
+  and fails there. In the app each repaint also recomposes the whole window (ARCHITECTURE.md section 2), so the
+  number and size of repaints is what is felt. Fix: the painted area is drawn once into a cached layer (a segment
+  at a time while painting, redrawn only when the view changes), shown with one flat opacity, and moves update
+  only the brush ring (old and new, as two small rects: a first version used the box around both, ~100,000 px
+  after a jump) and the new piece of stroke; the pulse updates only the painted area and its card. After: a move
+  repaints ~4,100 px (0.3 % of the canvas), independent of how much is painted, and no layer is rebuilt
+  while painting. The real feel is still to be checked in the app.
 - Real-app check: not run by the agent (GUI); the user verifies by relaunching from the branch.
 
 ## Decision log

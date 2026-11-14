@@ -14,7 +14,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import render
 from image_classifier.editor.state import CropGeometry, EditState, Orientation, Removal
 
-REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10"]
+REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11"]
 
 W, H = 480, 320
 PERIOD = 24
@@ -327,3 +327,91 @@ def test_rm10_a_card_and_pulse_show_while_the_fill_is_worked_out(editor):
     assert card != before
     c.set_image(c._image, c._size)  # the filled picture arrives
     assert not c.is_waiting() and not c._busy_timer.isActive()
+
+
+def _region_area(region, w, h) -> int:
+    """Pixels a paint region really covers (the rectangles of the region, not the box around them)."""
+    from PyQt6.QtGui import QPainter as _P
+    mask = QImage(w, h, QImage.Format.Format_Grayscale8)
+    mask.fill(0)
+    p = _P(mask)
+    p.setClipRegion(region)
+    p.fillRect(0, 0, w, h, Qt.GlobalColor.white)
+    p.end()
+    rows = np.frombuffer(mask.constBits().asstring(mask.sizeInBytes()), np.uint8).reshape(h, mask.bytesPerLine())
+    return int((rows[:, :w] > 0).sum())
+
+
+class _PaintLog:
+    """Records the area of every paint event of a widget (what the compositor has to redo)."""
+
+    def __init__(self, widget):
+        from PyQt6.QtCore import QObject
+
+        class Filter(QObject):
+            def eventFilter(inner, obj, ev):
+                if obj is widget and ev.type() == QEvent.Type.Paint:
+                    self.areas.append(_region_area(ev.region(), widget.width(), widget.height()))
+                return False
+
+        self.areas = []
+        self._filter = Filter(widget)
+        widget.installEventFilter(self._filter)
+        self.full = widget.width() * widget.height()
+
+    def reset(self):
+        self.areas.clear()
+
+
+def test_rm11_moving_and_painting_repaint_only_a_small_area(editor):
+    """RM-11: mouse moves repaint a small area; the painted area is a cached layer, not rebuilt per repaint."""
+    ed = editor
+    c = _open_remove(ed)
+    c.set_brush_size(50)
+    rect, z = c.image_rect(), c.zoom()
+    log = _PaintLog(c)
+    QApplication.processEvents()
+    # hovering: ring only
+    log.reset()
+    for i in range(30):
+        _mouse(c, QEvent.Type.MouseMove, QPointF(rect.x() + (200 + 6 * i) * z, rect.y() + 300 * z), Qt.MouseButton.NoButton)
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.05 * log.full, (max(log.areas), log.full)
+    # a big scribble already painted
+    for i in range(8):
+        y = 120 + i * 50
+        _drag(c, QPointF(rect.x() + 60 * z, rect.y() + y * z), QPointF(rect.x() + 800 * z, rect.y() + y * z), steps=60)
+    QApplication.processEvents()
+    assert c.has_selection()
+    builds = c._layer_builds
+    log.reset()
+    # painting one more stroke over it: small repaints, and no layer is rebuilt
+    a, b = QPointF(rect.x() + 100 * z, rect.y() + 520 * z), QPointF(rect.x() + 600 * z, rect.y() + 540 * z)
+    _mouse(c, QEvent.Type.MouseButtonPress, a)
+    for i in range(1, 41):
+        _mouse(c, QEvent.Type.MouseMove, a + (b - a) * (i / 40))
+        QApplication.processEvents()
+    _mouse(c, QEvent.Type.MouseButtonRelease, b)
+    QApplication.processEvents()
+    assert max(log.areas) < 0.08 * log.full, (max(log.areas), log.full)
+    assert c._layer_builds == builds, "the painted layer must not be rebuilt while painting"
+    # the busy pulse repaints the painted area and the card, not the whole canvas
+    ed._request_previews = lambda: None  # no render arrives: look at the waiting state only
+    ed._commit_strokes()
+    QApplication.processEvents()
+    log.reset()
+    for _ in range(10):
+        c._tick()
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.6 * log.full  # this scribble covers a large part of the photo
+    # a small removal's pulse is tiny
+    c.set_image(c._image, c._size)
+    c.set_brush_size(30)
+    _drag(c, QPointF(rect.x() + 400 * z, rect.y() + 300 * z), QPointF(rect.x() + 440 * z, rect.y() + 300 * z))
+    ed._commit_strokes()
+    QApplication.processEvents()
+    log.reset()
+    for _ in range(10):
+        c._tick()
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.1 * log.full, (max(log.areas), log.full)
