@@ -27,7 +27,7 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 - 2026-11-14 — Request: "can we add a removal? to get rid of a guy like that" (a man walking away on paved ground in
   front of a stone wall). Probe on that photo (549x700) with a mask over the whole figure:
   `cv2.inpaint` (Telea) = a grey/yellow smear with radial streaks; translation-and-blend fill found no valid
-  offset (the figure is too big); Criminisi-style exemplar fill at 300 px working size (9x9 patches, masked
+  offset (the figure is too big); Criminisi-style exemplar fill at 300 px working size (now 200) (9x9 patches, masked
   SSD in Lab via `cv2.matchTemplate`) removed the figure with believable pavement and wall. Cost ~13 ms per
   patch (350 patches, 4.6 s) at 300 px, dominated by the masked template search, so it runs on the render
   worker and small objects (cropped region, native resolution) are near-instant.
@@ -40,6 +40,13 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 - 2026-11-14 — ED-7 with the third tab: the Ajuste row overflowed 1280 px by 25 px; fixed by letting the Auto button
   drop its label with the tabs. The crop row looked 195 px too wide at 1920 px because a stale layout hint was
   read after leaving the result tab; the layouts are now activated before measuring.
+- 2026-11-14 — User: "it worked but it is super slow". Profile (cProfile, 3294x4200 photo, proxy 1647x2100, one big
+  stroke): 6.6 s, of which 5.1 s (77 %) is `cv2.matchTemplate` (307 calls x 16 ms, the masked patch search over the
+  whole working copy); applying the plan 0.49 s, Poisson blend 0.23 s. So the cost is the search, and it grows with
+  the working size squared times the number of patches. Variants on the three-stroke figure (549x700 photo):
+  300 px work / 3 channels 19.9 s; 300 px / lightness only 6.6 s; **200 px / 3 channels 2.7 s**; 300 px / lightness
+  only / 13 px patches 4.0 s; 220 px / lightness only 1.95 s. The fills of all variants look alike (same blocky
+  limit at the wall/bench), so `WORK` went from 300 to 200 and colour matching was kept.
 - Real-app check: not run by the agent (GUI); the user verifies by relaunching from the branch.
 
 ## Decision log

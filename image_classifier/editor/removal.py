@@ -22,7 +22,8 @@ import numpy as np
 
 from image_classifier.editor.state import Removal
 
-WORK = 300  # longest side of the working copy the search runs on
+SEARCH_CHANNELS = 3  # Lab channels the patch search compares (1 = lightness only: ~3x faster)
+WORK = 200  # longest side of the working copy the search runs on
 PATCH = 9
 MARGIN_WORK = 2.0  # working pixels the painted area is grown by, to swallow the object's soft edge
 _FAR = 3e38
@@ -76,13 +77,15 @@ def _work_geometry(removal: Removal, source_size):
 
 
 # --------------------------------------------------------------------------- the search
-def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int = PATCH):
+def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int | None = None):
     """Fill ``hole`` (bool, h x w) of ``img`` (uint8 RGB). Returns the offset map (dy, dx) per hole pixel,
     or None when there is nowhere hole-free to copy from."""
+    patch = patch or PATCH
     H, W = hole.shape
     r = patch // 2
     hole = hole.copy()
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float32)
+    nch = SEARCH_CHANNELS
     # a source window is usable only if it contains no hole pixel at all (checked once, on the original hole)
     count = cv2.boxFilter(hole.astype(np.float32), -1, (patch, patch), normalize=False,
                           borderType=cv2.BORDER_CONSTANT)
@@ -117,8 +120,8 @@ def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int = PATCH):
         x0 = min(max(0, x - r), W - patch)
         win = (slice(y0, y0 + patch), slice(x0, x0 + patch))
         unknown = hole[win]
-        known3 = np.repeat((~unknown)[..., None], 3, 2).astype(np.float32)
-        score = cv2.matchTemplate(lab, lab[win], cv2.TM_SQDIFF, mask=known3)
+        known3 = np.repeat((~unknown)[..., None], nch, 2).astype(np.float32)
+        score = cv2.matchTemplate(lab[..., :nch], lab[win][..., :nch], cv2.TM_SQDIFF, mask=known3)
         # prefer sources near the target: far-away patches are what brings in the wrong scenery (walls, benches)
         score += NEAR * ((yy - y0) ** 2 + (xx - x0) ** 2) / float(H * H + W * W)
         score[~valid] = _FAR
