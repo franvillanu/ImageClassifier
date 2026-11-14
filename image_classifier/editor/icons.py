@@ -45,6 +45,9 @@ _PATHS = {
     "adj_tint": ['<path d="M24 6C24 6 11 21 11 29A13 13 0 0 0 37 29C37 21 24 6 24 6Z"/>',
                  '<path d="M17 30A7 7 0 0 0 23 36"/>'],
     "adj_sharpness": ['<path d="M8 40H22V8Z"/>', '<path d="M40 40H26V8Z" fill="white"/>'],
+    # Eliminar tab: an eraser rubbing out a line
+    "eraser": ['<g transform="rotate(-45 24 22)"><rect x="9" y="14" width="30" height="16" rx="4"/><path d="M22 14V30"/></g>',
+               '<path d="M16 40H42"/>'],
     "undo": ['<path d="M17 11L9 19L17 27"/>', '<path d="M9 19H29A10 10 0 0 1 29 39H20"/>'],
     "redo": ['<path d="M31 11L39 19L31 27"/>', '<path d="M39 19H19A10 10 0 0 0 19 39H28"/>'],
     # photo with a small "restore" badge: reads as "back to the original", not as undo

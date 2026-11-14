@@ -38,9 +38,10 @@ from image_classifier.editor.history import EditHistory
 from image_classifier.editor.preview_worker import PreviewWorker
 from image_classifier.editor.qtimage import qimage_to_rgba, rgba_to_qimage
 from image_classifier.editor.render import adjust_rgba, downscale, render
-from image_classifier.editor.state import Adjustments, EditState
+from image_classifier.editor.removal import apply_removals, clear_caches
+from image_classifier.editor.state import Adjustments, EditState, Removal
 from image_classifier.editor.widgets import (
-    STYLE, AdjustDockButton, AspectStrip, Card, Divider, HaloButton, HaloTextButton, Popover, StraightenRuler, ValueDial,
+    STYLE, AdjustDockButton, AspectStrip, BrushSizeSlider, Card, Divider, HaloButton, HaloTextButton, Popover, StraightenRuler, ValueDial,
     tool_button,
 )
 from image_classifier.i18n.translations import translations
@@ -216,7 +217,8 @@ class PhotoEditor(QWidget):
         self._state = self._history.current
         self._straighten_base = None
         self._comparing = False
-        self._shown_adjust = None  # Adjustments currently displayed on the crop canvas
+        self._shown_key = None  # (Adjustments, removals) currently displayed on the crop canvas
+        self._removing = False  # a painted stroke is being filled in
         self._latest = {}
         self._task = None
         self._closing = False
@@ -231,7 +233,7 @@ class PhotoEditor(QWidget):
 
         self._build_ui()
         self.crop_canvas.set_levels(self._orig_levels)
-        self._shown_adjust = Adjustments()  # the original levels are unadjusted
+        self._shown_key = (Adjustments(), ())  # the original levels are unadjusted and untouched
         self._set_state(self._state, commit=False)
         self._switch_tab(tab)
         if parent is not None:
@@ -273,6 +275,7 @@ class PhotoEditor(QWidget):
         self.crop_canvas.userZoomed.connect(self._flash_zoom)
         self.adjust_canvas.userZoomed.connect(self._flash_zoom)
         self.adjust_canvas.userZoomed.connect(self._request_previews)  # sharper pixels when zoomed in
+        self.adjust_canvas.strokeFinished.connect(self._on_stroke)  # SPEC-005
         self.crop_canvas.rotateStarted.connect(self._ruler_pressed)
         self.crop_canvas.rotateChanged.connect(self._ruler_changed)
         self.crop_canvas.rotateFinished.connect(self._ruler_released)
@@ -301,12 +304,15 @@ class PhotoEditor(QWidget):
         """The two modes as labelled tabs; they start the bottom row (SPEC-004 ED-3)."""
         self.tab_crop = HaloTextButton("crop", self.tr_("editor_tab_crop"), size=24, height=46)
         self.tab_adjust = HaloTextButton("adjust", self.tr_("editor_tab_adjust"), size=24, height=46)
-        for b in (self.tab_crop, self.tab_adjust):
+        self.tab_remove = HaloTextButton("eraser", self.tr_("editor_tab_remove"), self.tr_("editor_remove_tip"),
+                                         size=24, height=46)
+        for b in (self.tab_crop, self.tab_adjust, self.tab_remove):
             b.setCheckable(True)
-            b.setToolTip(b.text())  # the name stays reachable when the tab is icon-only (ED-7)
-        self.tabs = _row(self.tab_crop, self.tab_adjust, Divider(), spacing=4)
+            b.setToolTip(b.toolTip() or b.text())  # the name stays reachable when the tab is icon-only (ED-7)
+        self.tabs = _row(self.tab_crop, self.tab_adjust, self.tab_remove, Divider(), spacing=4)
         self.tab_crop.clicked.connect(lambda: self._switch_tab("crop"))
         self.tab_adjust.clicked.connect(lambda: self._switch_tab("adjust"))
+        self.tab_remove.clicked.connect(lambda: self._switch_tab("remove"))
 
     def _build_actions(self):
         """Save (with its options) goes at the end of the bottom row (ED-5); close stays at the top right."""
@@ -365,7 +371,11 @@ class PhotoEditor(QWidget):
         self.btn_apply.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.apply_group = _row(14, self.btn_apply, spacing=0)
         self._build_adjust_dock()
-        self._tool_row = _row(self.tabs, self.crop_group, self.adjust_group, self.btn_compare,
+        self.brush_size = BrushSizeSlider(self.tr_("editor_remove_size"))
+        self.brush_size.valueChanged.connect(self.adjust_canvas.set_brush_size)
+        self.adjust_canvas.set_brush_size(self.brush_size.value())
+        self.remove_group = _row(self.brush_size, Divider(), spacing=2)
+        self._tool_row = _row(self.tabs, self.crop_group, self.adjust_group, self.remove_group, self.btn_compare,
                               self.history_group, self.btn_reset, self.apply_group, self.save_group, spacing=0)
         # SPEC-004 ED-8: an opaque rounded grey dock, so the controls stay readable over a zoomed photo
         self.crop_tools = Card(self, radius=16, fill=QColor(*DOCK_FILL))
@@ -419,8 +429,14 @@ class PhotoEditor(QWidget):
             widgets.append(b)
         widgets.append(Divider())
         self.adjust_group = _row(*widgets, spacing=2)
-        self.dial = ValueDial(self)
+        # SPEC-004 ED-11: the dial sits on the same grey container as the bottom row
+        self.dial_card = Card(self, radius=16, fill=QColor(*DOCK_FILL))
+        self.dial = ValueDial(self.dial_card)
         self.dial.setFixedWidth(560)
+        box = QVBoxLayout(self.dial_card)
+        box.setContentsMargins(14, 6, 14, 6)
+        box.addWidget(self.dial)
+        self.dial_card.adjustSize()
         self.dial.valueChanged.connect(lambda v: self._apply_adjust(self._adjust_name, v, commit=False))
         self.dial.released.connect(lambda: self._set_state(self._state, commit=True, source="dial"))
         self._adjust_name = ADJUSTMENTS[0]
@@ -461,13 +477,14 @@ class PhotoEditor(QWidget):
         self.aspect_card.adjustSize()
         self.aspect_card.move((w - self.aspect_card.width()) // 2, tools_y - self.aspect_card.height() - 8)
         top = EDGE + self.actions.height() + 8
-        dial_y = tools_y - self.dial.height() - 2
-        self.dial.move((w - self.dial.width()) // 2, dial_y)
+        self.dial_card.adjustSize()
+        dial_y = tools_y - self.dial_card.height() - 6
+        self.dial_card.move((w - self.dial_card.width()) // 2, dial_y)
         bottom = h - (dial_y if self._tab == "adjust" else tools_y) + 4
         left = EDGE  # SPEC-004 ED-6: no rail, so the photo only keeps the edge gap on both sides
         self.crop_canvas.set_insets(left, top - 8, left, h - tools_y + 4)
         self.adjust_canvas.set_insets(left, top - 8, left, bottom)
-        for overlay in (self.actions, self.crop_tools, self.dial, self.aspect_card):
+        for overlay in (self.actions, self.crop_tools, self.dial_card, self.aspect_card):
             overlay.raise_()
 
     RULER_MAX, RULER_MIN = 360, 200
@@ -479,10 +496,13 @@ class PhotoEditor(QWidget):
         The full width is worked out from the current one plus the known size changes:
         a nested layout's size hint lags behind a fixed-width change made in the same call.
         """
-        for holder in (self.tabs, self.crop_group, self._tool_row, self.crop_tools):
+        for holder in (self.tabs, self.crop_group, self.adjust_group, self.remove_group, self.history_group,
+                       self.apply_group, self.save_group, self._tool_row, self.crop_tools):
             holder.layout().invalidate()
+            holder.layout().activate()  # recompute now: a stale hint made the crop row look 195 px too wide
         current = self.crop_tools.layout().sizeHint().width()
-        tabs = (self.tab_crop, self.tab_adjust)
+        every = (self.tab_crop, self.tab_adjust, self.tab_remove, self.btn_enhance)
+        tabs = tuple(t for t in every if t.isVisibleTo(self))  # Auto only counts while the Ajuste row shows it
         cropping = not self.crop_group.isHidden()
         full = current + sum(t._full_width - t.width() for t in tabs)
         if cropping:
@@ -491,7 +511,7 @@ class PhotoEditor(QWidget):
         compact = excess > 0
         if compact:
             excess -= sum(t._full_width - (t.PAD + t._size + t.PAD) for t in tabs)
-        for t in tabs:
+        for t in every:
             t.set_compact(compact)
         ruler = self.RULER_MAX
         if excess > 0 and cropping:
@@ -569,18 +589,21 @@ class PhotoEditor(QWidget):
 
     # ================================================================== previews
     def _request_previews(self):
-        adj = self._state.adjust
+        adj, removals = self._state.adjust, self._state.removals
         # The crop canvas's adjusted pyramid is only rebuilt while it is on screen; on the
         # Ajuste tab it would queue ahead of the preview the user is actually watching.
-        if adj != self._shown_adjust and self._tab == "crop":
-            self._shown_adjust = adj
-            if adj.is_identity:
+        if (adj, removals) != self._shown_key and self._tab == "crop":
+            self._shown_key = (adj, removals)
+            if adj.is_identity and not removals:
                 self._latest["crop"] = self._worker.latest() + 1  # invalidate in-flight crop jobs
                 self.crop_canvas.set_levels(self._orig_levels)
             else:
                 proxy, size = self._proxy, self._size
-                self._latest["crop"] = self._worker.submit(
-                    "crop", lambda: build_levels(adjust_rgba(proxy, adj, vignette=False), size))
+
+                def build():  # SPEC-005 RM-8: the crop tab sees the photo with the removals applied
+                    return build_levels(adjust_rgba(apply_removals(proxy, removals, size), adj, vignette=False), size)
+
+                self._latest["crop"] = self._worker.submit("crop", build)
         if self.stack.currentWidget() is self.adjust_canvas:
             state, proxy = self._state, self._proxy
             # render exactly as many pixels as the canvas shows (capped by the proxy)
@@ -597,10 +620,21 @@ class PhotoEditor(QWidget):
         else:
             image, size = result
             self.adjust_canvas.set_image(image, size)
+            if self._removing:
+                self._removing = False
+                self._toast.hide()
 
     # ================================================================== interactions
     def _on_canvas_state(self, state: EditState, committed: bool):
         self._set_state(state, commit=committed, source="canvas")
+
+    def _on_stroke(self, path, radius: float):
+        """SPEC-005 RM-6: a finished brush stroke becomes one removal, in source pixels (one undo step)."""
+        ow, oh = self._state.output_size  # the canvas draws the output at this size; the geometry wants 0..1
+        points = tuple(tuple(float(v) for v in g.output_to_source(self._state, (x / ow, y / oh))) for x, y in path)
+        self._removing = True
+        self._show_toast(self.tr_("editor_removing"), ms=120000)
+        self._set_state(self._state.with_removal(Removal(points, float(radius))), commit=True, source="remove")
 
     def _ruler_pressed(self):
         if self._straighten_base is None:
@@ -659,13 +693,18 @@ class PhotoEditor(QWidget):
         self.apply_group.setVisible(crop)
         self.save_group.setVisible(not crop)  # ED-5: one accent button, Listo or Guardar
         self.adjust_group.setVisible(tab == "adjust")
-        self.dial.setVisible(tab == "adjust")
+        self.dial_card.setVisible(tab == "adjust")
+        self.remove_group.setVisible(tab == "remove")
+        self.tab_remove.setChecked(tab == "remove")
+        self.adjust_canvas.set_brush(tab == "remove")
         if not crop:
             self._show_aspect_strip(False)
         self._layout_overlays()
         if not crop:
             self.adjust_canvas.fit()
         (self.crop_canvas if crop else self.dial if tab == "adjust" else self.adjust_canvas).setFocus()
+        if tab == "remove":
+            self._show_toast(self.tr_("editor_remove_hint"), ms=2600)
         QTimer.singleShot(0, self._request_previews)  # canvas has its final size after layout
 
     def _apply_crop(self):
@@ -759,6 +798,8 @@ class PhotoEditor(QWidget):
             self._zoom(1.25)
         elif ctrl and k == Qt.Key.Key_Minus:
             self._zoom(0.8)
+        elif k in (Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight) and self._tab == "remove":
+            self.brush_size.setValue(self.brush_size.value() + (8 if k == Qt.Key.Key_BracketRight else -8))
         elif k == Qt.Key.Key_Backslash and not e.isAutoRepeat():
             self._set_compare(True)
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._tab == "crop":
@@ -865,6 +906,7 @@ class PhotoEditor(QWidget):
             return
         self._closing = True
         self._worker.stop()
+        clear_caches()
         if self.parent() is not None:
             self.parent().removeEventFilter(self)
         self.hide()

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QPainter
+from PyQt6.QtGui import QColor, QImage, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
 MARGIN = 32
@@ -12,6 +12,7 @@ MIN_ZOOM, MAX_ZOOM = 0.02, 16.0
 class AdjustCanvas(QWidget):
     zoomChanged = pyqtSignal(float)  # physical screen pixels per output pixel
     userZoomed = pyqtSignal()  # the user zoomed (wheel, double-click)
+    strokeFinished = pyqtSignal(object, float)  # SPEC-005: brush path (output px) and radius (output px)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +29,47 @@ class AdjustCanvas(QWidget):
         self._bg = QColor(0, 0, 0)
         self._insets = (0, 0, 0, 0)  # left, top, right, bottom kept free for floating controls
         self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._brush = False  # SPEC-005: remove-object brush
+        self._brush_px = 40.0  # brush diameter on screen
+        self._stroke: list[QPointF] | None = None  # screen points of the stroke being painted
+        self._pending: list[tuple[list, float]] = []  # finished strokes still being filled in (output px)
+        self._hover: QPointF | None = None
+        self._pan = None
+
+    # ------------------------------------------------------------------ remove-object brush (SPEC-005)
+    def set_brush(self, on: bool):
+        self._brush = on
+        self._stroke = None
+        self._pending.clear()
+        self._hover = None
+        self.setMouseTracking(on)
+        self.setCursor(Qt.CursorShape.BlankCursor if on else Qt.CursorShape.OpenHandCursor)
+        self.update()
+
+    def brush_active(self) -> bool:
+        return self._brush
+
+    def set_brush_size(self, diameter_px: float):
+        self._brush_px = float(diameter_px)
+        self.update()
+
+    def is_waiting(self) -> bool:
+        """True while painted strokes are still being filled in by the render worker."""
+        return bool(self._pending)
+
+    def _to_output(self, pt: QPointF) -> tuple[float, float]:
+        rect, z = self.image_rect(), self.zoom()
+        return ((pt.x() - rect.x()) / z, (pt.y() - rect.y()) / z)
+
+    def _finish_stroke(self):
+        pts, self._stroke = self._stroke, None
+        if not pts:
+            return
+        radius = self._brush_px / 2.0 / self.zoom()
+        path = [self._to_output(p) for p in pts]
+        self._pending.append((path, radius))
+        self.update()
+        self.strokeFinished.emit(path, radius)
 
     def set_background(self, color: QColor):
         self._bg = QColor(color)
@@ -47,6 +89,7 @@ class AdjustCanvas(QWidget):
             self._zoom = None
             self._center = QPointF(0.5, 0.5)
         self._image, self._size = image, size
+        self._pending.clear()
         self._emit_zoom()
         self.update()
 
@@ -152,7 +195,36 @@ class AdjustCanvas(QWidget):
         if image is not None and not image.isNull():
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             p.drawImage(self.image_rect(), image, QRectF(image.rect()))
+        if self._brush:
+            self._paint_brush(p)
         p.end()
+
+    def _paint_brush(self, p: QPainter):
+        """Red translucent strokes (finished-but-filling and current) and the round brush cursor."""
+        rect, z = self.image_rect(), self.zoom()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        red = QColor(255, 60, 60, 110)
+        strokes = [([QPointF(rect.x() + x * z, rect.y() + y * z) for x, y in path], r * z * 2)
+                   for path, r in self._pending]
+        if self._stroke:
+            strokes.append((self._stroke, self._brush_px))
+        for pts, width in strokes:
+            pen = QPen(red, width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            if len(pts) == 1:
+                p.drawPoint(pts[0])
+            else:
+                for a, b in zip(pts, pts[1:]):
+                    p.drawLine(a, b)
+        if self._hover is not None:
+            r = self._brush_px / 2.0
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(0, 0, 0, 170), 3))
+            p.drawEllipse(self._hover, r, r)
+            p.setPen(QPen(QColor(255, 255, 255, 230), 1.5))
+            p.drawEllipse(self._hover, r, r)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -167,12 +239,28 @@ class AdjustCanvas(QWidget):
         e.accept()
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self._zoom is not None:
+        self._hover = e.position()
+        if self._brush and e.button() == Qt.MouseButton.LeftButton:
+            self._stroke = [e.position()]
+            self.update()
+        elif e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton)                 and self._zoom is not None:
             self._drag = (e.position(), QPointF(self._center))
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if not self._brush:
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, e):
+        if self._brush:
+            self._hover = e.position()
+        if self._stroke is not None:
+            last = self._stroke[-1]
+            d = e.position() - last
+            if d.x() ** 2 + d.y() ** 2 >= max(2.0, self._brush_px / 6.0) ** 2:
+                self._stroke.append(e.position())
+            self.update()
+            return
         if self._drag is None:
+            if self._brush:
+                self.update()
             return
         start, center = self._drag
         d = e.position() - start
@@ -182,9 +270,18 @@ class AdjustCanvas(QWidget):
         self._clamp_center()
         self.update()
 
+    def leaveEvent(self, e):
+        self._hover = None
+        self.update()
+
     def mouseReleaseEvent(self, e):
+        if self._stroke is not None and e.button() == Qt.MouseButton.LeftButton:
+            if e.position() != self._stroke[-1]:
+                self._stroke.append(e.position())
+            self._finish_stroke()
+            return
         self._drag = None
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setCursor(Qt.CursorShape.BlankCursor if self._brush else Qt.CursorShape.OpenHandCursor)
 
     def mouseDoubleClickEvent(self, e):
         if self._zoom is None:
