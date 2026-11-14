@@ -383,10 +383,15 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self._source_size = (pixmap.width(), pixmap.height())
         if (self.auto_fit or defer_detail) and not self.pixmap_item.pixmap().isNull():
             # Keep the already fitted display, including baked rotation and
-            # brightness. Full pixels become visible on entering manual mode.
+            # brightness, but only while it still covers the viewport (CV-9): a window that grew
+            # after the preview was decoded (startup restore) would otherwise stay stretched/blurry.
             frame = display_cache[1] if display_cache is not None else previous
-            self._display_cache = (pixmap.cacheKey(), frame) if frame is not None else None
-            return
+            shown = self.pixmap_item.pixmap()
+            covers = max(shown.width(), shown.height()) >= self.preview_dimension() - 2
+            small_source = max(pixmap.width(), pixmap.height()) <= self.preview_dimension()
+            if covers or small_source or not self.auto_fit:
+                self._display_cache = (pixmap.cacheKey(), frame) if frame is not None else None
+                return
         self._display_cache = None
         self.updatePixmap()
 
