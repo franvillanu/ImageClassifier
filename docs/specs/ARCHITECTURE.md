@@ -48,9 +48,25 @@ Consequences (measured, see SPEC-001 Evidence):
 
 `show_image()` → `AdvancedGraphicsImageViewer.setImage()` → in-memory preview/full cache hit (instant) or
 `ImageLoaderRunnable` (QThreadPool, priorities current > preload > full-resolution). Screen-sized preview
-first, full resolution attached after a 250 ms dwell without re-render when at fit. Neighbours (next 2 in
+first, including manual zoom; full-resolution detail is displayed after a 250 ms dwell or explicit zoom.
+At fit, attaching the full source does not re-render the displayed frame. Neighbours (next 2 in
 travel direction, previous 1) are preloaded and cancelled when out of the window. Held arrow keys are
 throttled by `_nav_step_allowed()`. Caches: bounded in-memory LRU plus optional disk preview cache.
+
+Classifier camera contract (2026-11-14, SPEC-003 CV-4..CV-8):
+- `imaging/camera.py` owns the immutable camera record: explicit FIT/MANUAL mode, scale and centre in
+  EXIF-oriented source-pixel coordinates (quarter-turns rotate the scene and the viewed point together).
+  Keyboard and wheel use one zoom transition. The Qt view transform is derived from this record;
+  scroll-bar deltas update its centre without feeding rounding error back on frame replacements.
+- `ImageFrame.source_size` and cached preview metadata carry the source dimensions through reduced
+  decodes, memory caching, disk caching and slideshow handover. A pixmap-item transform maps decoded
+  pixels into that source scene. Preview/full replacement never rescales the camera.
+- `auto_fit`, `zoom_factor`, and `fit_zoom_factor` are compatibility properties, not independent state.
+  Only explicit fit actions select FIT; delayed layout callbacks cannot override a manual camera.
+- Edited/snapshotted pixels go through `replace_image()`, which invalidates pending load IDs, cancels
+  queued work and renders once. `app.py` reads the source but cannot assign `original_pixmap` directly.
+- Cached full sources remain available for saving/editing while navigation displays a preview. The
+  existing dwell timer uploads full detail only when browsing settles; explicit zoom requests it now.
 
 ## 4. Window / mode management
 

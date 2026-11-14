@@ -21,10 +21,11 @@ from PyQt6.QtCore import (
     pyqtSignal,
     pyqtSlot,
 )
-from PyQt6.QtGui import QImage, QImageReader, QPixmap
+from PyQt6.QtGui import QImage, QImageReader, QPixmap, QImageIOHandler
 
 HEIF_EXTENSIONS = (".heic", ".heif")
-PREVIEW_CACHE_VERSION = 1
+PREVIEW_CACHE_VERSION = 2  # Previews now retain EXIF-oriented source geometry.
+SOURCE_SIZE_KEY = "image-classifier-source-size"
 DEFAULT_PREVIEW_DIMENSION = 2048
 MIN_PREVIEW_DIMENSION = 1024
 MAX_PREVIEW_DIMENSION = 4096
@@ -103,6 +104,22 @@ class ImageFrame:
     path: str
     image: QImage
     full_resolution: bool
+
+    @property
+    def source_size(self):
+        return ((self.image.width(), self.image.height()) if self.full_resolution
+                else image_source_size(self.image))
+
+
+def image_source_size(image: QImage):
+    """Read preview geometry without opening the source file on the UI thread."""
+    try:
+        width, height = map(int, image.text(SOURCE_SIZE_KEY).split(","))
+        if width > 0 and height > 0:
+            return width, height
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 def _read_with_pillow(image_path: str) -> QImage:
@@ -309,9 +326,13 @@ class ImageLoaderRunnable(QRunnable):
         as they are (the photo itself is that small)."""
         if image is None or image.isNull() or max_dimension <= 0:
             return False
+        source_size = image_source_size(image) or (image.width(), image.height())
         if max(image.width(), image.height()) > max_dimension:
             image = image.scaled(max_dimension, max_dimension, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation)
+        # A metadata write must not detach a full-size shared source. Scale first.
+        image = QImage(image)
+        image.setText(SOURCE_SIZE_KEY, f"{source_size[0]},{source_size[1]}")
         cls._preview_cache.put(cls._preview_key(cls.normalize_path(image_path), max_dimension), image)
         return True
 
@@ -395,7 +416,7 @@ class ImageLoaderRunnable(QRunnable):
         try:
             cache_path = cls._disk_preview_path(image_path, max_dimension)
             image = QImage(cache_path)
-            if image.isNull():
+            if image.isNull() or image_source_size(image) is None:
                 return None
             try:
                 os.utime(cache_path, None)
@@ -522,6 +543,10 @@ class ImageLoaderRunnable(QRunnable):
             reader.setAutoTransform(True)
             reader.setAllocationLimit(512)
             size = reader.size()
+            oriented = QSize(size)
+            if reader.transformation() & QImageIOHandler.Transformation.TransformationRotate90:
+                oriented.transpose()
+            self._source_size = (oriented.width(), oriented.height()) if oriented.isValid() else None
             scaled = False
             if size.isValid() and max(size.width(), size.height()) > self.max_dimension:
                 size.scale(
@@ -546,6 +571,13 @@ class ImageLoaderRunnable(QRunnable):
 
     def _emit_preview(self, image: QImage):
         image = to_display_format(image)
+        size = image_source_size(image) or getattr(self, "_source_size", None)
+        if size is None:
+            # Formats without readable geometry must use a full frame rather
+            # than invent source coordinates from a reduced image.
+            full = self._read_full()
+            size = (full.width(), full.height())
+        image.setText(SOURCE_SIZE_KEY, f"{size[0]},{size[1]}")
         self._preview_cache.put(
             self._preview_key(self.image_path, self.max_dimension),
             image,
@@ -574,6 +606,7 @@ class ImageLoaderRunnable(QRunnable):
     def _run(self):
         full = self.get_cached_image(self.image_path)
         if full is not None:
+            self._source_size = (full.width(), full.height())
             if self.progressive and self.load_preview:
                 preview = self._scaled_preview(full)
                 self._emit_preview(preview)
@@ -606,6 +639,7 @@ class ImageLoaderRunnable(QRunnable):
                 with self._heif_decode_slots:
                     self._raise_if_cancelled()
                     full = to_display_format(self._read_full())
+                self._source_size = (full.width(), full.height())
                 if not self.load_full:
                     # Keep the expensive decode so the later upgrade is a cache hit.
                     self._full_cache.put(self._memory_source_key(self.image_path), full)

@@ -120,8 +120,8 @@ def _state(viewer):
 
 
 @pytest.mark.parametrize("cached_full", [True, False])
-@pytest.mark.parametrize("auto_fit", [True, False])
-def test_cv4_navigation_does_not_compound_preview_zoom(window, qapp, monkeypatch, cached_full, auto_fit):
+@pytest.mark.parametrize("input_method", ["keyboard", "wheel"])
+def test_cv4_navigation_does_not_compound_preview_zoom(window, qapp, monkeypatch, cached_full, input_method):
     """CV-4: repeated preview/full navigation preserves comparison zoom and pan."""
     from PyQt6.QtGui import QImage, QPixmap
     from image_classifier.imaging.loader import ImageLoaderRunnable, ImageFrame
@@ -129,11 +129,15 @@ def test_cv4_navigation_does_not_compound_preview_zoom(window, qapp, monkeypatch
     viewer = window.image_viewer
     full = QImage(3200, 2000, QImage.Format.Format_RGB32)
     full.fill(Qt.GlobalColor.gray)
-    preview = full.scaledToWidth(1024)
+    ImageLoaderRunnable.seed_preview("camera-regression.jpg", 1024, full)
+    preview = ImageLoaderRunnable.get_cached_preview("camera-regression.jpg", 1024)
     viewer.onImageLoaded(QPixmap.fromImage(full), True, False, viewer.current_load_id)
     for _ in range(12):
-        viewer.zoom_in()
-    viewer.auto_fit = auto_fit  # Keyboard zoom retains this flag; wheel zoom clears it.
+        if input_method == "keyboard":
+            viewer.zoom_in()
+        else:
+            from tests.test_spec_classifier_camera import _wheel
+            _wheel(viewer)
     viewer.centerOn(1400, 900)
     expected = viewer.transform().m11()
     center = viewer.mapToScene(viewer.viewport().rect().center())
@@ -154,7 +158,7 @@ def test_cv4_navigation_does_not_compound_preview_zoom(window, qapp, monkeypatch
         assert abs(actual.y() - center.y()) <= 2
     viewer.setImage("b.jpg", reset_zoom=True)
     assert viewer.auto_fit
-    assert viewer.transform().m11() * viewer.pixmap_item.pixmap().width() <= viewer.viewport().width()
+    assert viewer.transform().m11() * viewer.pixmap_item.sceneBoundingRect().width() <= viewer.viewport().width()
 
 
 def test_cv3_ctrl_up_down_zoom_like_up_down(window, qapp):
