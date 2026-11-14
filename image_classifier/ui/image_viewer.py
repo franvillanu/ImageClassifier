@@ -2,12 +2,15 @@
 """
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PyQt6.QtGui import QPixmap, QWheelEvent, QMouseEvent, QPainter, QTransform, QImage, QOpenGLContext
-from PyQt6.QtCore import Qt, QPoint, QTimer, QSize, QPointF
+from PyQt6.QtCore import Qt, QPoint, QTimer, QSize, QPointF, QRectF
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 from image_classifier.i18n.translations import translations
 from image_classifier.imaging import ImageFrame, ImageLoaderRunnable
 from image_classifier.imaging.loader import PRIORITY_CURRENT, PRIORITY_FULL_RESOLUTION, preview_dimension_for
+from image_classifier.imaging.loader import image_source_size
+from image_classifier.imaging.camera import Camera, ViewMode
+from dataclasses import replace
 from image_classifier.ui.widgets import BaseOverlay, MyDragOverlay
 from image_classifier.ui.viewport import NearestViewport, _opengl
 
@@ -36,12 +39,17 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.pixmap_item.setCacheMode(QGraphicsPixmapItem.CacheMode.NoCache)
         self.pixmap_item.setTransformationMode(Qt.TransformationMode.FastTransformation)
         self.scene.addItem(self.pixmap_item)
-        self.original_pixmap = None
+        self._original_pixmap = None
+        self._source_size = (0, 0)
+        self._camera = Camera()
+        self._applying_camera = False
+        self._rendered_source_key = None
+        self._rendered_full_detail = False
+        self._scroll_position = (0, 0)
+        self._last_applied_camera = None
         self.rotation_angle = 0
         self.brightness_factor = 1.0
-        self.auto_fit = True
-        self.zoom_factor = 1.0
-        self.fit_zoom_factor = 1.0
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.loader = None
         self.full_loader = None
         self.loading_dialog = None
@@ -61,6 +69,141 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self._brightness_timer.timeout.connect(self._apply_pending_brightness)
         self._pending_brightness = 1.0
         self._brightness_program = None
+        self.horizontalScrollBar().valueChanged.connect(self._capture_camera)
+        self.verticalScrollBar().valueChanged.connect(self._capture_camera)
+
+    @property
+    def original_pixmap(self):
+        return self._original_pixmap
+
+    @property
+    def source_size(self):
+        return self._source_size
+
+    @property
+    def auto_fit(self):
+        return self._camera.mode is ViewMode.FIT
+
+    @auto_fit.setter
+    def auto_fit(self, value):
+        self._camera = replace(self._camera, mode=ViewMode.FIT if value else ViewMode.MANUAL)
+
+    @property
+    def zoom_factor(self):
+        """Compatibility view of the camera, never an independent zoom field."""
+        return self._camera.scale
+
+    @zoom_factor.setter
+    def zoom_factor(self, value):
+        # Older integrations set a scale before setTransform. Enter manual mode
+        # immediately so a resize between the two cannot silently fit the photo.
+        self._camera = replace(self._camera, mode=ViewMode.MANUAL, scale=float(value))
+
+    @property
+    def fit_zoom_factor(self):
+        width, height = self._oriented_source_size()
+        if not width or not height:
+            return 1.0
+        return self._camera.fit(width, height, self.viewport().width(), self.viewport().height()).scale
+
+    def _oriented_source_size(self):
+        width, height = self._source_size
+        return (height, width) if self.rotation_angle % 180 else (width, height)
+
+    def _capture_camera(self, *_):
+        if self._applying_camera or self.original_pixmap is None:
+            return
+        if self.auto_fit:
+            # The scrollable scene margin permits precise manual centring; it
+            # must not let a drag or scroll shortcut move a fitted photograph.
+            position = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+            if position != self._scroll_position:
+                self._last_applied_camera = None
+                self._apply_camera()
+            return
+        position = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+        dx, dy = (position[i] - self._scroll_position[i] for i in (0, 1))
+        x, y = self._camera.centre
+        self._camera = replace(self._camera, centre=(x + dx / self._camera.scale,
+                                                     y + dy / self._camera.scale))
+        self._scroll_position = position
+
+    def _apply_camera(self):
+        signature = (self._camera, self._oriented_source_size(),
+                     self.viewport().width(), self.viewport().height())
+        if signature == self._last_applied_camera:
+            self._apply_sampling_mode()
+            return
+        self._applying_camera = True
+        try:
+            # Qt's mouse anchor must not alter a source-coordinate camera while
+            # replacing a frame or restoring a view after a resize.
+            anchor = self.transformationAnchor()
+            self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+            self.setDragMode(QGraphicsView.DragMode.NoDrag if self.auto_fit
+                             else QGraphicsView.DragMode.ScrollHandDrag)
+            # Leave room to centre a source point near an edge. This also avoids
+            # Qt's integer alignment offset becoming a cumulative camera drift.
+            rect = self.pixmap_item.sceneBoundingRect()
+            mx = self.viewport().width() / self._camera.scale
+            my = self.viewport().height() / self._camera.scale
+            self.setSceneRect(rect.adjusted(-mx, -my, mx, my))
+            super().setTransform(QTransform.fromScale(self._camera.scale, self._camera.scale))
+            self.centerOn(QPointF(*self._camera.centre))
+            actual = self.mapToScene(self.viewport().rect().center())
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() +
+                round((self._camera.centre[0] - actual.x()) * self._camera.scale))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() +
+                round((self._camera.centre[1] - actual.y()) * self._camera.scale))
+            self._scroll_position = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+            self.setTransformationAnchor(anchor)
+            self._last_applied_camera = signature
+        finally:
+            self._applying_camera = False
+        self._apply_sampling_mode()
+
+    def setTransform(self, matrix, combine=False):
+        super().setTransform(matrix, combine)
+        if hasattr(self, "_camera") and not self._applying_camera:
+            self._last_applied_camera = None
+            self.auto_fit = False
+            p = self.mapToScene(self.viewport().rect().center())
+            self._camera = replace(self._camera, scale=abs(self.transform().m11()), centre=(p.x(), p.y()))
+            self._scroll_position = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+
+    def _set_display_pixmap(self, pixmap):
+        """Every decode resolution occupies exactly the same source-pixel scene."""
+        width, height = self._oriented_source_size()
+        self.pixmap_item.setPixmap(pixmap)
+        size = pixmap.deviceIndependentSize()
+        self.pixmap_item.setTransform(QTransform.fromScale(width / size.width(), height / size.height()))
+        self.scene.setSceneRect(self.pixmap_item.sceneBoundingRect())
+
+    def replace_image(self, pixmap, *, full_resolution=True, source_size=None,
+                      rotation=None, brightness=None, fit=False):
+        """Replace edited/snapshotted pixels atomically and invalidate late loads."""
+        if pixmap is None or pixmap.isNull():
+            return
+        self._capture_camera()
+        if rotation is not None and not fit:
+            self._camera = self._camera_for_rotation(rotation)
+        self._cancel_pending_loads()
+        self.load_counter = max(getattr(self, "load_counter", 0), self.current_load_id) + 1
+        self.current_load_id = self.load_counter
+        self._shown_load_id = self.current_load_id
+        self._original_pixmap = pixmap
+        self._source_size = source_size or (pixmap.width(), pixmap.height())
+        self.full_resolution_ready = full_resolution
+        self.cached_texture = None
+        self._display_cache = None
+        if rotation is not None:
+            self.rotation_angle = rotation
+        if brightness is not None:
+            self.brightness_factor = brightness
+        if fit:
+            self.auto_fit = True
+        self.updatePixmap()
+        self.window().image_loading = False
 
     def preview_dimension(self) -> int:
         """Preview size that covers the viewport 1:1 in physical pixels."""
@@ -73,6 +216,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
 
     def _cancel_pending_loads(self):
         self._full_request_timer.stop()
+        self._brightness_timer.stop()
         for attr in ("loader", "full_loader"):
             worker = getattr(self, attr, None)
             if worker is not None:
@@ -87,6 +231,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         full-resolution frame is attached later without re-rendering the screen.
         """
         norm = ImageLoaderRunnable.normalize_path(image_path)
+        self._capture_camera()
 
         self.load_counter = getattr(self, "load_counter", 0) + 1
         self.current_load_id = self.load_counter
@@ -114,9 +259,13 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
                 preserve_zoom,
                 load_id,
                 full_resolution=False,
+                source_size=image_source_size(preview) or (
+                    (full.width(), full.height()) if full is not None else None),
             )
             if full is not None:
-                self._attach_full_resolution(QPixmap.fromImage(full), load_id)
+                self._attach_full_resolution(QPixmap.fromImage(full), load_id, defer_detail=True)
+                if not self.auto_fit:
+                    self._full_request_timer.start()
             else:
                 self._full_request_timer.start()
             return
@@ -165,6 +314,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
                 preserve_zoom,
                 load_id,
                 full_resolution=frame.full_resolution,
+                source_size=frame.source_size,
             )
             if not frame.full_resolution:
                 self._full_request_timer.start()
@@ -175,7 +325,11 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def request_full_resolution(self):
         """Start (or finish from cache) the full-resolution load for the current image."""
         self._full_request_timer.stop()
-        if self.full_resolution_ready or self.full_loader is not None:
+        if self.full_resolution_ready:
+            if not self.auto_fit:
+                self._ensure_manual_detail()
+            return
+        if self.full_loader is not None:
             return
         if self._shown_load_id != self.current_load_id:
             # Nothing on screen yet; the preview handler re-arms the timer.
@@ -210,44 +364,31 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.full_loader = None
         self._attach_full_resolution(QPixmap.fromImage(frame.image), load_id)
 
-    def _attach_full_resolution(self, pixmap: QPixmap, load_id: int):
+    def _attach_full_resolution(self, pixmap: QPixmap, load_id: int, *, defer_detail=False):
         """Swap in the full-resolution source without a visible re-render.
 
         Fit mode: the preview on screen already covers the viewport 1:1, so it is
-        kept as the display frame and only the source changes (no frame drop, no
-        quality "pop"). Zoomed in: the view is rescaled by preview/full so the same
-        part of the photo stays under the same screen pixels.
+        kept as the display frame and only the source changes. Zoomed in, source
+        geometry and camera stay fixed. Navigation may defer the detail upload
+        until dwell; an explicit zoom requests it immediately.
         """
         if load_id != self.current_load_id or pixmap.isNull():
             return
+        self._capture_camera()
         previous = self.original_pixmap
+        display_cache = self._display_cache
         self.full_resolution_ready = True
         self.cached_texture = None
-        if previous is None or previous.isNull():
-            self.original_pixmap = pixmap
-            self._display_cache = None
-            self.updatePixmap()
+        self._original_pixmap = pixmap
+        self._source_size = (pixmap.width(), pixmap.height())
+        if (self.auto_fit or defer_detail) and not self.pixmap_item.pixmap().isNull():
+            # Keep the already fitted display, including baked rotation and
+            # brightness. Full pixels become visible on entering manual mode.
+            frame = display_cache[1] if display_cache is not None else previous
+            self._display_cache = (pixmap.cacheKey(), frame) if frame is not None else None
             return
-        # Keyboard zoom keeps auto_fit set, so decide from the actual scale (as the
-        # original full-frame handler did) rather than the flag alone.
-        at_fit = self.auto_fit and abs(self.transform().m11() - self.fit_zoom_factor) < 0.01
-        if at_fit:
-            self.original_pixmap = pixmap
-            self._display_cache = (pixmap.cacheKey(), previous)
-            return
-
-        self.auto_fit = False
-        ratio = previous.width() / pixmap.width() if pixmap.width() else 1.0
-        center = self.mapToScene(self.viewport().rect().center())
-        self.original_pixmap = pixmap
         self._display_cache = None
         self.updatePixmap()
-        if abs(ratio - 1.0) > 1e-3:
-            self.scale(ratio, ratio)
-            self.zoom_factor = self.transform().m11()
-            self.fit_zoom_factor *= ratio
-            self.centerOn(QPointF(center.x() / ratio, center.y() / ratio))
-            self._apply_sampling_mode()
 
     def _on_load_error(self, err, load_id):
         if load_id != self.current_load_id:
@@ -272,7 +413,8 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         Nearest-neighbour keeps pixel-peeping crisp, but when downscaling it drops
         whole rows/columns, which shows up as jagged edges and shimmering detail.
         """
-        scale = abs(self.transform().m11()) * self.viewport().devicePixelRatioF()
+        scale = (abs(self.transform().m11()) * abs(self.pixmap_item.transform().m11())
+                 * self.viewport().devicePixelRatioF())
         mode = (
             Qt.TransformationMode.SmoothTransformation
             if scale < 0.999
@@ -313,7 +455,8 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
                       reset_zoom: bool,
                       preserve_zoom: bool,
                       load_id: int,
-                      full_resolution: bool = True):
+                      full_resolution: bool = True,
+                      source_size=None):
         main_win = self.window()
 
         # 1) Only update the UI if this load ID is still current.
@@ -335,8 +478,10 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             return
 
         # QPixmap is implicitly shared. Avoid a full-frame copy on every load.
+        self._capture_camera()
         self._shown_load_id = load_id
-        self.original_pixmap = pixmap
+        self._original_pixmap = pixmap
+        self._source_size = source_size or (pixmap.width(), pixmap.height())
         self._display_cache = None
         self.full_resolution_ready = full_resolution
         self.cached_texture  = None
@@ -355,24 +500,10 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # ─── Decide what to do with zoom on load ─────────────────────────────
         if reset_zoom:
             self.auto_fit    = True
-            self.zoom_factor = 1.0
-            self.resetTransform()
-        elif preserve_zoom and hasattr(self, "_saved_transform"):
-            self.auto_fit = False
-            self.setTransform(self._saved_transform)
-        else:
-            at_fit = abs(self.zoom_factor - self.fit_zoom_factor) < 0.01
-            self.auto_fit = at_fit
         # ─────────────────────────────────────────────────────────────────────
 
         # 7) Render the pixmap
-        if self.auto_fit:
-            self.adjustToFit()
-        else:
-            display_pix = self._pixmapWithRotationAndBrightness()
-            self.pixmap_item.setPixmap(display_pix)
-            self.scene.setSceneRect(self.pixmap_item.boundingRect())
-            self._apply_sampling_mode()
+        self.updatePixmap()
 
         self.pixmap_item.setVisible(True)
 
@@ -382,11 +513,6 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # 9) Now that loading is done, refresh all controls (star will update)
         if hasattr(main_win, "update_floating_controls"):
             main_win.update_floating_controls()
-
-        # ─── Ensure rotation/brightness are GPU-baked even in manual-zoom mode ───
-        if not self.auto_fit:
-            self.updatePixmap()
-
 
     def _pixmapWithRotationAndBrightness(self) -> QPixmap:
         """
@@ -405,12 +531,12 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         # 2) GPU brightness (only if non‐default)
         if self.brightness_factor != 1.0:
             vp = self.viewport()               # must be QOpenGLWidget
-            vp.makeCurrent()
-            out = self.applyBrightnessGPU(
-                base,
-                self.brightness_factor
-            )
-            vp.doneCurrent()
+            if isinstance(vp, QOpenGLWidget):
+                vp.makeCurrent()
+                out = self.applyBrightnessGPU(base, self.brightness_factor)
+                vp.doneCurrent()
+            else:
+                out = self.applyBrightness(base, self.brightness_factor)
         else:
             out = base
 
@@ -469,115 +595,93 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         return rendered
 
     def clear(self):
+        self._cancel_pending_loads()
+        self.load_counter = max(getattr(self, "load_counter", 0), self.current_load_id) + 1
+        self.current_load_id = self.load_counter
+        self.current_loading_image = None
+        self._shown_load_id = None
+        self._original_pixmap = None
+        self._source_size = (0, 0)
+        self.full_resolution_ready = False
+        self._display_cache = None
+        self.cached_texture = None
+        self._camera = Camera()
+        self._last_applied_camera = None
         self.pixmap_item.setPixmap(QPixmap())
+        self.pixmap_item.setTransform(QTransform())
+        self.scene.setSceneRect(QRectF())
+        self.setSceneRect(QRectF())
+        super().setTransform(QTransform())
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self._scroll_position = (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+        self.window().image_loading = False
+        for attribute in ("desired_rotation", "desired_brightness"):
+            if hasattr(self, attribute):
+                delattr(self, attribute)
 
     def adjustToFit(self):
-        """
-        Reset zoom, rotate + bake brightness into a pixmap,
-        then fit & center that result in the view (preserving DPR).
-        """
-        # 1) Bail if there’s nothing to fit
-        if not self.original_pixmap or not self.auto_fit:
+        """Explicitly fit and centre in source coordinates."""
+        if self.original_pixmap is None or self.original_pixmap.isNull():
             return
-
-        # 2) Reset any prior zoom/transform
-        self.resetTransform()
-
-        # Avoid allocating a same-size frame when no rotation is active.
-        source = self._display_source()
-        if self.rotation_angle:
-            rotated = source.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation
-            )
-        else:
-            rotated = source
-
-        # 4) Bake brightness (GPU if possible, else CPU)
-        if self.brightness_factor != 1.0:
-            vp = self.viewport()
-            if isinstance(vp, QOpenGLWidget):
-                vp.makeCurrent()
-                baked = self.applyBrightnessGPU(rotated, self.brightness_factor)
-                vp.doneCurrent()
-            else:
-                baked = self.applyBrightness(rotated, self.brightness_factor)
-        else:
-            baked = rotated
-
-        # 5) Preserve the *original* image’s DPR tag
-        baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
-
-        # 6) Show the baked pixmap
-        self.pixmap_item.setPixmap(baked)
-
-        # 7) Fit that pixmap to the view & update scene bounds
-        rect = self.pixmap_item.sceneBoundingRect()
-        self.scene.setSceneRect(rect)
-        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
-
-        # 8) Record the new zoom factors
-        scale = self.transform().m11()
-        self.zoom_factor     = scale
-        self.fit_zoom_factor = scale
-        self._apply_sampling_mode()
-
-        # 9) Center (unless explicitly skipped)
-        if not getattr(self, "skip_centering", False):
-            self.centerOn(rect.center())
-
+        self.auto_fit = True
+        self.updatePixmap()
 
     def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.auto_fit and self.original_pixmap:
-            self.adjustToFit()
+        camera = self._camera
+        self._applying_camera = True
+        try:
+            super().resizeEvent(event)
+        finally:
+            self._applying_camera = False
+        self._camera = camera
+        if self.original_pixmap:
+            if self.auto_fit:
+                self.updatePixmap()
+            else:
+                self._apply_camera()
 
     def updatePixmap(self):
-        if not self.original_pixmap:
+        """Render pixels once, then apply the resolution-independent camera."""
+        if self.original_pixmap is None or self.original_pixmap.isNull():
             return
+        camera = self._camera
+        self._applying_camera = True
+        try:
+            if self.auto_fit:
+                source = self._display_source()
+                if self.rotation_angle:
+                    rendered = source.transformed(QTransform().rotate(self.rotation_angle),
+                                                  Qt.TransformationMode.SmoothTransformation)
+                else:
+                    rendered = source
+                if self.brightness_factor != 1.0:
+                    vp = self.viewport()
+                    if isinstance(vp, QOpenGLWidget):
+                        vp.makeCurrent()
+                        rendered = self.applyBrightnessGPU(rendered, self.brightness_factor)
+                        vp.doneCurrent()
+                    else:
+                        rendered = self.applyBrightness(rendered, self.brightness_factor)
+            else:
+                rendered = self._pixmapWithRotationAndBrightness()
+            self._set_display_pixmap(rendered)
+            self._rendered_source_key = self.original_pixmap.cacheKey()
+            self._rendered_full_detail = not self.auto_fit
+        finally:
+            self._applying_camera = False
+        self._camera = camera
         if self.auto_fit:
-            self.adjustToFit()
-            return
+            width, height = self._oriented_source_size()
+            self._camera = self._camera.fit(width, height, self.viewport().width(), self.viewport().height())
+        self._apply_camera()
 
-        # 0) Save current view transform & anchor
-        saved_transform = self.transform()
-        saved_anchor    = self.transformationAnchor()
-
-        # 1) Anchor at center for the bake
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-
-        # 2) Rotate
-        if self.rotation_angle != 0:
-            base = self.original_pixmap.transformed(
-                QTransform().rotate(self.rotation_angle),
-                Qt.TransformationMode.SmoothTransformation
-            )
-        else:
-            base = self.original_pixmap
-
-        # 3) Brightness (GPU vs CPU)
-        vp = self.viewport()
-        if self.brightness_factor != 1.0 and isinstance(vp, QOpenGLWidget):
-            vp.makeCurrent()
-            baked = self.applyBrightnessGPU(base, self.brightness_factor)
-            vp.doneCurrent()
-        elif self.brightness_factor != 1.0:
-            baked = self.applyBrightness(base, self.brightness_factor)
-        else:
-            baked = base
-
-        # 4) Tag with original DPR
-        baked.setDevicePixelRatio(self.original_pixmap.devicePixelRatio())
-
-        # 5) Into item + update bounds
-        self.pixmap_item.setPixmap(baked)
-        self.scene.setSceneRect(self.pixmap_item.boundingRect())
-
-        # 6) Restore transform & anchor so zoom/pan stay exactly where they were
-        self.setTransform(saved_transform)
-        self.setTransformationAnchor(saved_anchor)
-        self._apply_sampling_mode()
-
+    def _ensure_manual_detail(self):
+        # A fitted full source may still display its screen-sized working frame.
+        # Switch once on the first zoom, not on every wheel/key event.
+        if (self.full_resolution_ready and
+                (self._rendered_source_key != self.original_pixmap.cacheKey()
+                 or not self._rendered_full_detail)):
+            self.updatePixmap()
 
     def setBrightness(self, factor):
         self.compare_enabled = False
@@ -593,30 +697,11 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def wheelEvent(self, event: QWheelEvent):
         if not self.original_pixmap:
             return
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.auto_fit = False
-        old_scene_pos = self.mapToScene(event.position().toPoint())
-        let_in = event.angleDelta().y() > 0
-        factor = 1.1 if let_in else 0.9
-        current_zoom = self.transform().m11()
-        if current_zoom * factor < 0.1:
-            factor = 0.1 / current_zoom
-        elif current_zoom * factor > 3.0:
-            factor = 3.0 / current_zoom
-        self.scale(factor, factor)
-        self.zoom_factor = self.transform().m11()
-        new_scene_pos = self.mapToScene(event.position().toPoint())
-        delta = new_scene_pos - old_scene_pos
-        self.translate(delta.x(), delta.y())
-        self._apply_sampling_mode()
-        # Zooming needs real pixels: skip the dwell delay.
-        self.request_full_resolution()
+        self._zoom_camera(1.1 if event.angleDelta().y() > 0 else 0.9, event.position())
+        event.accept()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        self.auto_fit = True
         self.adjustToFit()
-        self.zoom_factor = self.transform().m11()
-        self.fit_zoom_factor = self.zoom_factor
 
     def paintEvent(self, event):
         gl_viewport = self.viewport()
@@ -655,37 +740,47 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self._manual_zoom(zoom_in=False)
 
     def _manual_zoom(self, zoom_in: bool):
-        if not self.original_pixmap:
-            return
-        viewport_center = self.viewport().rect().center()
-        scene_center = self.mapToScene(viewport_center)
-        factor = 1.1 if zoom_in else 0.9
-        current_zoom = self.transform().m11()
-        if current_zoom * factor < 0.1:
-            factor = 0.1 / current_zoom
-        elif current_zoom * factor > 3.0:
-            factor = 3.0 / current_zoom
-        self.scale(factor, factor)
-        self.zoom_factor = self.transform().m11()
-        self.centerOn(scene_center)
-        self._apply_sampling_mode()
+        if self.original_pixmap:
+            self._zoom_camera(1.1 if zoom_in else 0.9)
+
+    def _zoom_camera(self, factor, anchor=None):
+        self._capture_camera()
+        if anchor is None:
+            anchor = QPointF(self.viewport().rect().center())
+        point = self.mapToScene(anchor.toPoint())
+        old_scale = self._camera.scale
+        self._camera = self._camera.zoom(factor)
+        # Preserve the source point under the pointer (or viewport centre).
+        cx, cy = self._camera.centre
+        ratio = old_scale / self._camera.scale
+        self._camera = replace(self._camera, centre=(point.x() + (cx - point.x()) * ratio,
+                                                     point.y() + (cy - point.y()) * ratio))
+        self._ensure_manual_detail()
+        self._apply_camera()
+        self._capture_camera()
         self.request_full_resolution()
 
-    def rotate_clockwise(self):
-        self.rotation_angle = (self.rotation_angle + 90) % 360
-        
-        # Invalidate the cached texture so the GPU brightness code
-        # will recreate it with the correct size:
-        self.cached_texture = None
+    def _camera_for_rotation(self, angle):
+        steps = ((angle - self.rotation_angle) % 360) // 90
+        width, height = self._oriented_source_size()
+        camera = self._camera
+        for _ in range(int(steps)):
+            camera = camera.rotate_clockwise(height)
+            width, height = height, width
+        return camera
 
-        if self.auto_fit or abs(self.zoom_factor - 1.0) < 0.01:
-            self.auto_fit = True
-            self.adjustToFit()
-        else:
-            self.updatePixmap()
-            self.scene.setSceneRect(self.pixmap_item.boundingRect())
-            self.centerOn(self.scene.sceneRect().center())
-    
+    def set_rotation(self, angle):
+        """Rotate the scene and the viewed source point as one transition."""
+        self._capture_camera()
+        camera = self._camera_for_rotation(angle)
+        self.rotation_angle = angle % 360
+        self._camera = camera
+        self.cached_texture = None
+        self.updatePixmap()
+
+    def rotate_clockwise(self):
+        self.set_rotation(self.rotation_angle + 90)
+
     def contextMenuEvent(self, event: QMouseEvent):
         # Get the main window (PhotoViewer) that contains this viewer.
         photo_viewer = self.window()

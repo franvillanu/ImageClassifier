@@ -133,18 +133,20 @@ def test_zoom_before_full_resolution_keeps_view_stable(viewer_window, tmp_path):
 
     for _ in range(6):
         viewer.zoom_in()  # keyboard zoom: also requests full resolution immediately
-    on_screen_scale = viewer.transform().m11() * viewer.pixmap_item.pixmap().width()
+    # CV-6: pixmap pixels map into source coordinates through the item transform.
+    # Measure the rendered scene, rather than assuming item pixels ARE the scene.
+    on_screen_scale = viewer.viewportTransform().mapRect(viewer.pixmap_item.sceneBoundingRect()).width()
     centre_fraction = (
         viewer.mapToScene(viewer.viewport().rect().center()).x()
-        / viewer.pixmap_item.pixmap().width()
+        / viewer.pixmap_item.sceneBoundingRect().width()
     )
 
     assert _wait_until(lambda: viewer.full_resolution_ready)
     assert viewer.pixmap_item.pixmap().width() == FULL_SIZE[0]
-    after_scale = viewer.transform().m11() * viewer.pixmap_item.pixmap().width()
+    after_scale = viewer.viewportTransform().mapRect(viewer.pixmap_item.sceneBoundingRect()).width()
     after_fraction = (
         viewer.mapToScene(viewer.viewport().rect().center()).x()
-        / viewer.pixmap_item.pixmap().width()
+        / viewer.pixmap_item.sceneBoundingRect().width()
     )
     assert after_scale == pytest.approx(on_screen_scale, rel=0.01)
     assert after_fraction == pytest.approx(centre_fraction, abs=0.01)

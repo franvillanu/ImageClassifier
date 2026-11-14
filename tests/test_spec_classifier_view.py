@@ -7,7 +7,7 @@ from PIL import Image
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtTest import QTest
 
-REQUIRES = ["CV-1", "CV-2", "CV-3"]
+REQUIRES = ["CV-1", "CV-2", "CV-3", "CV-4"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -117,6 +117,48 @@ def _zoomed_in(window, qapp):
 
 def _state(viewer):
     return viewer.horizontalScrollBar().value(), viewer.verticalScrollBar().value(), viewer.transform().m11()
+
+
+@pytest.mark.parametrize("cached_full", [True, False])
+@pytest.mark.parametrize("input_method", ["keyboard", "wheel"])
+def test_cv4_navigation_does_not_compound_preview_zoom(window, qapp, monkeypatch, cached_full, input_method):
+    """CV-4: repeated preview/full navigation preserves comparison zoom and pan."""
+    from PyQt6.QtGui import QImage, QPixmap
+    from image_classifier.imaging.loader import ImageLoaderRunnable, ImageFrame
+
+    viewer = window.image_viewer
+    full = QImage(3200, 2000, QImage.Format.Format_RGB32)
+    full.fill(Qt.GlobalColor.gray)
+    ImageLoaderRunnable.seed_preview("camera-regression.jpg", 1024, full)
+    preview = ImageLoaderRunnable.get_cached_preview("camera-regression.jpg", 1024)
+    viewer.onImageLoaded(QPixmap.fromImage(full), True, False, viewer.current_load_id)
+    for _ in range(12):
+        if input_method == "keyboard":
+            viewer.zoom_in()
+        else:
+            from tests.test_spec_classifier_camera import _wheel
+            _wheel(viewer)
+    viewer.centerOn(1400, 900)
+    expected = viewer.transform().m11()
+    center = viewer.mapToScene(viewer.viewport().rect().center())
+    monkeypatch.setattr(ImageLoaderRunnable, "get_cached_preview", classmethod(lambda cls, *args: preview))
+    monkeypatch.setattr(ImageLoaderRunnable, "get_cached_image", classmethod(lambda cls, *args: full if cached_full else None))
+    pending = []
+    monkeypatch.setattr(ImageLoaderRunnable, "start", lambda worker, *args: pending.append(worker))
+    for path in ["b.jpg", "a.jpg"] * 3:
+        viewer.setImage(path, reset_zoom=False)
+        if not cached_full:
+            viewer.request_full_resolution()
+            worker = pending.pop()
+            worker.signals.fullReady.emit(ImageFrame(path, full, True))
+            viewer.request_full_resolution()
+        assert viewer.transform().m11() == pytest.approx(expected)
+        actual = viewer.mapToScene(viewer.viewport().rect().center())
+        assert abs(actual.x() - center.x()) <= 2
+        assert abs(actual.y() - center.y()) <= 2
+    viewer.setImage("b.jpg", reset_zoom=True)
+    assert viewer.auto_fit
+    assert viewer.transform().m11() * viewer.pixmap_item.sceneBoundingRect().width() <= viewer.viewport().width()
 
 
 def test_cv3_ctrl_up_down_zoom_like_up_down(window, qapp):

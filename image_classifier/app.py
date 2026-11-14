@@ -1428,13 +1428,7 @@ class PhotoViewer(QMainWindow):
             self.global_rotation = (self.global_rotation + 90) % 360
             for img in self.image_files:
                 self.image_rotations[img] = self.global_rotation
-            self.image_viewer.rotation_angle = self.global_rotation
-            self.image_viewer.cached_texture = None
-            if self.image_viewer.auto_fit or abs(self.image_viewer.zoom_factor - 1.0) < 0.01:
-                self.image_viewer.auto_fit = True
-                self.image_viewer.adjustToFit()
-            else:
-                self.image_viewer.updatePixmap()
+            self.image_viewer.set_rotation(self.global_rotation)
         else:
             # Push undo state before rotating.
             self.push_undo_state()
@@ -1564,7 +1558,7 @@ class PhotoViewer(QMainWindow):
 
 
     def force_first_image_fit(self):
-        if self.image_files and self.current_index >= 0:
+        if self.image_files and self.current_index >= 0 and self.image_viewer.auto_fit:
             self.image_viewer.adjustToFit()
             self.update_floating_controls()
 
@@ -2983,6 +2977,7 @@ class PhotoViewer(QMainWindow):
         self._brightness_initial_state = {
             "pixmap":          self.image_viewer.original_pixmap,
             "full_res":        self.image_viewer.full_resolution_ready,
+            "source_size":     self.image_viewer.source_size,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -3863,12 +3858,7 @@ class PhotoViewer(QMainWindow):
     def applyCropResult(self, cropped_pix: QPixmap):
         if not cropped_pix.isNull():
             self.push_undo_state(from_crop=True)
-            self.image_viewer.original_pixmap = cropped_pix
-            self.image_viewer.rotation_angle = 0
-            self.image_viewer.brightness_factor = 1.0
-            self.image_viewer.cached_texture = None
-            self.image_viewer.adjustToFit()
-            self.image_viewer.updatePixmap()
+            self.image_viewer.replace_image(cropped_pix, rotation=0, brightness=1.0, fit=True)
             self.image_modified = True
             self.unsaved_crop = cropped_pix
     
@@ -3894,6 +3884,7 @@ class PhotoViewer(QMainWindow):
         state = {
             "pixmap":          self.image_viewer.original_pixmap,
             "full_res":        self.image_viewer.full_resolution_ready,
+            "source_size":     self.image_viewer.source_size,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -3916,17 +3907,20 @@ class PhotoViewer(QMainWindow):
         fetch it. Without this, saving after an undo could write the downscaled preview.
         """
         viewer = self.image_viewer
-        viewer._display_cache = None
-        if state.get("full_res", True):
-            viewer.full_resolution_ready = True
-            return
+        pixmap = state["pixmap"]
+        full_resolution = state.get("full_res", True)
+        source_size = state.get("source_size")
         path = getattr(self, "_current_path", None)
-        full = ImageLoaderRunnable.get_cached_image(path) if path else None
-        if full is not None:
-            viewer.original_pixmap = QPixmap.fromImage(full)
-            viewer.full_resolution_ready = True
-        else:
-            viewer.full_resolution_ready = False
+        if not full_resolution:
+            full = ImageLoaderRunnable.get_cached_image(path) if path else None
+            if full is not None:
+                pixmap = QPixmap.fromImage(full)
+                full_resolution = True
+                source_size = (full.width(), full.height())
+        viewer.replace_image(pixmap, full_resolution=full_resolution, source_size=source_size,
+                             rotation=state["rotation"], brightness=state["brightness"],
+                             fit=state.get("from_crop", False))
+        if not full_resolution:
             viewer.request_full_resolution()
 
     def undo_action(self):
@@ -3948,6 +3942,7 @@ class PhotoViewer(QMainWindow):
         curr = {
             "pixmap":          self.image_viewer.original_pixmap,
             "full_res":        self.image_viewer.full_resolution_ready,
+            "source_size":     self.image_viewer.source_size,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -3956,20 +3951,14 @@ class PhotoViewer(QMainWindow):
         hist["redo"].append(curr)
 
         # 3) Apply popped state
-        self.image_viewer.original_pixmap   = state["pixmap"]
         self._restore_snapshot_resolution(state)
-        self.image_viewer.rotation_angle    = state["rotation"]
-        self.image_viewer.brightness_factor = state["brightness"]
-        # clear out any old GPU cache so we rebuild on next paint
-        self.image_viewer.cached_texture    = None
 
         # 4) Restore modified flag
         self._modified[path] = state["image_modified"]
         self.image_modified  = state["image_modified"]
         self.unsaved_crop    = None
 
-        # 5) Repaint
-        self.image_viewer.updatePixmap()
+        # 5) Pixels and camera were restored atomically above.
 
         # 6) Sync the slider (if overlay still up)
         if hasattr(self, "brightness_slider"):
@@ -3981,10 +3970,7 @@ class PhotoViewer(QMainWindow):
         # 7) Turn off any compare‐mode overlay
         self.image_viewer.compare_enabled = False
 
-        # 8) Fit only if this undo came from a crop action
-        if state.get("from_crop", False):
-            self.image_viewer.auto_fit = True
-            self.image_viewer.adjustToFit()
+        # 8) Crop snapshots already requested fit in the replacement operation.
 
         # 9) Update UI
         self._update_undo_redo_actions()
@@ -4016,6 +4002,7 @@ class PhotoViewer(QMainWindow):
         curr = {
             "pixmap":          self.image_viewer.original_pixmap,
             "full_res":        self.image_viewer.full_resolution_ready,
+            "source_size":     self.image_viewer.source_size,
             "rotation":        self.image_viewer.rotation_angle,
             "brightness":      self.image_viewer.brightness_factor,
             "image_modified":  self.image_modified,
@@ -4024,19 +4011,13 @@ class PhotoViewer(QMainWindow):
         hist["undo"].append(curr)
 
         # 3) Apply popped state
-        self.image_viewer.original_pixmap   = state["pixmap"]
         self._restore_snapshot_resolution(state)
-        self.image_viewer.rotation_angle    = state["rotation"]
-        self.image_viewer.brightness_factor = state["brightness"]
-        # clear any old GPU texture cache
-        self.image_viewer.cached_texture    = None
 
         # 4) Restore modified flag
         self._modified[path] = state["image_modified"]
         self.image_modified  = state["image_modified"]
 
-        # 5) Repaint
-        self.image_viewer.updatePixmap()
+        # 5) Pixels and camera were restored atomically above.
 
         # 6) Sync the slider (if overlay still up)
         if hasattr(self, "brightness_slider"):
@@ -4048,10 +4029,7 @@ class PhotoViewer(QMainWindow):
         # 7) Turn off any compare‐mode overlay
         self.image_viewer.compare_enabled = False
 
-        # 8) Fit only if this redo came from a crop action
-        if state.get("from_crop", False):
-            self.image_viewer.auto_fit = True
-            self.image_viewer.adjustToFit()
+        # 8) Crop snapshots already requested fit in the replacement operation.
 
         # 9) Update UI
         self._update_undo_redo_actions()
@@ -4225,19 +4203,7 @@ class PhotoViewer(QMainWindow):
         *and* mark this image as having unsaved edits.
         """
         # ——— your existing viewer-update code ———
-        self.image_viewer.original_pixmap = sharpened_pix
-        self.image_viewer.cached_texture = None
-
-        # preserve auto-fit vs manual zoom:
-        if self.image_viewer.auto_fit:
-            self.image_viewer.adjustToFit()
-        else:
-            self.image_viewer.resetTransform()
-            self.image_viewer.scale(
-                self.image_viewer.zoom_factor,
-                self.image_viewer.zoom_factor
-            )
-            self.image_viewer.updatePixmap()
+        self.image_viewer.replace_image(sharpened_pix)
         # ———————————————————————————————
 
         # mark *this* image dirty
