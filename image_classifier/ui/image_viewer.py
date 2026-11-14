@@ -107,6 +107,16 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         full = ImageLoaderRunnable.get_cached_image(norm)
         preview = ImageLoaderRunnable.get_cached_preview(norm, dimension)
 
+        # A carried zoom uses full-source pixel coordinates. Applying that scale
+        # to a preview and then upgrading it multiplies the scale by preview/full
+        # on every visit. Keep the old photo visible until the full source arrives.
+        carry_zoom = not reset_zoom and (
+            abs(self.zoom_factor - self.fit_zoom_factor) >= 0.01
+            or (preserve_zoom and hasattr(self, "_saved_transform"))
+        )
+        if carry_zoom:
+            preview = None
+
         if preview is not None:
             self.onImageLoaded(
                 QPixmap.fromImage(preview),
@@ -136,7 +146,8 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             norm,
             max_dimension=dimension,
             progressive=True,
-            load_full=False,
+            load_full=carry_zoom,
+            load_preview=not carry_zoom,
         )
         worker.signals.previewReady.connect(
             lambda frame, id=load_id:
