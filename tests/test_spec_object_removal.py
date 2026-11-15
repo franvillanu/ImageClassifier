@@ -14,7 +14,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import render
 from image_classifier.editor.state import CropGeometry, EditState, Orientation, Removal
 
-REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11", "RM-12"]
+REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11", "RM-12", "RM-13", "RM-16"]
 
 W, H = 480, 320
 PERIOD = 24
@@ -455,3 +455,45 @@ def test_rm12_control_without_any_limit_the_sources_are_far():
     size = max(np.ptp(ys), np.ptp(xs)) + 1
     bound = max(rm.RADIUS * size, 3 * rm.PATCH) + rm.PATCH
     assert np.hypot(plan.offsets[..., 0], plan.offsets[..., 1])[hole].max() > bound * 1.5
+
+
+def _structured(seed=9):
+    """A scene with a few different textures (stripes, blobs, noise) so a search has real choices to make."""
+    rng = np.random.default_rng(seed)
+    h, w = 320, 480
+    y, x = np.mgrid[0:h, 0:w]
+    base = 110 + 60 * np.sin(2 * np.pi * x / 22) * (y < 170) + 50 * np.sin(2 * np.pi * (x + y) / 31) * (y >= 170)
+    rgb = np.stack([base, base * 0.9, 100 + 0 * base], -1) + rng.normal(0, 9, (h, w, 3))
+    return np.clip(rgb, 0, 255).astype(np.uint8)
+
+
+def test_rm13_windowed_search_gives_the_same_offsets_with_fewer_pixels():
+    """RM-13: searching only the allowed window = searching everything and masking: same offsets, far fewer pixels."""
+    rgb = _structured()
+    stroke = Removal(points=((190.0, 150.0), (300.0, 170.0)), radius=36.0)
+    out = {}
+    for windowed in (False, True):
+        old = rm.WINDOWED
+        rm.WINDOWED = windowed
+        rm._stats["search_px"] = 0
+        try:
+            plan = rm.fill_plan(_rgba(rgb), stroke, (480, 320))
+        finally:
+            rm.WINDOWED = old
+        out[windowed] = (plan.offsets, rm._stats["search_px"])
+    assert (out[False][0] == out[True][0]).all()
+    assert out[True][1] < 0.5 * out[False][1], (out[True][1], out[False][1])
+
+
+def test_rm16_applying_only_works_on_the_painted_box():
+    """RM-16: pixels processed when applying are a small part of the region around a small stroke; outside it is unchanged."""
+    rgb = _structured()
+    src = _rgba(rgb)
+    small = Removal(points=((230.0, 150.0), (270.0, 160.0)), radius=14.0)
+    plan = rm.fill_plan(src, small, (480, 320))
+    rm._stats["apply_px"] = 0
+    out = rm.apply_plan(src, small, plan, (480, 320))
+    x0, y0, x1, y1 = plan.box
+    assert 0 < rm._stats["apply_px"] <= 0.4 * (x1 - x0) * (y1 - y0), (rm._stats["apply_px"], (x1 - x0) * (y1 - y0))
+    painted = rm.stroke_mask((320, 480), small, 1.0, margin=4.0) > 0
+    assert (out[~painted] == src[~painted]).all()

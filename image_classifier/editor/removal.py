@@ -27,6 +27,8 @@ WORK = 200  # longest side of the working copy the search runs on
 PATCH = 9
 MARGIN_WORK = 2.0  # working pixels the painted area is grown by, to swallow the object's soft edge
 _FAR = 3e38
+WINDOWED = True  # search only the window where copying is allowed (same result, far fewer pixels)
+_stats = {"search_px": 0, "apply_px": 0}  # pixels the template search looked at (tests, evidence)
 RADIUS = 0.6  # a patch is only copied from within this many hole-sizes of itself (0 = anywhere)
 COH_W = 40.0  # weight of copying from the same place as the already filled neighbours (0 = off)
 COH_CAP = 40000.0
@@ -139,28 +141,52 @@ def _exemplar_fill(img: np.ndarray, hole: np.ndarray, patch: int | None = None):
         win = (slice(y0, y0 + patch), slice(x0, x0 + patch))
         unknown = hole[win]
         known3 = np.repeat((~unknown)[..., None], nch, 2).astype(np.float32)
-        score = cv2.matchTemplate(lab[..., :nch], lab[win][..., :nch], cv2.TM_SQDIFF, mask=known3)
-        # prefer sources near the target: far-away patches are what brings in the wrong scenery (walls, benches)
-        if CTX_W:
+        tmpl = lab[win][..., :nch]
+        mine = None
+        if CTX_W:  # the average colour of what is really around this patch
             cy, cx = y0 + r, x0 + r
             sl = (slice(max(0, cy - half), cy + half + 1), slice(max(0, cx - half), cx + half + 1))
             seen = (~hole[sl]).astype(np.float32)
             if seen.sum() >= 1:
                 mine = (lab[sl] * seen[..., None]).sum((0, 1)) / seen.sum()
-                score += CTX_W * ((ctx_cand - mine) ** 2).sum(-1)
+        mdy = mdx = None
         if COH_W:
             fw = filled[win]
             if fw.any():  # continue from where the neighbours were copied from: coherent chunks, no stray scraps
                 mdy, mdx = np.median(offsets[win][fw], axis=0)
-                d2 = (yy - y0 - mdy) ** 2 + (xx - x0 - mdx) ** 2
-                score += np.minimum(COH_W * d2, COH_CAP)
-        score += NEAR * ((yy - y0) ** 2 + (xx - x0) ** 2) / float(H * H + W * W)
-        score[~valid] = _FAR
-        if radius2:  # only the neighbourhood of this patch is a candidate source (RM-3)
-            near = ((yy - y0) ** 2 + (xx - x0) ** 2) <= radius2
-            if (near & valid).any():
-                score[~near] = _FAR
-        sy, sx = np.unravel_index(int(np.argmin(score)), score.shape)
+
+        def search(wy0, wy1, wx0, wx1, circle):
+            """Best source whose window top-left lies in the given rows/cols; None if the circle holds no usable one."""
+            sh, sw = wy1 - wy0 - patch + 1, wx1 - wx0 - patch + 1
+            sc = cv2.matchTemplate(lab[wy0:wy1, wx0:wx1, :nch], tmpl, cv2.TM_SQDIFF, mask=known3)
+            _stats["search_px"] += sc.size
+            gy_, gx_ = yy[wy0:wy0 + sh, wx0:wx0 + sw], xx[wy0:wy0 + sh, wx0:wx0 + sw]
+            ok = valid[wy0:wy0 + sh, wx0:wx0 + sw]
+            if mine is not None:
+                sc += CTX_W * ((ctx_cand[wy0:wy0 + sh, wx0:wx0 + sw] - mine) ** 2).sum(-1)
+            if mdy is not None:
+                sc += np.minimum(COH_W * ((gy_ - y0 - mdy) ** 2 + (gx_ - x0 - mdx) ** 2), COH_CAP)
+            d2 = (gy_ - y0) ** 2 + (gx_ - x0) ** 2
+            sc += NEAR * d2 / float(H * H + W * W)
+            sc[~ok] = _FAR
+            if circle:  # only the neighbourhood of this patch is a candidate source (RM-12)
+                near = d2 <= radius2
+                if not (near & ok).any():
+                    return None
+                sc[~near] = _FAR
+            iy, ix = np.unravel_index(int(np.argmin(sc)), sc.shape)
+            return wy0 + int(iy), wx0 + int(ix)
+
+        found = None
+        if radius2:
+            if WINDOWED:  # RM-13: nothing outside the circle can win, so do not even look there
+                rad = int(np.ceil(np.sqrt(radius2)))
+                found = search(max(0, y0 - rad), min(H, y0 + rad + patch), max(0, x0 - rad), min(W, x0 + rad + patch), True)
+            else:
+                found = search(0, H, 0, W, True)
+        if found is None:
+            found = search(0, H, 0, W, False)
+        sy, sx = found
         src = (slice(sy, sy + patch), slice(sx, sx + patch))
         img[win][unknown] = img[src][unknown]
         lab[win][unknown] = lab[src][unknown]
@@ -188,35 +214,61 @@ def fill_plan(img: np.ndarray, removal: Removal, source_size: tuple[int, int]) -
 
 # --------------------------------------------------------------------------- applying a plan
 def apply_plan(img: np.ndarray, removal: Removal, plan: Plan, source_size: tuple[int, int]) -> np.ndarray:
-    """Return a copy of ``img`` (RGBA or RGB uint8, any resolution of the source) with the stroke filled."""
+    """Return a copy of ``img`` (RGBA or RGB uint8, any resolution of the source) with the stroke filled.
+
+    Only the box of the painted area (plus a margin) is processed: that is where pixels change, and it is a
+    small part of the region the fill was searched in (RM-16).
+    """
     sx, sy = img.shape[1] / source_size[0], img.shape[0] / source_size[1]
     x0, y0, x1, y1 = plan.box
     ix0, iy0 = int(round(x0 * sx)), int(round(y0 * sy))
     ix1, iy1 = max(int(round(x1 * sx)), ix0 + 1), max(int(round(y1 * sy)), iy0 + 1)
-    roi = np.ascontiguousarray(img[iy0:iy1, ix0:ix1, :3])
-    rh, rw = roi.shape[:2]
+    rh, rw = iy1 - iy0, ix1 - ix0
     ww, wh = plan.work
     s_work = ww / max(1e-6, (x1 - x0))
     # one working pixel less than the plan's own growth, so the area filled here lies inside the planned one
     margin_src = (MARGIN_WORK - 1.0) / s_work
-    mask = stroke_mask((rh, rw), removal, sx, (ix0 / sx, iy0 / sy), margin_src * sx)
-    hole = mask > 0
-    if not hole.any():
+    mask_full = stroke_mask((rh, rw), removal, sx, (ix0 / sx, iy0 / sy), margin_src * sx)
+    bx, by, bw, bh = cv2.boundingRect(mask_full)
+    if bw == 0 or bh == 0:
         return img
+    pad = 8  # known pixels around the painted area for the blend
+    cx0, cy0 = max(0, bx - pad), max(0, by - pad)
+    cx1, cy1 = min(rw, bx + bw + pad), min(rh, by + bh + pad)
+    mask = np.ascontiguousarray(mask_full[cy0:cy1, cx0:cx1])
+    hole = mask > 0
+    roi = img[iy0:iy1, ix0:ix1, :3]  # the full region: sources may lie anywhere in it
+    crop = np.ascontiguousarray(roi[cy0:cy1, cx0:cx1])
+    _stats["apply_px"] += crop.shape[0] * crop.shape[1]
     out = img.copy()
     if plan.offsets is None:
-        filled = cv2.inpaint(roi, mask, 5, cv2.INPAINT_TELEA)
+        filled = cv2.inpaint(crop, mask, 5, cv2.INPAINT_TELEA)
     else:
-        fx, fy = rw / ww, rh / wh
-        off = cv2.resize(plan.offsets.astype(np.float32), (rw, rh), interpolation=cv2.INTER_NEAREST)
-        gy, gx = np.mgrid[0:rh, 0:rw].astype(np.float32)
-        map_x = np.clip(np.round(gx + off[..., 1] * fx), 0, rw - 1).astype(np.float32)
-        map_y = np.clip(np.round(gy + off[..., 0] * fy), 0, rh - 1).astype(np.float32)
-        copied = cv2.remap(roi, map_x, map_y, cv2.INTER_NEAREST)
-        filled = np.where(hole[..., None], copied, roi)
-        filled = _blend(filled, roi, mask)
-    out[iy0:iy1, ix0:ix1, :3][hole] = filled[hole]
+        filled = _blend(_copy_hole(roi, plan, hole, (cx0, cy0), rw / ww, rh / wh), crop, mask)
+    out[iy0 + cy0:iy0 + cy1, ix0 + cx0:ix0 + cx1, :3][hole] = filled[hole]
     return out
+
+
+def _copy_hole(roi: np.ndarray, plan: Plan, hole: np.ndarray, origin: tuple[int, int], fx: float, fy: float) -> np.ndarray:
+    """The box of ``roi`` starting at ``origin`` with the hole pixels copied from where the plan says.
+
+    ``plan`` offsets are working pixels (scaled by fx, fy here); sources are read from the whole ``roi`` with
+    one ``cv2.remap``.
+    """
+    ox, oy = origin
+    bh, bw = hole.shape
+    rh, rw = roi.shape[:2]
+    wh, ww = plan.offsets.shape[:2]
+    cy = np.clip(((np.arange(bh) + oy) / fy).astype(np.int32), 0, wh - 1)
+    cx = np.clip(((np.arange(bw) + ox) / fx).astype(np.int32), 0, ww - 1)
+    off = plan.offsets[cy[:, None], cx[None, :]]  # nearest working cell of every pixel
+    usable = (off != 0).any(-1)  # a cell the plan did not fill has no source: the pixel stays as it is
+    gy, gx = np.mgrid[0:bh, 0:bw].astype(np.float32)
+    map_x = np.clip(np.round(gx + ox + off[..., 1] * fx), 0, rw - 1).astype(np.float32)
+    map_y = np.clip(np.round(gy + oy + off[..., 0] * fy), 0, rh - 1).astype(np.float32)
+    copied = cv2.remap(roi, map_x, map_y, cv2.INTER_NEAREST)
+    base = roi[oy:oy + bh, ox:ox + bw]
+    return np.where((hole & usable)[..., None], copied, base)
 
 
 def _blend(filled: np.ndarray, original: np.ndarray, mask: np.ndarray) -> np.ndarray:

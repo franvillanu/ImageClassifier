@@ -26,6 +26,11 @@ objects over complex scenes can show repeated patterns; the user can undo and re
 | RM-10 | From the moment strokes are handed over until the filled photo is shown, the painted area pulses and a card with a spinner and "Eliminando…" is drawn over the photo near it; nothing of this remains afterwards. | User (2026-11-14): the fill takes a while and the small message at the top went unnoticed, so it looked like nothing happened. |
 | RM-11 | Painting and moving the brush stay light: a mouse move repaints only a small area around the brush (its ring and the new piece of stroke), never the whole canvas; what was already painted is drawn once into a cached layer, so a repaint does not rebuild it (its cost does not grow with the number of strokes); the busy pulse repaints only the painted area and its card. | User (2026-11-14): "when the user paints or moves the mouse with the removal dot it lags". Every move called `update()` on the whole canvas and every repaint rebuilt the union of all strokes (3.9 of 6.2 ms with 12 strokes), and in the app every repaint recomposes the whole window (ARCHITECTURE.md section 2). |
 | RM-12 | The fill comes from the neighbourhood of the painted area: every filled pixel is copied from a place within a bounded distance of itself (0.6 of the painted area's size, at least three patches), and neighbouring filled pixels mostly come from the same offset (coherent chunks, not scattered scraps). | User (2026-11-14, screenshots): "it brings results that are far from the drawn area" - pieces of bench and wall appeared on the pavement and hillside. Cause: patches in the middle of a hole have few known pixels to compare, so almost any place scores as well as any other and the search picked arbitrary far-away ones. |
+| RM-13 | The patch search only looks inside the window where copying is allowed (RM-12), and gives exactly the same fill as searching the whole working region would: the offsets are identical, with a fraction of the pixels searched. | The masked template search is 77 % of the time (RM-4 evidence) and its cost grew with the whole region although RM-12 already excludes everything outside the window; the saving pays for a larger working size, i.e. a finer fill, at no extra time. |
+| RM-14 | (retired 2026-11-15) Blending the nearby sources around the seams. | Tried and withdrawn: on the user's photo the vote softened the block seams but smeared the whole fill into a soft grid, and cost +65 % time on a 12 MP photo (see Evidence). Replaced by RM-15, which attacks the cause of the visible seams (tone steps between patches). |
+
+| RM-15 | (retired 2026-11-15) Colour-matching every copied patch to the known pixels around it. | Tried and withdrawn: on the user's photo it changed nothing visible and the jump across the seams went from 3.50 to 4.11 grey levels (worse): the visible blocks are copied structure, not tone (the Poisson blend already levels the tone). |
+| RM-16 | Applying a fill only works on the box of the painted area (plus a small margin), not on the whole region around it: the pixels processed are at most 40 % of that region's for a small stroke, and the result outside the painted area is unchanged. | Budget set by the user: better quality without being slower. The apply step took 2.9 of 5.4 s on a 12 MP photo, mostly on pixels that are not painted. |
 
 ## Evidence
 
@@ -83,9 +88,32 @@ objects over complex scenes can show repeated patterns; the user can undo and re
   were chosen from a five-variant sheet; more surroundings weight (150) was worse (tan bits on the pavement).
   Left: stepped edges on the bench (offsets are quantised at the working size and enlarged), and the bench
   where it meets the hillside.
+- 2026-11-15 — "Improve what we have as much as possible without AI, without hurting performance, without a heavier
+  installer or more dependencies." Budget measured first, old (last commit) against new, alternated, best of 3, same
+  machine: 549x700 photo 1.21 s, 3294x4200 photo 3.15 s. Findings: (1) searching only the allowed window (RM-13)
+  gives identical offsets and cuts the searched pixels by ~30 % on this big hole (much more on small ones);
+  the saving is too small to afford a larger working size (300 px costs 4x: 17.5 against 3.8 Mpx searched, 400 px
+  14x); (2) the first version of the seam vote (RM-14) made the 12 MP case 3.15 -> 5.3 s (+69 %): profile 2.9 s in
+  the copy with votes, 1.1 s in `seamlessClone`, search only 0.66 s; almost the whole hole counts as "near a
+  seam" because the coherent chunks are only a few patches wide. Side by side on the bench and wall the vote
+  softens the seams but smears the fill into a grid, so it was withdrawn. (3) the apply step works on the whole
+  region around the hole (hole + 0.9 of its size on every side, about 7x the hole's area) although only the hole
+  changes: RM-16.
+- 2026-11-15 — Result of the round, fair comparison old (last commit) vs new, alternated, best of 3: 549x700 photo
+  1.24 -> 0.95 s, 3294x4200 photo 4.21 -> 3.26 s (-23 % in both), same fill. What made it faster is RM-13 (search only
+  the allowed window) and RM-16 (apply only on the painted box). Two quality ideas were tried and **withdrawn** with
+  numbers: seam voting (RM-14) and per-patch colour matching (RM-15). So the limit of the current fill is the
+  structure it copies, not seams or tone; next candidates are listed in the decision log.
+  A third cheap try, the weight of the structure term in the order patches are filled (0.001, 0.01, 0.05, 0.3
+  on the same photo): all four fills look alike and 0.3 makes the wall's step worse, so nothing was changed.
 - Real-app check: not run by the agent (GUI); the user verifies by relaunching from the branch.
 
 ## Decision log
+
+- 2026-11-15 — Ideas not done, in the order I would try them: (1) a second pass that re-searches each patch once the
+  hole is full (so interior patches are matched with their whole content, not the few known pixels they had when
+  first placed); (2) refining the offsets at a finer working size only along the seams with the known photo;
+  (3) a neural model (opt B in the chat), the only thing that can invent what is not in the photo.
 
 - 2026-11-14 — No AI model (LaMa/ONNX): it would add ~200 MB and a runtime to the installer. Exemplar fill needs only
   OpenCV and numpy, which are already shipped. If the quality is not enough for big objects, a model can replace
