@@ -14,7 +14,7 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.render import render
 from image_classifier.editor.state import CropGeometry, EditState, Orientation, Removal
 
-REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10"]
+REQUIRES = ["RM-1", "RM-2", "RM-3", "RM-4", "RM-5", "RM-6", "RM-7", "RM-8", "RM-9", "RM-10", "RM-11", "RM-12", "RM-13", "RM-16"]
 
 W, H = 480, 320
 PERIOD = 24
@@ -327,3 +327,173 @@ def test_rm10_a_card_and_pulse_show_while_the_fill_is_worked_out(editor):
     assert card != before
     c.set_image(c._image, c._size)  # the filled picture arrives
     assert not c.is_waiting() and not c._busy_timer.isActive()
+
+
+def _region_area(region, w, h) -> int:
+    """Pixels a paint region really covers (the rectangles of the region, not the box around them)."""
+    from PyQt6.QtGui import QPainter as _P
+    mask = QImage(w, h, QImage.Format.Format_Grayscale8)
+    mask.fill(0)
+    p = _P(mask)
+    p.setClipRegion(region)
+    p.fillRect(0, 0, w, h, Qt.GlobalColor.white)
+    p.end()
+    rows = np.frombuffer(mask.constBits().asstring(mask.sizeInBytes()), np.uint8).reshape(h, mask.bytesPerLine())
+    return int((rows[:, :w] > 0).sum())
+
+
+class _PaintLog:
+    """Records the area of every paint event of a widget (what the compositor has to redo)."""
+
+    def __init__(self, widget):
+        from PyQt6.QtCore import QObject
+
+        class Filter(QObject):
+            def eventFilter(inner, obj, ev):
+                if obj is widget and ev.type() == QEvent.Type.Paint:
+                    self.areas.append(_region_area(ev.region(), widget.width(), widget.height()))
+                return False
+
+        self.areas = []
+        self._filter = Filter(widget)
+        widget.installEventFilter(self._filter)
+        self.full = widget.width() * widget.height()
+
+    def reset(self):
+        self.areas.clear()
+
+
+def test_rm11_moving_and_painting_repaint_only_a_small_area(editor):
+    """RM-11: mouse moves repaint a small area; the painted area is a cached layer, not rebuilt per repaint."""
+    ed = editor
+    c = _open_remove(ed)
+    c.set_brush_size(50)
+    rect, z = c.image_rect(), c.zoom()
+    log = _PaintLog(c)
+    QApplication.processEvents()
+    # hovering: ring only
+    log.reset()
+    for i in range(30):
+        _mouse(c, QEvent.Type.MouseMove, QPointF(rect.x() + (200 + 6 * i) * z, rect.y() + 300 * z), Qt.MouseButton.NoButton)
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.05 * log.full, (max(log.areas), log.full)
+    # a big scribble already painted
+    for i in range(8):
+        y = 120 + i * 50
+        _drag(c, QPointF(rect.x() + 60 * z, rect.y() + y * z), QPointF(rect.x() + 800 * z, rect.y() + y * z), steps=60)
+    QApplication.processEvents()
+    assert c.has_selection()
+    builds = c._layer_builds
+    log.reset()
+    # painting one more stroke over it: small repaints, and no layer is rebuilt
+    a, b = QPointF(rect.x() + 100 * z, rect.y() + 520 * z), QPointF(rect.x() + 600 * z, rect.y() + 540 * z)
+    _mouse(c, QEvent.Type.MouseButtonPress, a)
+    for i in range(1, 41):
+        _mouse(c, QEvent.Type.MouseMove, a + (b - a) * (i / 40))
+        QApplication.processEvents()
+    _mouse(c, QEvent.Type.MouseButtonRelease, b)
+    QApplication.processEvents()
+    assert max(log.areas) < 0.08 * log.full, (max(log.areas), log.full)
+    assert c._layer_builds == builds, "the painted layer must not be rebuilt while painting"
+    # the busy pulse repaints the painted area and the card, not the whole canvas
+    ed._request_previews = lambda: None  # no render arrives: look at the waiting state only
+    ed._commit_strokes()
+    QApplication.processEvents()
+    log.reset()
+    for _ in range(10):
+        c._tick()
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.6 * log.full  # this scribble covers a large part of the photo
+    # a small removal's pulse is tiny
+    c.set_image(c._image, c._size)
+    c.set_brush_size(30)
+    _drag(c, QPointF(rect.x() + 400 * z, rect.y() + 300 * z), QPointF(rect.x() + 440 * z, rect.y() + 300 * z))
+    ed._commit_strokes()
+    QApplication.processEvents()
+    log.reset()
+    for _ in range(10):
+        c._tick()
+        QApplication.processEvents()
+    assert log.areas and max(log.areas) < 0.1 * log.full, (max(log.areas), log.full)
+
+
+def _plan_offsets(**settings):
+    """Fill plan for a big stroke over noise (every place looks as good as any other) and its offsets."""
+    rng = np.random.default_rng(5)
+    rgb = np.clip(rng.normal(128, 40, (320, 480, 3)), 0, 255).astype(np.uint8)
+    big = Removal(points=((150.0, 160.0), (330.0, 160.0)), radius=50.0)
+    old = {k: getattr(rm, k) for k in settings}
+    try:
+        for k, v in settings.items():
+            setattr(rm, k, v)
+        plan = rm.fill_plan(_rgba(rgb), big, (480, 320))
+    finally:
+        for k, v in old.items():
+            setattr(rm, k, v)
+    hole = rm.stroke_mask(plan.work[::-1], big, plan.work[0] / (plan.box[2] - plan.box[0]), (plan.box[0], plan.box[1]),
+                          rm.MARGIN_WORK) > 0
+    return plan, hole
+
+
+def test_rm12_the_fill_comes_from_near_the_painted_area_in_coherent_chunks():
+    """RM-12: bounded source distance, and neighbouring filled pixels share their offset."""
+    plan, hole = _plan_offsets()
+    assert plan.offsets is not None
+    ys, xs = np.nonzero(hole)
+    size = max(np.ptp(ys), np.ptp(xs)) + 1
+    bound = max(rm.RADIUS * size, 3 * rm.PATCH) + rm.PATCH  # a patch's own extent on top of the centre distance
+    dist = np.hypot(plan.offsets[..., 0], plan.offsets[..., 1])[hole]
+    assert dist.max() <= bound * 1.5, (dist.max(), bound)
+    same = (plan.offsets[:, 1:] == plan.offsets[:, :-1]).all(-1) & hole[:, 1:] & hole[:, :-1]
+    assert same.sum() / max(1, (hole[:, 1:] & hole[:, :-1]).sum()) > 0.7  # most neighbours copy from the same offset
+
+
+def test_rm12_control_without_any_limit_the_sources_are_far():
+    """RM-12 (control): with every limit off the sources are far from the hole, so the bound above measures something."""
+    plan, hole = _plan_offsets(RADIUS=0.0, COH_W=0.0, CTX_W=0.0, NEAR=0.0)
+    ys, xs = np.nonzero(hole)
+    size = max(np.ptp(ys), np.ptp(xs)) + 1
+    bound = max(rm.RADIUS * size, 3 * rm.PATCH) + rm.PATCH
+    assert np.hypot(plan.offsets[..., 0], plan.offsets[..., 1])[hole].max() > bound * 1.5
+
+
+def _structured(seed=9):
+    """A scene with a few different textures (stripes, blobs, noise) so a search has real choices to make."""
+    rng = np.random.default_rng(seed)
+    h, w = 320, 480
+    y, x = np.mgrid[0:h, 0:w]
+    base = 110 + 60 * np.sin(2 * np.pi * x / 22) * (y < 170) + 50 * np.sin(2 * np.pi * (x + y) / 31) * (y >= 170)
+    rgb = np.stack([base, base * 0.9, 100 + 0 * base], -1) + rng.normal(0, 9, (h, w, 3))
+    return np.clip(rgb, 0, 255).astype(np.uint8)
+
+
+def test_rm13_windowed_search_gives_the_same_offsets_with_fewer_pixels():
+    """RM-13: searching only the allowed window = searching everything and masking: same offsets, far fewer pixels."""
+    rgb = _structured()
+    stroke = Removal(points=((190.0, 150.0), (300.0, 170.0)), radius=36.0)
+    out = {}
+    for windowed in (False, True):
+        old = rm.WINDOWED
+        rm.WINDOWED = windowed
+        rm._stats["search_px"] = 0
+        try:
+            plan = rm.fill_plan(_rgba(rgb), stroke, (480, 320))
+        finally:
+            rm.WINDOWED = old
+        out[windowed] = (plan.offsets, rm._stats["search_px"])
+    assert (out[False][0] == out[True][0]).all()
+    assert out[True][1] < 0.5 * out[False][1], (out[True][1], out[False][1])
+
+
+def test_rm16_applying_only_works_on_the_painted_box():
+    """RM-16: pixels processed when applying are a small part of the region around a small stroke; outside it is unchanged."""
+    rgb = _structured()
+    src = _rgba(rgb)
+    small = Removal(points=((230.0, 150.0), (270.0, 160.0)), radius=14.0)
+    plan = rm.fill_plan(src, small, (480, 320))
+    rm._stats["apply_px"] = 0
+    out = rm.apply_plan(src, small, plan, (480, 320))
+    x0, y0, x1, y1 = plan.box
+    assert 0 < rm._stats["apply_px"] <= 0.4 * (x1 - x0) * (y1 - y0), (rm._stats["apply_px"], (x1 - x0) * (y1 - y0))
+    painted = rm.stroke_mask((320, 480), small, 1.0, margin=4.0) > 0
+    assert (out[~painted] == src[~painted]).all()

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPainterPathStroker, QPen
+from PyQt6.QtCore import QLineF, QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF, QRegion
 from PyQt6.QtWidgets import QWidget
 
 MARGIN = 32
@@ -44,6 +44,12 @@ class AdjustCanvas(QWidget):
         self._busy_timer.timeout.connect(self._tick)
         self._hover: QPointF | None = None
         self._pan = None
+        # RM-11: the painted area lives in cached layers (opaque red, drawn once, shown with one flat opacity)
+        self._sel_layer: QImage | None = None
+        self._pend_layer: QImage | None = None
+        self._layer_key = None
+        self._layer_builds = 0
+        self._pend_dirty = QRect()
 
     # ------------------------------------------------------------------ remove-object brush (SPEC-005)
     def set_brush(self, on: bool):
@@ -52,6 +58,7 @@ class AdjustCanvas(QWidget):
         self._selection.clear()
         self._clear_pending()
         self._hover = None
+        self._sel_layer = self._pend_layer = None
         self.setMouseTracking(on)
         self.setCursor(Qt.CursorShape.BlankCursor if on else Qt.CursorShape.OpenHandCursor)
         self.update()
@@ -75,6 +82,7 @@ class AdjustCanvas(QWidget):
 
     def clear_selection(self):
         self._selection.clear()
+        self._sel_layer = None
         self.update()
 
     def take_selection(self) -> list:
@@ -82,19 +90,94 @@ class AdjustCanvas(QWidget):
         The area keeps pulsing, with the busy card, until the filled photo arrives (SPEC-005 RM-10)."""
         taken, self._selection = self._selection, []
         if taken:
+            self._ensure_layers()
+            self._pend_layer, self._sel_layer = self._sel_layer, None  # the cached drawing moves over, nothing redrawn
             self._pending = taken
             self._phase = 0.0
+            self._pend_dirty = self._busy_dirty(self._bounds(self._screen_strokes(taken)))
             self._busy_timer.start()
         self.update()
         return taken
 
     def _clear_pending(self):
+        had = bool(self._pending)
         self._pending.clear()
+        self._pend_layer = None
         self._busy_timer.stop()
+        if had:
+            self.update(self._pend_dirty)
 
     def _tick(self):
         self._phase += 0.2
-        self.update()
+        self.update(self._pend_dirty)  # RM-11: only the painted area and its card
+
+    # ---- cached layers
+    def _view_key(self):
+        r = self.image_rect()
+        return (round(r.x(), 2), round(r.y(), 2), round(r.width(), 2), self.width(), self.height(),
+                self.devicePixelRatioF())
+
+    def _new_layer(self) -> QImage:
+        dpr = self.devicePixelRatioF()
+        layer = QImage(max(1, round(self.width() * dpr)), max(1, round(self.height() * dpr)),
+                       QImage.Format.Format_ARGB32_Premultiplied)
+        layer.setDevicePixelRatio(dpr)
+        layer.fill(Qt.GlobalColor.transparent)
+        return layer
+
+    @staticmethod
+    def _stroke_pen(width: float) -> QPen:
+        pen = QPen(QColor(255, 60, 60), width)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        return pen
+
+    def _draw_into(self, layer: QImage, pts: list, width: float):
+        """Draw one polyline (screen px) opaque into ``layer``: overlaps add nothing, so the tint stays flat (RM-9)."""
+        p = QPainter(layer)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(self._stroke_pen(width))
+        if len(pts) == 1:
+            p.drawPoint(pts[0])
+        else:
+            p.drawPolyline(QPolygonF(pts))
+        p.end()
+
+    def _screen_strokes(self, done) -> list:
+        rect, z = self.image_rect(), self.zoom()
+        return [([QPointF(rect.x() + x * z, rect.y() + y * z) for x, y in path], r * z * 2) for path, r in done]
+
+    def _ensure_layers(self):
+        """(Re)draw the cached layers if the view changed since (zoom, pan, resize); otherwise nothing to do."""
+        key = self._view_key()
+        if key == self._layer_key and (self._sel_layer is not None or not (self._selection or self._stroke)) \
+                and (self._pend_layer is not None or not self._pending):
+            return
+        self._layer_key = key
+        self._layer_builds += 1
+        self._sel_layer = self._new_layer()
+        for pts, width in self._screen_strokes(self._selection):
+            self._draw_into(self._sel_layer, pts, width)
+        if self._stroke:
+            self._draw_into(self._sel_layer, self._stroke, self._brush_px)
+        self._pend_layer = None
+        if self._pending:
+            self._pend_layer = self._new_layer()
+            for pts, width in self._screen_strokes(self._pending):
+                self._draw_into(self._pend_layer, pts, width)
+
+    @staticmethod
+    def _bounds(strokes) -> QRectF:
+        box = QRectF()
+        for pts, width in strokes:
+            xs, ys = [q.x() for q in pts], [q.y() for q in pts]
+            box = box.united(QRectF(min(xs) - width / 2, min(ys) - width / 2,
+                                    max(xs) - min(xs) + width, max(ys) - min(ys) + width))
+        return box
+
+    def _ring_rect(self, pt: QPointF) -> QRect:
+        r = self._brush_px / 2.0 + 3
+        return QRectF(pt.x() - r, pt.y() - r, 2 * r, 2 * r).toAlignedRect()
 
     def _to_output(self, pt: QPointF) -> tuple[float, float]:
         rect, z = self.image_rect(), self.zoom()
@@ -106,8 +189,7 @@ class AdjustCanvas(QWidget):
             return
         radius = self._brush_px / 2.0 / self.zoom()
         path = [self._to_output(p) for p in pts]
-        self._selection.append((path, radius))
-        self.update()
+        self._selection.append((path, radius))  # the layer already shows it: nothing to redraw
         self.strokeFinished.emit(path, radius)
 
     def set_background(self, color: QColor):
@@ -227,7 +309,7 @@ class AdjustCanvas(QWidget):
         center = QPointF(0.5, 0.5) if self._compare is not None else self.view_center()
         return QRectF(mid.x() - center.x() * w, mid.y() - center.y() * h, w, h)
 
-    def paintEvent(self, _e):
+    def paintEvent(self, e):
         p = QPainter(self)
         p.fillRect(self.rect(), self._bg)
         image, _ = self._shown()
@@ -235,44 +317,43 @@ class AdjustCanvas(QWidget):
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             p.drawImage(self.image_rect(), image, QRectF(image.rect()))
         if self._brush:
-            self._paint_brush(p)
+            self._paint_brush(p, e.rect())
         p.end()
 
-    def _screen_path(self, strokes) -> QPainterPath:
-        """One filled shape for all strokes (screen px, width = brush): overlaps add nothing (RM-9)."""
-        union = QPainterPath()
-        for pts, width in strokes:
-            one = QPainterPath(pts[0])
-            if len(pts) == 1:
-                one.addEllipse(pts[0], width / 2.0, width / 2.0)
-                union = union.united(one)
-                continue
-            for q in pts[1:]:
-                one.lineTo(q)
-            stroker = QPainterPathStroker()
-            stroker.setWidth(width)
-            stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
-            stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            union = union.united(stroker.createStroke(one))
-        return union
+    def _busy_font(self) -> QFont:
+        font = QFont()
+        font.setFamilies(["Segoe UI Variable Text", "Segoe UI"])
+        font.setPixelSize(16)
+        font.setWeight(QFont.Weight.DemiBold)
+        return font
 
-    def _paint_brush(self, p: QPainter):
-        """The painted area as one flat red tint, the busy card, and the round brush cursor."""
-        rect, z = self.image_rect(), self.zoom()
+    def _card_rect(self, area: QRectF) -> QRectF:
+        """The busy card: centred on the painted area and kept inside the view."""
+        text_w = QFontMetricsF(self._busy_font()).horizontalAdvance(self._busy_text)
+        w, h = text_w + 76, 52.0
+        c = area.center()
+        x = min(max(8.0, c.x() - w / 2), self.width() - w - 8.0)
+        y = min(max(8.0, c.y() - h / 2), self.height() - h - 8.0)
+        return QRectF(x, y, w, h)
+
+    def _busy_dirty(self, area: QRectF) -> QRect:
+        return area.united(self._card_rect(area)).adjusted(-2, -2, 2, 2).toAlignedRect()
+
+    def _paint_brush(self, p: QPainter, clip: QRect):
+        """The painted area as one flat red tint (cached layers), the busy card, and the round brush cursor."""
+        self._ensure_layers()
+        dpr = self.devicePixelRatioF()
+        src = QRectF(clip.x() * dpr, clip.y() * dpr, clip.width() * dpr, clip.height() * dpr)
+        if self._pend_layer is not None:  # pulsing while the fill is worked out
+            p.setOpacity((95 + 70 * (0.5 + 0.5 * math.sin(self._phase))) / 255.0)
+            p.drawImage(QRectF(clip), self._pend_layer, src)
+        if self._sel_layer is not None and (self._selection or self._stroke):
+            p.setOpacity(110 / 255.0)
+            p.drawImage(QRectF(clip), self._sel_layer, src)
+        p.setOpacity(1.0)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        def screen(done):
-            return [([QPointF(rect.x() + x * z, rect.y() + y * z) for x, y in path], r * z * 2) for path, r in done]
-
-        waiting = self._screen_path(screen(self._pending)) if self._pending else None
-        if waiting is not None:  # pulsing while the fill is worked out
-            alpha = int(95 + 70 * (0.5 + 0.5 * math.sin(self._phase)))
-            p.fillPath(waiting, QColor(255, 60, 60, alpha))
-        mine = screen(self._selection) + ([(self._stroke, self._brush_px)] if self._stroke else [])
-        if mine:
-            p.fillPath(self._screen_path(mine), QColor(255, 60, 60, 110))
-        if waiting is not None:
-            self._paint_busy_card(p, waiting.boundingRect())
+        if self._pending:
+            self._paint_busy_card(p, self._bounds(self._screen_strokes(self._pending)))
         if self._hover is not None:
             r = self._brush_px / 2.0
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -282,18 +363,10 @@ class AdjustCanvas(QWidget):
             p.drawEllipse(self._hover, r, r)
 
     def _paint_busy_card(self, p: QPainter, area: QRectF):
-        """A card with a spinner and the message, centred on the painted area and kept inside the view."""
-        font = QFont()
-        font.setFamilies(["Segoe UI Variable Text", "Segoe UI"])
-        font.setPixelSize(16)
-        font.setWeight(QFont.Weight.DemiBold)
-        p.setFont(font)
-        text_w = p.fontMetrics().horizontalAdvance(self._busy_text)
-        w, h = text_w + 76, 52.0
-        c = area.center()
-        x = min(max(8.0, c.x() - w / 2), self.width() - w - 8.0)
-        y = min(max(8.0, c.y() - h / 2), self.height() - h - 8.0)
-        card = QRectF(x, y, w, h)
+        """A card with a spinner and the message over the painted area."""
+        p.setFont(self._busy_font())
+        card = self._card_rect(area)
+        text_w = card.width() - 76
         p.setPen(QPen(QColor(255, 255, 255, 40), 1))
         p.setBrush(QColor(20, 20, 23, 235))
         p.drawRoundedRect(card, 14, 14)
@@ -322,29 +395,39 @@ class AdjustCanvas(QWidget):
         e.accept()
 
     def mousePressEvent(self, e):
-        self._hover = e.position()
+        self._move_ring(e.position())
         if self._brush and e.button() == Qt.MouseButton.LeftButton:
+            self._ensure_layers()
             self._stroke = [e.position()]
+            if self._sel_layer is None:
+                self._sel_layer = self._new_layer()
+            self._draw_into(self._sel_layer, self._stroke, self._brush_px)
             self.strokeStarted.emit()
-            self.update()
-        elif e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton)                 and self._zoom is not None:
+        elif e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton) \
+                and self._zoom is not None:
             self._drag = (e.position(), QPointF(self._center))
             if not self._brush:
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
+    def _move_ring(self, pos: QPointF):
+        """Move the brush ring, repainting only where it was and where it is (RM-11)."""
+        if not self._brush:
+            return
+        old, self._hover = self._hover, pos
+        dirty = QRegion(self._ring_rect(pos))  # a region: two small rects, not the box around both
+        if old is not None:
+            dirty = dirty.united(QRegion(self._ring_rect(old)))
+        self.update(dirty)
+
     def mouseMoveEvent(self, e):
-        if self._brush:
-            self._hover = e.position()
+        self._move_ring(e.position())
         if self._stroke is not None:
             last = self._stroke[-1]
             d = e.position() - last
             if d.x() ** 2 + d.y() ** 2 >= max(2.0, self._brush_px / 6.0) ** 2:
-                self._stroke.append(e.position())
-            self.update()
+                self._extend_stroke(e.position())
             return
         if self._drag is None:
-            if self._brush:
-                self.update()
             return
         start, center = self._drag
         d = e.position() - start
@@ -354,14 +437,28 @@ class AdjustCanvas(QWidget):
         self._clamp_center()
         self.update()
 
+    def _extend_stroke(self, pos: QPointF):
+        """Add one segment to the stroke being painted: drawn into the cached layer, only its box repainted."""
+        last = self._stroke[-1]
+        self._stroke.append(pos)
+        if self._sel_layer is not None:
+            p = QPainter(self._sel_layer)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            p.setPen(self._stroke_pen(self._brush_px))
+            p.drawLine(QLineF(last, pos))
+            p.end()
+        r = self._brush_px / 2.0 + 2
+        self.update(QRectF(last, pos).normalized().adjusted(-r, -r, r, r).toAlignedRect())
+
     def leaveEvent(self, e):
-        self._hover = None
-        self.update()
+        if self._hover is not None:
+            old, self._hover = self._hover, None
+            self.update(self._ring_rect(old))
 
     def mouseReleaseEvent(self, e):
         if self._stroke is not None and e.button() == Qt.MouseButton.LeftButton:
             if e.position() != self._stroke[-1]:
-                self._stroke.append(e.position())
+                self._extend_stroke(e.position())
             self._finish_stroke()
             return
         self._drag = None
