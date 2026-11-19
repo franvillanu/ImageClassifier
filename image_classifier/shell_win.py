@@ -1,5 +1,6 @@
 """Windows Shell integration (COM, Shell32). Only used on Windows."""
 import ctypes
+import subprocess
 from ctypes import POINTER, c_ulong, c_void_p
 from ctypes.wintypes import LPCWSTR, UINT
 
@@ -45,17 +46,36 @@ SHOpenFolderAndSelectItems.argtypes = [c_void_p, UINT, ctypes.POINTER(c_void_p),
 SHOpenFolderAndSelectItems.restype = HRESULT
 
 
-def open_folder_and_select_item(file_path: str) -> None:
-    """Open Explorer and select the given file. Raises OSError on failure."""
-    from ctypes import byref, POINTER, c_ulong
+CoTaskMemFree = ctypes.windll.ole32.CoTaskMemFree
+CoTaskMemFree.argtypes = [c_void_p]
+CoTaskMemFree.restype = None
+
+SHELL_ATTEMPTS = 2
+
+
+def _shell_select(file_path: str) -> bool:
+    """Ask the Shell to open the folder with the file selected (SPEC-006 EX-1, EX-3)."""
     full_pidl = POINTER(c_ulong)()
-    hr = SHParseDisplayName(
-        LPCWSTR(file_path), None, byref(full_pidl), UINT(0), None
-    )
+    hr = SHParseDisplayName(LPCWSTR(file_path), None, ctypes.byref(full_pidl), UINT(0), None)
     if hr != 0:
-        raise OSError(f"SHParseDisplayName failed (0x{hr & 0xFFFFFFFF:08X})")
-    hr2 = SHOpenFolderAndSelectItems(
-        full_pidl, UINT(0), None, UINT(0)
-    )
-    if hr2 != 0:
-        raise OSError(f"SHOpenFolderAndSelectItems failed (0x{hr2 & 0xFFFFFFFF:08X})")
+        return False
+    try:
+        for _ in range(SHELL_ATTEMPTS):
+            if SHOpenFolderAndSelectItems(full_pidl, UINT(0), None, UINT(0)) == 0:
+                return True
+        return False
+    finally:
+        CoTaskMemFree(full_pidl)
+
+
+def open_folder_and_select_item(file_path: str) -> None:
+    """Open Explorer on the file's folder with the file selected.
+
+    SHOpenFolderAndSelectItems fails intermittently with E_FAIL for paths that work a moment later,
+    so it is retried once and then explorer.exe /select is used (SPEC-006 EX-2).
+    Raises OSError only if explorer.exe cannot be started either.
+    """
+    if _shell_select(file_path):
+        return
+    # Explorer parses its own command line: the /select argument must be passed as one raw string.
+    subprocess.Popen(f'explorer.exe /select,"{file_path}"')
