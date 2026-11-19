@@ -21,6 +21,7 @@ acceptance); its output becomes the spec.
 | [SPEC-003-classifier-view.md](SPEC-003-classifier-view.md) | Classifier photo view: fit, zoom, position | Active, started |
 | [SPEC-004-editor-view.md](SPEC-004-editor-view.md) | Editor: compare with the original, canvas zoom/pan | Active, started |
 | [SPEC-005-object-removal.md](SPEC-005-object-removal.md) | Editor: remove an object by painting over it | Active, started |
+| [SPEC-006-open-in-explorer.md](SPEC-006-open-in-explorer.md) | Context menu: open the photo in File Explorer | Active, started |
 
 Backlog (write the spec *before* touching these areas): navigation and preloading, slideshow playback engine,
 rest of the editor, updates, config persistence, favorites/compare/export, i18n.
