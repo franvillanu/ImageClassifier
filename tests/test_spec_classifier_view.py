@@ -7,7 +7,7 @@ from PIL import Image
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtTest import QTest
 
-REQUIRES = ["CV-1", "CV-2", "CV-3", "CV-4"]
+REQUIRES = ["CV-1", "CV-2", "CV-3", "CV-4", "CV-10"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -202,3 +202,16 @@ def test_cv3_help_shows_ctrl_up_down_as_zoom_not_move():
         t = translations[lang]
         assert "Ctrl+⬆️" in t["shortcut_zoom_in_key"] and "Ctrl+⬇️" in t["shortcut_zoom_out_key"]
         assert "Ctrl+⬆️" not in t["shortcut_pan_up_desc"] and "Ctrl+⬇️" not in t["shortcut_pan_down_desc"]
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Down, Qt.Key.Key_Up])
+def test_cv10_moving_never_leaves_the_photo(window, qapp, key):
+    """CV-10: holding Shift+arrow stops when the window centre reaches the photo edge."""
+    viewer = _zoomed_in(window, qapp)
+    target = qapp.focusWidget() or viewer
+    for _ in range(400):
+        QTest.keyClick(target, key, Qt.KeyboardModifier.ShiftModifier)
+    qapp.processEvents()
+    centre = viewer.mapToScene(viewer.viewport().rect().center())
+    photo = viewer.pixmap_item.sceneBoundingRect()
+    assert photo.adjusted(-2, -2, 2, 2).contains(centre)

@@ -156,11 +156,12 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
             self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag if self.auto_fit
                              else QGraphicsView.DragMode.ScrollHandDrag)
-            # Leave room to centre a source point near an edge. This also avoids
+            # Half a viewport of room centres any source point, even at an edge, and
+            # keeps the window centre on the photo (SPEC-003 CV-10). This also avoids
             # Qt's integer alignment offset becoming a cumulative camera drift.
             rect = self.pixmap_item.sceneBoundingRect()
-            mx = self.viewport().width() / self._camera.scale
-            my = self.viewport().height() / self._camera.scale
+            mx = self.viewport().width() / 2 / self._camera.scale
+            my = self.viewport().height() / 2 / self._camera.scale
             self.setSceneRect(rect.adjusted(-mx, -my, mx, my))
             super().setTransform(QTransform.fromScale(self._camera.scale, self._camera.scale))
             self.centerOn(QPointF(*self._camera.centre))
