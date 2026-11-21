@@ -2,7 +2,7 @@
 """
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PyQt6.QtGui import QPixmap, QWheelEvent, QMouseEvent, QPainter, QTransform, QImage, QOpenGLContext
-from PyQt6.QtCore import Qt, QPoint, QTimer, QSize, QPointF, QRectF
+from PyQt6.QtCore import Qt, QPoint, QTimer, QSize, QPointF, QRectF, pyqtSignal
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
 from image_classifier.i18n.translations import translations
@@ -10,6 +10,8 @@ from image_classifier.imaging import ImageFrame, ImageLoaderRunnable
 from image_classifier.imaging.loader import PRIORITY_CURRENT, PRIORITY_FULL_RESOLUTION, preview_dimension_for
 from image_classifier.imaging.loader import image_source_size
 from image_classifier.imaging.camera import Camera, ViewMode
+from image_classifier.imaging import huge
+from image_classifier.workers.huge_worker import HugeDetailRunnable
 from dataclasses import replace
 from image_classifier.ui.widgets import BaseOverlay, MyDragOverlay
 from image_classifier.ui.viewport import NearestViewport, _opengl
@@ -20,6 +22,9 @@ from image_classifier.ui.viewport import NearestViewport, _opengl
 # ------------------------------------------------------------------------
 class AdvancedGraphicsImageViewer(QGraphicsView):
     FULL_RESOLUTION_DWELL_MS = 250
+    # SPEC-007 HI-5: ("loading", percent) while the detail frame of a huge image loads,
+    # then ("ready", 100) or ("failed", 0). The window turns it into a status line.
+    detailStatus = pyqtSignal(str, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +57,10 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.loader = None
         self.full_loader = None
+        self.detail_loader = None
+        self._detail_ready = False
+        self._detail_failed = False
+        self.detail_error = ""
         self.loading_dialog = None
         self.full_resolution_ready = False
         self.current_load_id = 0
@@ -79,6 +88,11 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     @property
     def source_size(self):
         return self._source_size
+
+    @property
+    def is_huge(self):
+        """HI-1: the source has too many pixels to hold whole; see SPEC-007."""
+        return huge.is_huge(*self._source_size)
 
     @property
     def auto_fit(self):
@@ -217,11 +231,16 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def _cancel_pending_loads(self):
         self._full_request_timer.stop()
         self._brightness_timer.stop()
-        for attr in ("loader", "full_loader"):
+        had_detail_loader = self.detail_loader is not None
+        for attr in ("loader", "full_loader", "detail_loader"):
             worker = getattr(self, attr, None)
             if worker is not None:
                 worker.cancel()
                 setattr(self, attr, None)
+        if self._detail_ready or self._detail_failed or had_detail_loader:
+            self.detailStatus.emit("hidden", 0)
+        self._detail_ready = False
+        self._detail_failed = False
 
     def setImage(self, image_path, reset_zoom=True, preserve_zoom=False):
         """Show ``image_path``: screen-sized frame first, full resolution on demand.
@@ -325,6 +344,10 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def request_full_resolution(self):
         """Start (or finish from cache) the full-resolution load for the current image."""
         self._full_request_timer.stop()
+        if self.is_huge and not self.full_resolution_ready:
+            # HI-3: a full decode of a map needs several GB; ask for the detail frame instead.
+            self._request_detail()
+            return
         if self.full_resolution_ready:
             if not self.auto_fit:
                 self._ensure_manual_detail()
@@ -357,6 +380,54 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
         )
         self.full_loader = worker
         worker.start(PRIORITY_FULL_RESOLUTION)
+
+    def _request_detail(self):
+        """HI-4: decode the reduced detail frame of a huge image in the background."""
+        if self._detail_ready or self._detail_failed or self.detail_loader is not None:
+            return
+        if self._shown_load_id != self.current_load_id:
+            return
+        norm = getattr(self, "current_loading_image", None)
+        if not norm:
+            return
+        load_id = self.current_load_id
+        runnable = HugeDetailRunnable(norm)
+        runnable.signals.progress.connect(lambda pct, id=load_id: self._on_detail_progress(pct, id))
+        runnable.signals.ready.connect(lambda image, size, id=load_id: self._on_detail_ready(image, size, id))
+        runnable.signals.error.connect(lambda err, id=load_id: self._on_detail_error(err, id))
+        self.detail_loader = runnable
+        self.detailStatus.emit("loading", 0)
+        ImageLoaderRunnable.thread_pool().start(runnable, PRIORITY_FULL_RESOLUTION)
+
+    def _on_detail_progress(self, percent: int, load_id: int):
+        if load_id == self.current_load_id and self.detail_loader is not None:
+            self.detailStatus.emit("loading", int(percent))
+
+    def _on_detail_ready(self, image: QImage, source_size, load_id: int):
+        """Swap in the detail frame: same source-pixel scene, so the camera does not move (CV-8)."""
+        if load_id != self.current_load_id:
+            return
+        self.detail_loader = None
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
+            return
+        self._capture_camera()
+        self._detail_ready = True
+        self._original_pixmap = pixmap
+        self._source_size = tuple(source_size)
+        self._display_cache = None
+        self.cached_texture = None
+        if not self.auto_fit:
+            self.updatePixmap()
+        self.detailStatus.emit("ready", 100)
+
+    def _on_detail_error(self, err: str, load_id: int):
+        if load_id != self.current_load_id:
+            return
+        self.detail_loader = None
+        self._detail_failed = True
+        self.detailStatus.emit("failed", 0)
+        self.detail_error = err
 
     def _on_full_frame(self, frame: ImageFrame, load_id: int):
         if load_id != self.current_load_id:
@@ -683,7 +754,7 @@ class AdvancedGraphicsImageViewer(QGraphicsView):
     def _ensure_manual_detail(self):
         # A fitted full source may still display its screen-sized working frame.
         # Switch once on the first zoom, not on every wheel/key event.
-        if (self.full_resolution_ready and
+        if ((self.full_resolution_ready or self._detail_ready) and
                 (self._rendered_source_key != self.original_pixmap.cacheKey()
                  or not self._rendered_full_detail)):
             self.updatePixmap()

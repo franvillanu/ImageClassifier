@@ -45,7 +45,10 @@ from image_classifier.editor.widgets import (
     tool_button,
 )
 from image_classifier.i18n.translations import translations
+from image_classifier.imaging import huge
 from image_classifier.imaging.saver import save_rgba
+from image_classifier.ui.huge_job import HugeJob
+from image_classifier.workers.huge_worker import HugeEditWorker
 
 # The Ajuste dock, in order: light, then colour.
 LIGHT = ["brightness", "exposure", "contrast", "highlights", "shadows", "vignette"]
@@ -195,7 +198,7 @@ class PhotoEditor(QWidget):
     def __init__(self, parent: QWidget, source: QImage, source_path: str, *, language: str = "en",
                  rot90: int = 0, brightness: int = 0, tab: str = "crop",
                  copy_path_for: Callable[[], str] | None = None,
-                 background: str = "#000000"):
+                 background: str = "#000000", true_size: tuple[int, int] | None = None):
         super().__init__(parent)
         self.setObjectName("PhotoEditor")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -206,7 +209,11 @@ class PhotoEditor(QWidget):
         self._source_path = source_path
         self._copy_path_for = copy_path_for
         self._src = qimage_to_rgba(source)
-        self._size = (self._src.shape[1], self._src.shape[0])
+        # SPEC-007 HI-9: for a huge image ``source`` is a reduced stand-in and ``true_size`` the real
+        # dimensions; every edit is stored in true source pixels and applied to the file on save.
+        self._basic = true_size is not None
+        self._huge_job = None
+        self._size = tuple(true_size) if self._basic else (self._src.shape[1], self._src.shape[0])
         self._proxy = downscale(self._src, self._proxy_side())
         self._proxy_scale = self._proxy.shape[1] / self._size[0]
         self._orig_levels = build_levels(self._proxy, self._size)
@@ -236,6 +243,9 @@ class PhotoEditor(QWidget):
             app.aboutToQuit.connect(self._worker.stop)
 
         self._build_ui()
+        if self._basic:  # HI-9: only what can be done on the file
+            for hidden in (self.tab_adjust, self.tab_remove, self.btn_enhance):
+                hidden.hide()
         self.crop_canvas.set_levels(self._orig_levels)
         self._shown_key = (Adjustments(), ())  # the original levels are unadjusted and untouched
         self._set_state(self._state, commit=False)
@@ -696,6 +706,8 @@ class PhotoEditor(QWidget):
 
     def _switch_tab(self, tab: str):
         """``crop``, ``adjust``, or ``result`` (the finished photo after Done, no tool selected)."""
+        if self._basic and tab in ("adjust", "remove"):
+            return
         crop = tab == "crop"
         self._commit_strokes()
         if crop and self._tab != "crop":
@@ -879,6 +891,9 @@ class PhotoEditor(QWidget):
         else:
             path = self._copy_path_for() if self._copy_path_for else _unique_copy(self._source_path)
         source = self._source_path
+        if self._basic:
+            self._save_basic(source, path, overwrite)
+            return
 
         def write(pixels):
             save_rgba(path, pixels, source_path=source)
@@ -890,6 +905,27 @@ class PhotoEditor(QWidget):
 
         self._run_final(write, done)
 
+    def _save_basic(self, source: str, path: str, overwrite: bool):
+        """HI-10: apply the edit to the file in a background job; the editor stays open until it is saved."""
+        if self._huge_job is not None:
+            return
+        self._commit_strokes()
+        t = self._t
+        job = HugeJob(
+            self, HugeEditWorker(source, path, self._state, self), self._language,
+            on_saved=lambda saved_path: (self.saved.emit(saved_path, overwrite), self._close()),
+            on_failed=lambda msg: _Modal(self, t["editor_save_failed"].format(error=msg),
+                                         buttons=[("ok", "OK", "Primary")]).exec(),
+            on_canceled=lambda: self._show_toast(t["huge_save_canceled"]))
+        job.done.connect(self._on_basic_job_done)
+        self._huge_job = job
+        job.start()
+
+    def _on_basic_job_done(self):
+        job, self._huge_job = self._huge_job, None
+        if job is not None:
+            job.deleteLater()
+
     def _save_shortcut(self, overwrite: bool = False, clipboard: bool = False):
         self.save_menu.close_menu()
         if not self.btn_save.isEnabled():
@@ -900,6 +936,9 @@ class PhotoEditor(QWidget):
             self._save(overwrite=overwrite)
 
     def _copy_to_clipboard(self):
+        if self._basic:  # HI-9: a whole huge image cannot be put on the clipboard
+            self._show_toast(self.tr_("huge_no_clipboard").format(mp=huge.megapixels(*self._size)))
+            return
         if self._task is not None and self._task.isRunning():
             return
 

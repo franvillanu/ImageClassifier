@@ -602,6 +602,12 @@ class ImageLoaderRunnable(QRunnable):
             self._run()
         except _LoadCancelled:
             return
+        except Exception as exc:
+            # SPEC-007 HI-2: a worker must always end with a result. Pillow's
+            # DecompressionBombError and MemoryError used to escape here silently,
+            # leaving the viewer waiting for a frame that never came.
+            if not self._cancelled:
+                self.signals.error.emit(f"Failed to read {self.image_path}: {exc}")
 
     def _run(self):
         full = self.get_cached_image(self.image_path)

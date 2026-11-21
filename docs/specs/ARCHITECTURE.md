@@ -53,6 +53,18 @@ At fit, attaching the full source does not re-render the displayed frame. Neighb
 travel direction, previous 1) are preloaded and cancelled when out of the window. Held arrow keys are
 throttled by `_nav_step_allowed()`. Caches: bounded in-memory LRU plus optional disk preview cache.
 
+Huge images (2026-11-21, SPEC-007): above 100 MP (`imaging/huge.is_huge`) the viewer never decodes the full
+frame (≈ 3.6 GB per copy at 896 MP; Qt's 512 MB allocation limit and Pillow's bomb limit both refuse it).
+`request_full_resolution()` asks for a **detail frame** instead (`workers/huge_worker.HugeDetailRunnable`, Pillow
+reduced decode, long side 8192, cached like a preview) and `full_resolution_ready` stays false. Progress is the
+fraction of the file's bytes read (`huge._ProgressReader`); the viewer emits `detailStatus` and the window shows a
+status line. Rotating and saving runs on the file in `HugeRotateWorker` (read → transpose → atomic write), never
+through the viewer. Edit opens `PhotoEditor` in **basic mode** (`true_size=`): the editor already works on a reduced
+proxy with its state in true source pixels, so only the Crop tab is offered and Save runs `HugeEditWorker`
+(`huge.edit_file`: the editor's own matrix, one Pillow resampling per strip). `ui/huge_job.HugeJob` is the shared
+progress dialog. Brightness/sharpness/old crop overlay say "too large" via `PhotoViewer._full_resolution_gate()`. Any worker exception
+now reaches the viewer as an error signal (HI-2).
+
 Classifier camera contract (2026-11-14, SPEC-003 CV-4..CV-8):
 - `imaging/camera.py` owns the immutable camera record: explicit FIT/MANUAL mode, scale and centre in
   EXIF-oriented source-pixel coordinates (quarter-turns rotate the scene and the viewed point together).

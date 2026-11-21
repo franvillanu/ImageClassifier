@@ -61,15 +61,24 @@ def _to_pil(arr: np.ndarray, keep_alpha: bool) -> Image.Image:
     return Image.fromarray(np.ascontiguousarray(rgba[..., :3]), "RGB")
 
 
-def save_rgba(path: str, arr: np.ndarray, *, source_path: str | None = None) -> None:
-    """Save an RGB/RGBA uint8 array to ``path``. Raises ``OSError`` on failure."""
+def _format_for(path: str) -> tuple[str, str]:
     ext = os.path.splitext(path)[1].lower()
     fmt = _FORMATS.get(ext)
     if fmt is None:
         raise OSError(f"Unsupported file type: {ext or '(none)'}")
+    return ext, fmt
+
+
+def save_rgba(path: str, arr: np.ndarray, *, source_path: str | None = None) -> None:
+    """Save an RGB/RGBA uint8 array to ``path``. Raises ``OSError`` on failure."""
+    _, fmt = _format_for(path)
+    save_image(path, _to_pil(arr, fmt in ("PNG", "WEBP", "TIFF", "HEIF")), source_path=source_path)
+
+
+def save_image(path: str, img: Image.Image, *, source_path: str | None = None) -> None:
+    """Save a Pillow image to ``path`` with the source's EXIF/ICC. Raises ``OSError`` on failure."""
+    ext, fmt = _format_for(path)
     exif, icc = _source_metadata(source_path)
-    keep_alpha = fmt in ("PNG", "WEBP", "TIFF", "HEIF")
-    img = _to_pil(arr, keep_alpha)
 
     kwargs = {}
     if exif and fmt in ("JPEG", "PNG", "WEBP", "TIFF", "HEIF"):
