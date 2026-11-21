@@ -45,6 +45,8 @@ from image_classifier.editor.editor_window import PhotoEditor
 from image_classifier.editor.qtimage import qimage_to_rgba
 from image_classifier.imaging.saver import save_rgba
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
+from image_classifier.workers.huge_worker import HugeRotateWorker
+from image_classifier.imaging import huge
 from image_classifier import __version__
 from image_classifier.updates.controller import UpdateController
 from image_classifier.ui.update_banner import UpdateBanner
@@ -1609,6 +1611,19 @@ class PhotoViewer(QMainWindow):
         """)
         self.filename_label.setFixedHeight(50)
         self.filename_label.hide()
+        # SPEC-007: huge maps. Status line while the detail frame loads, and the rotate-and-save job.
+        self._huge_worker = None
+        self._huge_progress = None
+        self.huge_status_label = QLabel(self)
+        self.huge_status_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.huge_status_label.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 150); color: white; font-size: 16px;"
+            "border-radius: 8px; padding: 6px 12px;")
+        self.huge_status_label.hide()
+        self._huge_status_timer = QTimer(self)
+        self._huge_status_timer.setSingleShot(True)
+        self._huge_status_timer.timeout.connect(self.huge_status_label.hide)
+        self.image_viewer.detailStatus.connect(self._on_detail_status)
         if self.current_directory and os.path.exists(self.current_directory):
             self.load_directory(self.current_directory)
         else:
@@ -1708,6 +1723,7 @@ class PhotoViewer(QMainWindow):
             self.update_banner.reposition()
         self.update_floating_controls()
         self.update_filename_position()
+        self._position_huge_status()
         if hasattr(self, "settings_overlay") and self.settings_overlay is not None:
             self.close_settings_overlay()
         # New: If a crop overlay is open, let it handle the resize
@@ -2886,6 +2902,140 @@ class PhotoViewer(QMainWindow):
         y = star_geo.y() + (star_geo.height() - label_size.height()) // 3
         self.filename_label.setGeometry(x, y, label_size.width(), label_size.height())
 
+    # ------------------------------------------------------------------ huge images (SPEC-007)
+    def _position_huge_status(self):
+        label = self.huge_status_label
+        if label.isVisible():
+            label.move(20, self.height() - label.height() - 20)
+
+    def _on_detail_status(self, state, percent):
+        """HI-5: say what is loaded and how far the detail frame is."""
+        label = self.huge_status_label
+        self._huge_status_timer.stop()
+        if state == "hidden":
+            label.hide()
+            return
+        viewer = self.image_viewer
+        pixmap = viewer.original_pixmap
+        detail_px = max(pixmap.width(), pixmap.height()) if pixmap is not None else 0
+        text = huge.status_text(state, percent, viewer.source_size, detail_px, self.current_language,
+                                error=str(getattr(viewer, "detail_error", "")))
+        if label.text() != text:
+            label.setText(text)
+            label.adjustSize()
+        label.show()
+        label.raise_()
+        self._position_huge_status()
+        if state == "ready":
+            self._huge_status_timer.start(6000)
+        elif state == "failed":
+            self._huge_status_timer.start(15000)
+
+    def _full_resolution_gate(self) -> bool:
+        """True when every pixel is in memory. Otherwise say why not: still loading, or (HI-7) too large."""
+        viewer = self.image_viewer
+        if viewer.full_resolution_ready:
+            return True
+        t = translations.get(self.current_language, translations["en"])
+        if viewer.is_huge:
+            width, height = viewer.source_size
+            self.show_ephemeral_message(
+                t["huge_no_edit"].format(mp=huge.megapixels(width, height)), duration_ms=3500)
+        else:
+            viewer.request_full_resolution()
+            self.show_ephemeral_message(
+                t.get("full_resolution_loading", "Full-resolution image is still loading."))
+        return False
+
+    def _save_huge_rotation(self, overwrite: bool):
+        """HI-6/HI-7: rotate and save a huge image from the file, in the background, with progress."""
+        if self._huge_worker is not None:
+            return
+        viewer = self.image_viewer
+        t = translations.get(self.current_language, translations["en"])
+        width, height = viewer.source_size
+        if viewer.brightness_factor != 1.0:
+            self.show_ephemeral_message(
+                t["huge_brightness_not_saved"].format(mp=huge.megapixels(width, height)), duration_ms=4000)
+            return
+        quarter_turns = (int(viewer.rotation_angle or 0) % 360) // 90
+        if quarter_turns == 0:
+            self.show_ephemeral_message(t["huge_nothing_to_save"], duration_ms=3000)
+            return
+        norm_path = self.image_files[self.current_index]
+        orig_path = self.norm_to_original.get(norm_path, norm_path)
+        orig_filename = os.path.basename(orig_path)
+        if overwrite:
+            confirm = self.show_custom_dialog(
+                t["overwrite_image_confirm"].format(current_image=orig_filename),
+                icon_type="warning", buttons="yesno")
+            if confirm != QDialog.DialogCode.Accepted:
+                return
+            save_path = orig_path
+        else:
+            name, ext = os.path.splitext(orig_filename)
+            save_path = self.get_unique_copy_filename(os.path.dirname(orig_path), name, ext)
+        progress = OverlayProgressDialog(
+            t["huge_save_title"], t["huge_stage_read"].format(pct=0), parent=self)
+        progress.cancelButton.setText(t["cancel"])
+        progress.setValue(0)
+        progress.show()
+        progress.raise_()
+        worker = HugeRotateWorker(orig_path, save_path, quarter_turns, self)
+        worker.progressChanged.connect(self._on_huge_progress)
+        progress.cancelButton.clicked.connect(worker.cancel)
+        worker.saved.connect(lambda path: self._on_huge_saved(norm_path, path, overwrite))
+        worker.failed.connect(self._on_huge_failed)
+        worker.canceled.connect(self._on_huge_canceled)
+        worker.finished.connect(self._on_huge_thread_finished)
+        self._huge_worker, self._huge_progress = worker, progress
+        worker.start()
+
+    def _on_huge_progress(self, stage, percent):
+        dialog = self._huge_progress
+        if dialog is None:
+            return
+        t = translations.get(self.current_language, translations["en"])
+        text = (t["huge_stage_read"].format(pct=percent) if stage == "read"
+                else t["huge_stage_rotate"] if stage == "rotate" else t["huge_stage_write"])
+        dialog.messageLabel.setText(text)
+        bar = dialog.progressBar
+        if percent >= 0:
+            bar.setRange(0, 100)
+            bar.setValue(percent)
+        else:
+            bar.setRange(0, 0)  # animated: no percentage exists for this stage, so none is shown
+        if stage == "write":
+            dialog.cancelButton.setEnabled(False)  # the atomic replace cannot be interrupted
+        dialog.container.adjustSize()
+        dialog.container.move((dialog.width() - dialog.container.width()) // 2,
+                              (dialog.height() - dialog.container.height()) // 2)
+
+    def _close_huge_progress(self):
+        if self._huge_progress is not None:
+            self._huge_progress.hide()
+            self._huge_progress.deleteLater()
+            self._huge_progress = None
+
+    def _on_huge_saved(self, norm_path, save_path, overwrite):
+        self._close_huge_progress()
+        self._finish_save(norm_path, save_path, overwrite)
+
+    def _on_huge_failed(self, error):
+        self._close_huge_progress()
+        t = translations.get(self.current_language, translations["en"])
+        self.show_custom_dialog(t["editor_save_failed"].format(error=error), icon_type="error", buttons="ok")
+
+    def _on_huge_canceled(self):
+        self._close_huge_progress()
+        t = translations.get(self.current_language, translations["en"])
+        self.show_ephemeral_message(t["huge_save_canceled"], duration_ms=3000)
+
+    def _on_huge_thread_finished(self):
+        worker, self._huge_worker = self._huge_worker, None
+        if worker is not None:
+            worker.deleteLater()
+
     def toggle_brightness_overlay(self):
         if hasattr(self, "brightness_overlay") and self.brightness_overlay is not None and self.brightness_overlay.isVisible():
             self.close_brightness_overlay()
@@ -2894,17 +3044,7 @@ class PhotoViewer(QMainWindow):
 
 
     def open_brightness_overlay(self):
-        if not self.image_viewer.full_resolution_ready:
-            self.image_viewer.request_full_resolution()
-            self.show_ephemeral_message(
-                translations.get(
-                    self.current_language,
-                    translations["en"],
-                ).get(
-                    "full_resolution_loading",
-                    "Full-resolution image is still loading.",
-                )
-            )
+        if not self._full_resolution_gate():
             return
         t = translations[self.current_language]
 
@@ -3440,6 +3580,10 @@ class PhotoViewer(QMainWindow):
             self._marked_save_timer.stop()
             self._write_marked_images()
         self.save_config()
+        if self._huge_worker is not None:
+            # A QThread must not be destroyed while running; the atomic write leaves the file intact.
+            self._huge_worker.cancel()
+            self._huge_worker.wait(15000)
         super().closeEvent(event)
 
     def get_unique_copy_filename(self, folder, base_name, ext):
@@ -3463,15 +3607,11 @@ class PhotoViewer(QMainWindow):
         # 0) Basic checks: do nothing if there is no image
         if not self.image_files or self.current_index < 0:
             return
-        if not self.image_viewer.full_resolution_ready:
-            self.image_viewer.request_full_resolution()
-            t = translations.get(self.current_language, translations["en"])
-            self.show_ephemeral_message(
-                t.get(
-                    "full_resolution_loading",
-                    "Full-resolution image is still loading.",
-                )
-            )
+        if self.image_viewer.is_huge:
+            # SPEC-007 HI-6: a map is rotated from the file in the background, never decoded whole here.
+            self._save_huge_rotation(overwrite)
+            return
+        if not self._full_resolution_gate():
             return
 
         # 1) Determine the normalized path & original file path
@@ -3708,9 +3848,7 @@ class PhotoViewer(QMainWindow):
         if not self.image_files or self.current_index < 0:
             return
         t = translations.get(self.current_language, translations["en"])
-        if not self.image_viewer.full_resolution_ready:
-            self.image_viewer.request_full_resolution()
-            self.show_ephemeral_message(t.get("full_resolution_loading", "Full-resolution image is still loading."))
+        if not self._full_resolution_gate():
             return
         pixmap = self.image_viewer.original_pixmap
         if pixmap is None or pixmap.isNull():
@@ -3758,17 +3896,7 @@ class PhotoViewer(QMainWindow):
         self.setFocus()
 
     def open_crop_overlay(self):
-        if not self.image_viewer.full_resolution_ready:
-            self.image_viewer.request_full_resolution()
-            self.show_ephemeral_message(
-                translations.get(
-                    self.current_language,
-                    translations["en"],
-                ).get(
-                    "full_resolution_loading",
-                    "Full-resolution image is still loading.",
-                )
-            )
+        if not self._full_resolution_gate():
             return
         # Retrieve the pristine (original) pixmap.
         current_pixmap = self.image_viewer.original_pixmap
@@ -4171,17 +4299,7 @@ class PhotoViewer(QMainWindow):
         Launch the Sharpness overlay *without* pushing an undo state.
         We only snapshot when the user actually applies the change.
         """
-        if not self.image_viewer.full_resolution_ready:
-            self.image_viewer.request_full_resolution()
-            self.show_ephemeral_message(
-                translations.get(
-                    self.current_language,
-                    translations["en"],
-                ).get(
-                    "full_resolution_loading",
-                    "Full-resolution image is still loading.",
-                )
-            )
+        if not self._full_resolution_gate():
             return
 
         # If you had a leftover flag, clear it:
