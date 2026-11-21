@@ -107,6 +107,8 @@ class _Canvas(QWidget):
         cw, _ = align.canvas_size(self._true_size, self._rot90, self._angle)
         frame_px_per_true = self._base.width() / self._true_size[0]
         limit = self.MAX_SCREEN_PER_FRAME_PX * frame_px_per_true  # screen px per true px
+        if frame_px_per_true < 1.0:
+            limit = min(limit, 1.0)  # a reduced frame: never beyond 100 % of the real pixels
         return max(1.0, limit / (fit.width() / cw))
 
     def zoom_by(self, factor: float, anchor: QPointF | None = None):
@@ -301,8 +303,9 @@ class AlignScreen(QWidget):
     def _refresh_info(self):
         width, height = self.result_size
         percent = round(self._canvas.screen_per_true_pixel() * 100)
+        key = "align_zoom_fit" if self._canvas.zoom == 1.0 else "align_zoom"
         self.info.setText(self._tr("align_result_size").format(w=width, h=height) + "  ·  "
-                          + self._tr("align_zoom").format(pct=percent))
+                          + self._tr(key).format(pct=percent))
         self.info.adjustSize()
 
     def _reset(self):

@@ -336,3 +336,21 @@ def test_ra8_the_frame_keeps_up_to_8192_px_and_painting_it_is_fast(win, qapp):
         assert max(timings.values()) < 1.5
     finally:
         s._close()
+
+
+def test_ra7_a_reduced_frame_never_zooms_past_the_real_pixels_and_fit_is_labelled(win, qapp):
+    """RA-7: fitted shows "Fit (n %)"; a map's reduced frame stops at exactly 100 % of the real pixels."""
+    from image_classifier.editor.align_screen import AlignScreen
+    from PyQt6.QtGui import QImage
+
+    frame = QImage(8192, 6872, QImage.Format.Format_RGB32)      # a quarter of a 32,000 x 26,850 map
+    frame.fill(Qt.GlobalColor.darkGray)
+    s = AlignScreen(win, frame, str(win.photos / "a.png"), (32000, 26850))
+    try:
+        assert s.info.text().endswith("%)") and "Fit (" in s.info.text()
+        s._canvas.zoom_by(1000.0, None)
+        s._refresh_info()
+        assert s._canvas.screen_per_true_pixel() == pytest.approx(1.0, abs=0.01)
+        assert "Zoom 100 %" in s.info.text()
+    finally:
+        s._close()
