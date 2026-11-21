@@ -206,12 +206,15 @@ def test_cv3_help_shows_ctrl_up_down_as_zoom_not_move():
 
 @pytest.mark.parametrize("key", [Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Down, Qt.Key.Key_Up])
 def test_cv10_moving_never_leaves_the_photo(window, qapp, key):
-    """CV-10: holding Shift+arrow stops when the window centre reaches the photo edge."""
+    """CV-10: holding Shift+arrow stops when the the window edge reaches the photo edge."""
     viewer = _zoomed_in(window, qapp)
     target = qapp.focusWidget() or viewer
     for _ in range(400):
         QTest.keyClick(target, key, Qt.KeyboardModifier.ShiftModifier)
     qapp.processEvents()
-    centre = viewer.mapToScene(viewer.viewport().rect().center())
+    view = viewer.mapToScene(viewer.viewport().rect()).boundingRect()
     photo = viewer.pixmap_item.sceneBoundingRect()
-    assert photo.adjusted(-2, -2, 2, 2).contains(centre)
+    if view.width() < photo.width():
+        assert view.left() >= photo.left() - 2 and view.right() <= photo.right() + 2
+    if view.height() < photo.height():
+        assert view.top() >= photo.top() - 2 and view.bottom() <= photo.bottom() + 2
