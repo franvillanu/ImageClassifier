@@ -6,17 +6,21 @@ photo takes the same code path.
 import json
 import time
 
+import cv2
+
 import numpy as np
 import pytest
 from PIL import Image
 from PyQt6.QtCore import QStandardPaths
 from PyQt6.QtWidgets import QDialog
 
+from image_classifier.editor.render import render
+from image_classifier.editor.state import CropGeometry, EditState, Orientation
 from image_classifier.imaging import huge
 from image_classifier.imaging.loader import ImageLoaderRunnable
 from image_classifier.workers.huge_worker import HugeRotateWorker
 
-REQUIRES = ["HI-1", "HI-2", "HI-3", "HI-4", "HI-5", "HI-6", "HI-7", "HI-8"]
+REQUIRES = ["HI-1", "HI-2", "HI-3", "HI-4", "HI-5", "HI-6", "HI-7", "HI-8", "HI-9", "HI-10", "HI-11"]
 
 
 def _wait(qapp, cond, timeout=10.0):
@@ -255,20 +259,19 @@ def test_hi6_saving_a_rotated_huge_image_in_the_app(huge_window, qapp, monkeypat
     win.rotate_action()
     assert viewer.rotation_angle == 90
     win.saveModifiedImage(overwrite=False)
-    assert win._huge_worker is not None
-    dialog = win._huge_progress
+    assert win._huge_job is not None
+    dialog = win._huge_job.dialog
     assert dialog is not None and dialog.isVisible()
-    win._on_huge_progress("read", 40)
+    win._huge_job.on_progress("read", 40)
     assert (dialog.progressBar.minimum(), dialog.progressBar.maximum()) == (0, 100)
     assert dialog.progressBar.value() == 40 and "40 %" in dialog.messageLabel.text()
-    win._on_huge_progress("write", -1)
+    win._huge_job.on_progress("write", -1)
     assert (dialog.progressBar.minimum(), dialog.progressBar.maximum()) == (0, 0)   # no invented percentage
     assert not dialog.cancelButton.isEnabled()
-    assert _wait(qapp, lambda: win._huge_worker is None)
+    assert _wait(qapp, lambda: win._huge_job is None)
     copy = win.photos / "map_copy.jpg"
     assert copy.exists() and Image.open(copy).size == (1000, 1600)
     assert original.read_bytes() == before
-    assert win._huge_progress is None
 
 
 def test_hi6_overwrite_asks_first_and_replaces_the_file(huge_window, qapp, monkeypatch):
@@ -279,10 +282,10 @@ def test_hi6_overwrite_asks_first_and_replaces_the_file(huge_window, qapp, monke
     win.rotate_action()
     monkeypatch.setattr(win, "show_custom_dialog", lambda *a, **k: QDialog.DialogCode.Rejected)
     win.saveModifiedImage(overwrite=True)
-    assert win._huge_worker is None and original.read_bytes() == before
+    assert win._huge_job is None and original.read_bytes() == before
     monkeypatch.setattr(win, "show_custom_dialog", lambda *a, **k: QDialog.DialogCode.Accepted)
     win.saveModifiedImage(overwrite=True)
-    assert _wait(qapp, lambda: win._huge_worker is None)
+    assert _wait(qapp, lambda: win._huge_job is None)
     assert Image.open(original).size == (1000, 1600)
 
 
@@ -294,9 +297,9 @@ def test_hi7_pixel_actions_say_the_image_is_too_large(huge_window, qapp):
     assert win._full_resolution_gate() is False
     assert viewer.full_loader is None
     text = win.ephemeral_messages[0].text()
-    assert "too large" in text and "2 MP" in text
-    win.open_editor()
-    assert getattr(win, "photo_editor", None) is None
+    assert "too large" in text and "2 MP" in text and "Edit" in text
+    win.open_crop_overlay()
+    assert getattr(win, "crop_overlay", None) is None
 
 
 def test_hi7_brightness_is_not_dropped_silently(huge_window, qapp):
@@ -306,7 +309,7 @@ def test_hi7_brightness_is_not_dropped_silently(huge_window, qapp):
     win.image_viewer.brightness_factor = 0.8
     try:
         win.saveModifiedImage(overwrite=False)
-        assert win._huge_worker is None
+        assert win._huge_job is None
         assert not (win.photos / "map_copy.jpg").exists()
         assert "Brightness" in win.ephemeral_messages[0].text()
     finally:
@@ -318,7 +321,7 @@ def test_hi7_saving_without_a_rotation_says_so(huge_window, qapp):
     """HI-7: nothing to rotate -> a message, no 3 GB copy of the same file."""
     win = huge_window
     win.saveModifiedImage(overwrite=False)
-    assert win._huge_worker is None and not (win.photos / "map_copy.jpg").exists()
+    assert win._huge_job is None and not (win.photos / "map_copy.jpg").exists()
     assert "Nothing to save" in win.ephemeral_messages[0].text()
 
 
@@ -334,3 +337,121 @@ def test_hi8_rotating_on_screen_needs_no_decode(huge_window, qapp):
     assert (viewer.loader, viewer.full_loader, viewer.detail_loader) == before
     rect = viewer.pixmap_item.sceneBoundingRect()
     assert rect.height() > rect.width()
+
+
+# ------------------------------------------------------------------ HI-9
+def test_hi9_editor_opens_in_basic_mode_on_a_huge_image(huge_window, qapp):
+    """HI-9: Crop tab only; edit state in true source pixels while the pixels in memory are reduced."""
+    win = huge_window
+    win.open_editor()
+    ed = win.photo_editor
+    try:
+        assert ed is not None
+        assert ed._size == (1600, 1000)                       # true size
+        assert ed._src.shape[1] <= 1600 and ed._state.source_size == (1600, 1000)
+        assert ed.tab_adjust.isHidden() and ed.tab_remove.isHidden() and ed.btn_enhance.isHidden()
+        assert not ed.tab_crop.isHidden()
+        ed._copy_to_clipboard()                               # not offered: no render task starts
+        assert ed._task is None
+    finally:
+        ed._close()
+
+
+def test_hi7_the_editor_refuses_a_huge_image_with_changed_brightness(huge_window, qapp):
+    """HI-7: brightness cannot be saved on a huge image, so the editor does not open with it."""
+    win = huge_window
+    win.image_viewer.brightness_factor = 0.8
+    try:
+        win.open_editor()
+        assert getattr(win, "photo_editor", None) is None
+        assert "Brightness" in win.ephemeral_messages[0].text()
+    finally:
+        win.image_viewer.brightness_factor = 1.0
+
+
+# ------------------------------------------------------------------ HI-10 / HI-11
+def _smooth_png(path, size=(640, 400)):
+    w, h = size
+    yy, xx = np.mgrid[0:h, 0:w]
+    arr = np.stack([xx * 255 // w, yy * 255 // h, ((xx + yy) * 255 // (w + h))], -1).astype(np.uint8)
+    cv2.circle(arr, (w // 3, h // 2), h // 5, (250, 20, 20), -1)
+    Image.fromarray(arr).save(path)
+    return arr
+
+
+def _state(size, rot90, flip, angle, frac=0.6):
+    base = EditState(source_size=size, orientation=Orientation(rot90=rot90, flip=flip))
+    ow, oh = base.oriented_size
+    return base.with_crop(CropGeometry(ow / 2.0, oh / 2.0, round(ow * frac), round(oh * frac), angle))
+
+
+@pytest.mark.parametrize("rot90,flip,angle", [(0, False, 0.0), (1, False, 0.0), (3, True, 0.0),
+                                              (0, False, 4.0), (1, False, -6.5), (2, True, 3.0)])
+def test_hi11_file_render_matches_the_editor_render(tmp_path, rot90, flip, angle):
+    """HI-11: same pixels as the editor's own render; exact when the crop is an unrotated pixel slice."""
+    src, dst = tmp_path / "s.png", tmp_path / "d.png"
+    arr = _smooth_png(src)
+    state = _state((640, 400), rot90, flip, angle)
+    huge.edit_file(str(src), str(dst), state, progress=lambda *_: None)
+    expected = render(cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA), state)[..., :3].astype(np.int16)
+    with Image.open(dst) as out:
+        got = np.asarray(out.convert("RGB")).astype(np.int16)
+    assert got.shape == expected.shape == (state.output_size[1], state.output_size[0], 3)
+    diff = np.abs(got - expected)
+    if angle == 0.0:
+        assert diff.max() == 0
+    else:
+        assert diff.mean() < 2.0 and np.percentile(diff, 99) < 40
+
+
+def test_hi10_edit_file_reports_real_progress_by_strips_and_keeps_exif_upright(tmp_path, monkeypatch):
+    """HI-10: render fractions grow strip by strip to 1.0, then write; EXIF-oriented sources come out upright."""
+    monkeypatch.setattr(huge, "EDIT_STRIP_ROWS", 100)
+    src = tmp_path / "s.jpg"
+    _corner_jpeg(src, (600, 400), exif_orientation=6)      # stored sideways: upright it is 400 x 600
+    state = _state((400, 600), 0, False, 2.0, frac=0.7)
+    seen = []
+    huge.edit_file(str(src), str(src), state, progress=lambda stage, f: seen.append((stage, f)))
+    renders = [f for s, f in seen if s == "render"]
+    assert renders == sorted(renders) and renders[-1] == 1.0 and len(renders) >= 4
+    assert seen[-1] == ("write", None)
+    with Image.open(src) as out:                           # overwrite in place worked (file released)
+        assert out.size == state.output_size
+        assert out.getexif().get(huge.EXIF_ORIENTATION) == 1
+
+
+def test_hi10_cancel_leaves_the_original_untouched(tmp_path, monkeypatch):
+    """HI-10: cancelling mid-render raises Cancelled, the file is byte-identical, no temp files remain."""
+    monkeypatch.setattr(huge, "EDIT_STRIP_ROWS", 50)
+    src = tmp_path / "s.jpg"
+    _corner_jpeg(src, (600, 400))
+    before = src.read_bytes()
+    seen = []
+    state = _state((600, 400), 0, False, 3.0)
+    with pytest.raises(huge.Cancelled):
+        huge.edit_file(str(src), str(src), state, progress=lambda s, f: seen.append(s),
+                       cancelled=lambda: seen.count("render") >= 2)
+    assert src.read_bytes() == before
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".edit-")]
+
+
+def test_hi10_saving_from_the_basic_editor_runs_the_job_with_progress(huge_window, qapp):
+    """HI-10: Save a copy in basic mode: progress dialog, copy has the crop's size, original untouched, editor closes."""
+    win = huge_window
+    original = win.photos / "map.jpg"
+    before = original.read_bytes()
+    win.open_editor()
+    ed = win.photo_editor
+    saved = []
+    ed.saved.connect(lambda path, overwrote: saved.append((path, overwrote)))
+    state = _state((1600, 1000), 0, False, 3.0, frac=0.5)
+    ed._set_state(state, commit=True)
+    ed._save(overwrite=False)
+    assert ed._huge_job is not None and ed._huge_job.dialog.isVisible()
+    assert _wait(qapp, lambda: ed._huge_job is None and saved)
+    copy = win.photos / "map_copy.jpg"
+    assert saved[0][1] is False and copy.exists()
+    with Image.open(copy) as out:
+        assert out.size == state.output_size
+    assert original.read_bytes() == before
+    assert _wait(qapp, lambda: win.photo_editor is None)

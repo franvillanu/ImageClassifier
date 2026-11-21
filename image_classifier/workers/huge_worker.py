@@ -68,17 +68,18 @@ class HugeDetailRunnable(QRunnable):
                 self.signals.error.emit(str(exc) or type(exc).__name__)
 
 
-class HugeRotateWorker(QThread):
-    """HI-6: rotate ``src`` by ``quarter_turns`` clockwise and write ``dst`` (may equal ``src``)."""
+class HugeFileWorker(QThread):
+    """Run ``job(progress, cancelled)`` on a file in the background (HI-6, HI-10), writing ``dst``."""
 
-    progressChanged = pyqtSignal(str, int)   # stage ("read"/"rotate"/"write"), percent or -1 if unknown
+    progressChanged = pyqtSignal(str, int)   # stage ("read"/"rotate"/"render"/"write"), percent or -1 if unknown
     saved = pyqtSignal(str)
     failed = pyqtSignal(str)
     canceled = pyqtSignal()
 
-    def __init__(self, src: str, dst: str, quarter_turns: int, parent=None):
+    def __init__(self, dst: str, job, parent=None):
         super().__init__(parent)
-        self.src, self.dst, self.quarter_turns = src, dst, quarter_turns
+        self.dst = dst
+        self._job = job
         self._cancel = False
 
     def cancel(self):
@@ -88,11 +89,26 @@ class HugeRotateWorker(QThread):
         def progress(stage, fraction):
             self.progressChanged.emit(stage, -1 if fraction is None else int(fraction * 100))
         try:
-            huge.rotate_file(self.src, self.dst, self.quarter_turns,
-                             progress=progress, cancelled=lambda: self._cancel)
+            self._job(progress, lambda: self._cancel)
         except huge.Cancelled:
             self.canceled.emit()
         except Exception as exc:  # HI-2
             self.failed.emit(str(exc) or type(exc).__name__)
         else:
             self.saved.emit(self.dst)
+
+
+class HugeRotateWorker(HugeFileWorker):
+    """HI-6: rotate ``src`` by ``quarter_turns`` clockwise and write ``dst`` (may equal ``src``)."""
+
+    def __init__(self, src: str, dst: str, quarter_turns: int, parent=None):
+        super().__init__(dst, lambda progress, cancelled: huge.rotate_file(
+            src, dst, quarter_turns, progress=progress, cancelled=cancelled), parent)
+
+
+class HugeEditWorker(HugeFileWorker):
+    """HI-10: render an editor ``EditState`` from ``src`` into ``dst`` (may equal ``src``)."""
+
+    def __init__(self, src: str, dst: str, state, parent=None):
+        super().__init__(dst, lambda progress, cancelled: huge.edit_file(
+            src, dst, state, progress=progress, cancelled=cancelled), parent)

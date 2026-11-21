@@ -15,6 +15,7 @@ from PIL import Image
 HUGE_PIXELS = 100_000_000          # HI-1
 DETAIL_DIMENSION = 8192            # HI-4: long side of the detail frame
 EXIF_ORIENTATION = 0x0112
+EDIT_STRIP_ROWS = 512              # HI-10: output rows rendered per progress step
 
 Progress = Callable[[str, Optional[float]], None]
 
@@ -133,6 +134,71 @@ def decode_reduced(path: str, max_dimension: int = DETAIL_DIMENSION, *,
             if op is not None:
                 img = img.transpose(op)
             return img, source_size
+    finally:
+        reader.close()
+
+
+def edit_file(src: str, dst: str, state, *, progress: Progress,
+              cancelled: Callable[[], bool] = _never) -> None:
+    """HI-10: render the editor's geometry (turn/flip, straighten, crop) from ``src`` into ``dst``.
+
+    ``state`` is an editor ``EditState`` in true source pixels. The same matrix the editor uses
+    (``output_to_source_matrix``) drives one Pillow resampling, done in strips of ``EDIT_STRIP_ROWS``
+    output rows so progress is real: ``progress("render", fraction)`` per strip, then ``("write", None)``.
+    Edges outside the photo (the editor keeps the crop inside) would be black, not replicated.
+    Raises ``Cancelled`` or ``OSError``; ``dst`` may equal ``src`` (atomic replace, original kept on failure).
+    """
+    import numpy as np
+
+    from image_classifier.editor.render import _integer_crop, output_size, output_to_source_matrix
+    from image_classifier.imaging.saver import save_image
+
+    reader = _ProgressReader(src, lambda f: progress("read", f), cancelled)
+    try:
+        with _no_pixel_limit():
+            img = Image.open(reader)
+            exif_op = _orientation_op(img)
+            try:
+                img.load()
+                reader.close()  # release the file: overwrite replaces it (Windows)
+                if exif_op is not None:
+                    rotated = img.transpose(exif_op)
+                    img.close()
+                    img = rotated
+                if img.mode not in ("RGB", "RGBA", "L"):
+                    converted = img.convert("RGB")
+                    img.close()
+                    img = converted
+                if img.size != tuple(state.source_size):
+                    raise OSError("The file changed while it was being edited.")
+                out_w, out_h = output_size(state)
+                matrix = output_to_source_matrix(state, (img.height, img.width), (out_w, out_h))
+                half = np.array([[1, 0, 0.5], [0, 1, 0.5], [0, 0, 1.0]])
+                unhalf = np.array([[1, 0, -0.5], [0, 1, -0.5], [0, 0, 1.0]])
+                continuous = half @ matrix @ unhalf  # Pillow maps pixel centres, cv2-style indices differ by 0.5
+                exact = _integer_crop(state, (img.height, img.width), (out_w, out_h)) is not None
+                resample = Image.Resampling.NEAREST if exact else Image.Resampling.BICUBIC
+                result = Image.new(img.mode, (out_w, out_h))
+                try:
+                    for y0 in range(0, out_h, EDIT_STRIP_ROWS):
+                        if cancelled():
+                            raise Cancelled()
+                        rows = min(EDIT_STRIP_ROWS, out_h - y0)
+                        m = continuous @ np.array([[1, 0, 0], [0, 1, y0], [0, 0, 1.0]])
+                        strip = img.transform((out_w, rows), Image.Transform.AFFINE,
+                                              tuple(float(v) for v in m[:2].ravel()), resample=resample)
+                        result.paste(strip, (0, y0))
+                        progress("render", (y0 + rows) / out_h)
+                    if cancelled():
+                        raise Cancelled()
+                    progress("write", None)
+                    save_image(dst, result, source_path=src)
+                finally:
+                    result.close()
+            except MemoryError as exc:
+                raise OSError("Not enough memory to process this image.") from exc
+            finally:
+                img.close()
     finally:
         reader.close()
 

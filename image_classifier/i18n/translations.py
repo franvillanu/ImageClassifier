@@ -97,7 +97,9 @@ translations = {
         # 3. Dialogs & Error/Confirmation Messages
         "error_loading_image": "Error: Could not load image.",
         "full_resolution_loading": "Full-resolution image is still loading.",
-        "huge_no_edit": "This image is too large ({mp} MP) for this action. You can rotate it and save it.",
+        "huge_no_edit": "This image is too large ({mp} MP) for this action. Use Edit to rotate, straighten and crop it.",
+        "huge_no_clipboard": "A large image ({mp} MP) can't be copied to the clipboard. Save it instead.",
+        "huge_stage_render": "Applying your changes… {pct} %",
         "huge_brightness_not_saved": "Brightness can't be saved on a large image ({mp} MP). Reset the brightness to save the rotation.",
         "huge_nothing_to_save": "Nothing to save: rotate the image first.",
         "huge_status_loading": "Large image {w} × {h} px ({mp} MP) · preview shown · loading detail… {pct} %",
@@ -590,7 +592,9 @@ translations = {
         # 3. Diálogos de Error / Confirmación
         "error_loading_image": "Error: No se pudo cargar la imagen.",
         "full_resolution_loading": "La imagen a resolución completa todavía se está cargando.",
-        "huge_no_edit": "Esta imagen es demasiado grande ({mp} MP) para esta acción. Puedes rotarla y guardarla.",
+        "huge_no_edit": "Esta imagen es demasiado grande ({mp} MP) para esta acción. Usa Editar para rotarla, enderezarla y recortarla.",
+        "huge_no_clipboard": "Una imagen grande ({mp} MP) no se puede copiar al portapapeles. Guárdala en su lugar.",
+        "huge_stage_render": "Aplicando tus cambios… {pct} %",
         "huge_brightness_not_saved": "El brillo no se puede guardar en una imagen grande ({mp} MP). Restablece el brillo para guardar la rotación.",
         "huge_nothing_to_save": "No hay nada que guardar: rota la imagen primero.",
         "huge_status_loading": "Imagen grande {w} × {h} px ({mp} MP) · vista previa mostrada · cargando detalle… {pct} %",

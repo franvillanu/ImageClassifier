@@ -46,6 +46,7 @@ from image_classifier.editor.qtimage import qimage_to_rgba
 from image_classifier.imaging.saver import save_rgba
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
 from image_classifier.workers.huge_worker import HugeRotateWorker
+from image_classifier.ui.huge_job import HugeJob
 from image_classifier.imaging import huge
 from image_classifier import __version__
 from image_classifier.updates.controller import UpdateController
@@ -1612,8 +1613,7 @@ class PhotoViewer(QMainWindow):
         self.filename_label.setFixedHeight(50)
         self.filename_label.hide()
         # SPEC-007: huge maps. Status line while the detail frame loads, and the rotate-and-save job.
-        self._huge_worker = None
-        self._huge_progress = None
+        self._huge_job = None
         self.huge_status_label = QLabel(self)
         self.huge_status_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.huge_status_label.setStyleSheet(
@@ -2949,7 +2949,7 @@ class PhotoViewer(QMainWindow):
 
     def _save_huge_rotation(self, overwrite: bool):
         """HI-6/HI-7: rotate and save a huge image from the file, in the background, with progress."""
-        if self._huge_worker is not None:
+        if self._huge_job is not None:
             return
         viewer = self.image_viewer
         t = translations.get(self.current_language, translations["en"])
@@ -2975,66 +2975,20 @@ class PhotoViewer(QMainWindow):
         else:
             name, ext = os.path.splitext(orig_filename)
             save_path = self.get_unique_copy_filename(os.path.dirname(orig_path), name, ext)
-        progress = OverlayProgressDialog(
-            t["huge_save_title"], t["huge_stage_read"].format(pct=0), parent=self)
-        progress.cancelButton.setText(t["cancel"])
-        progress.setValue(0)
-        progress.show()
-        progress.raise_()
-        worker = HugeRotateWorker(orig_path, save_path, quarter_turns, self)
-        worker.progressChanged.connect(self._on_huge_progress)
-        progress.cancelButton.clicked.connect(worker.cancel)
-        worker.saved.connect(lambda path: self._on_huge_saved(norm_path, path, overwrite))
-        worker.failed.connect(self._on_huge_failed)
-        worker.canceled.connect(self._on_huge_canceled)
-        worker.finished.connect(self._on_huge_thread_finished)
-        self._huge_worker, self._huge_progress = worker, progress
-        worker.start()
+        job = HugeJob(
+            self, HugeRotateWorker(orig_path, save_path, quarter_turns, self), self.current_language,
+            on_saved=lambda path: self._finish_save(norm_path, path, overwrite),
+            on_failed=lambda error: self.show_custom_dialog(
+                t["editor_save_failed"].format(error=error), icon_type="error", buttons="ok"),
+            on_canceled=lambda: self.show_ephemeral_message(t["huge_save_canceled"], duration_ms=3000))
+        job.done.connect(self._on_huge_job_done)
+        self._huge_job = job
+        job.start()
 
-    def _on_huge_progress(self, stage, percent):
-        dialog = self._huge_progress
-        if dialog is None:
-            return
-        t = translations.get(self.current_language, translations["en"])
-        text = (t["huge_stage_read"].format(pct=percent) if stage == "read"
-                else t["huge_stage_rotate"] if stage == "rotate" else t["huge_stage_write"])
-        dialog.messageLabel.setText(text)
-        bar = dialog.progressBar
-        if percent >= 0:
-            bar.setRange(0, 100)
-            bar.setValue(percent)
-        else:
-            bar.setRange(0, 0)  # animated: no percentage exists for this stage, so none is shown
-        if stage == "write":
-            dialog.cancelButton.setEnabled(False)  # the atomic replace cannot be interrupted
-        dialog.container.adjustSize()
-        dialog.container.move((dialog.width() - dialog.container.width()) // 2,
-                              (dialog.height() - dialog.container.height()) // 2)
-
-    def _close_huge_progress(self):
-        if self._huge_progress is not None:
-            self._huge_progress.hide()
-            self._huge_progress.deleteLater()
-            self._huge_progress = None
-
-    def _on_huge_saved(self, norm_path, save_path, overwrite):
-        self._close_huge_progress()
-        self._finish_save(norm_path, save_path, overwrite)
-
-    def _on_huge_failed(self, error):
-        self._close_huge_progress()
-        t = translations.get(self.current_language, translations["en"])
-        self.show_custom_dialog(t["editor_save_failed"].format(error=error), icon_type="error", buttons="ok")
-
-    def _on_huge_canceled(self):
-        self._close_huge_progress()
-        t = translations.get(self.current_language, translations["en"])
-        self.show_ephemeral_message(t["huge_save_canceled"], duration_ms=3000)
-
-    def _on_huge_thread_finished(self):
-        worker, self._huge_worker = self._huge_worker, None
-        if worker is not None:
-            worker.deleteLater()
+    def _on_huge_job_done(self):
+        job, self._huge_job = self._huge_job, None
+        if job is not None:
+            job.deleteLater()
 
     def toggle_brightness_overlay(self):
         if hasattr(self, "brightness_overlay") and self.brightness_overlay is not None and self.brightness_overlay.isVisible():
@@ -3580,10 +3534,9 @@ class PhotoViewer(QMainWindow):
             self._marked_save_timer.stop()
             self._write_marked_images()
         self.save_config()
-        if self._huge_worker is not None:
+        if self._huge_job is not None:
             # A QThread must not be destroyed while running; the atomic write leaves the file intact.
-            self._huge_worker.cancel()
-            self._huge_worker.wait(15000)
+            self._huge_job.cancel_and_wait()
         super().closeEvent(event)
 
     def get_unique_copy_filename(self, folder, base_name, ext):
@@ -3848,7 +3801,16 @@ class PhotoViewer(QMainWindow):
         if not self.image_files or self.current_index < 0:
             return
         t = translations.get(self.current_language, translations["en"])
-        if not self._full_resolution_gate():
+        viewer = self.image_viewer
+        huge_image = viewer.is_huge and not viewer.full_resolution_ready
+        if huge_image:
+            # HI-9: the full editor needs every pixel; a huge image gets the basic one (turn, straighten, crop).
+            if viewer.brightness_factor != 1.0:
+                width, height = viewer.source_size
+                self.show_ephemeral_message(
+                    t["huge_brightness_not_saved"].format(mp=huge.megapixels(width, height)), duration_ms=4000)
+                return
+        elif not self._full_resolution_gate():
             return
         pixmap = self.image_viewer.original_pixmap
         if pixmap is None or pixmap.isNull():
@@ -3870,6 +3832,7 @@ class PhotoViewer(QMainWindow):
             brightness=round((1.0 - (self.image_viewer.brightness_factor or 1.0)) * 200),
             copy_path_for=lambda: self.get_unique_copy_filename(folder, name, ext),
             background=getattr(self.image_viewer, "bg_color", "#000000"),
+            true_size=viewer.source_size if huge_image else None,
         )
         self.photo_editor.saved.connect(lambda path, overwrite: self._on_editor_saved(norm_path, path, overwrite))
         self.photo_editor.closed.connect(self._on_editor_closed)
