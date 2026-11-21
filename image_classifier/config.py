@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     "show_filename": False,
     "current_language": "en",
     "rotate_all": False,
+    "advanced_rotation": False,
     "menu_dock_left": True,
     "loop_navigation": False,
     "last_index": 0,

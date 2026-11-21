@@ -42,6 +42,7 @@ from image_classifier.imaging.loader import (
 )
 from image_classifier.config import get_config_file
 from image_classifier.editor.editor_window import PhotoEditor
+from image_classifier.editor.align_screen import AlignScreen
 from image_classifier.editor.qtimage import qimage_to_rgba
 from image_classifier.imaging.saver import save_rgba
 from image_classifier.workers import ExportWorker, DeleteNonFavoritesWorker, SharpenThread
@@ -182,6 +183,7 @@ class PhotoViewer(QMainWindow):
         self.reset_zoom_on_new_image = True
         self.image_brightness = {}
         self.rotate_all = False
+        self.advanced_rotation = False  # SPEC-008 RA-1
         self.global_rotation = 0 
         self.image_rotations = {}
         self.norm_to_original = {}
@@ -479,6 +481,7 @@ class PhotoViewer(QMainWindow):
                 (t["loop_navigation"], self.loop_navigation, self.set_loop_navigation),
                 (t["reset_zoom"], self.reset_zoom_on_new_image, self.set_reset_zoom),
                 (t["rotate_all_option"], self.rotate_all, self.set_rotate_all),
+                (t["advanced_rotation_option"], self.advanced_rotation, self.set_advanced_rotation),
                 (t["show_filename"], self.show_filename, self.set_show_filename),
             ]),
             (t["settings_group_storage"], [
@@ -1422,8 +1425,52 @@ class PhotoViewer(QMainWindow):
             self.show_image()
         self.save_config()
 
+    def set_advanced_rotation(self, value: bool):
+        self.advanced_rotation = bool(value)
+        self.save_config()
+
+    def open_align(self):
+        """SPEC-008: rotate by any angle and straighten, nothing cropped (the screen renders from the file)."""
+        if getattr(self, "photo_editor", None) is not None:
+            return
+        t = translations.get(self.current_language, translations["en"])
+        viewer = self.image_viewer
+        pixmap = viewer.original_pixmap
+        if pixmap is None or pixmap.isNull():
+            return
+        if self.image_modified or viewer.brightness_factor != 1.0:  # RA-6: the save works on the file
+            self.show_ephemeral_message(t["align_modified_first"], duration_ms=3500)
+            return
+        norm_path = self.image_files[self.current_index]
+        orig_path = self.norm_to_original.get(norm_path, norm_path)
+        folder, filename = os.path.split(orig_path)
+        name, ext = os.path.splitext(filename)
+        angle = int(viewer.rotation_angle or 0)
+        rot90 = (angle // 90) % 4 if angle % 90 == 0 else 0
+
+        def confirm_overwrite():
+            return self.show_custom_dialog(
+                t["overwrite_image_confirm"].format(current_image=filename),
+                icon_type="warning", buttons="yesno") == QDialog.DialogCode.Accepted
+
+        self.disable_all_shortcuts()
+        if getattr(self, "floating_menu", None) is not None:
+            self.floating_menu.setEnabled(False)
+        self.photo_editor = AlignScreen(
+            self, pixmap.toImage(), orig_path, viewer.source_size,
+            language=self.current_language, rot90=rot90,
+            copy_path_for=lambda: self.get_unique_copy_filename(folder, name, ext),
+            confirm_overwrite=confirm_overwrite,
+            background=getattr(viewer, "bg_color", "#000000"),
+        )
+        self.photo_editor.saved.connect(lambda path, overwrite: self._on_editor_saved(norm_path, path, overwrite))
+        self.photo_editor.closed.connect(self._on_editor_closed)
+
     def rotate_action(self):
         if not self.image_files or self.current_index < 0:
+            return
+        if self.advanced_rotation and not self.rotate_all:  # RA-2
+            self.open_align()
             return
         current_image = self.image_files[self.current_index]
         if self.rotate_all:
@@ -1843,6 +1890,7 @@ class PhotoViewer(QMainWindow):
                 self.show_filename            = config.get('show_filename', False)
                 self.current_language         = config.get('current_language', "en")
                 self.rotate_all               = config.get('rotate_all', False)
+                self.advanced_rotation        = config.get('advanced_rotation', False)
                 self.menu_dock_left           = config.get('menu_dock_left', True)
                 self.loop_navigation          = config.get('loop_navigation', False)
                 self.last_index               = config.get('last_index', 0)
@@ -1861,6 +1909,7 @@ class PhotoViewer(QMainWindow):
                 self.show_filename            = False
                 self.current_language         = "en"
                 self.rotate_all               = False
+                self.advanced_rotation        = False
                 self.menu_dock_left           = True
                 self.loop_navigation          = False
                 self.last_index               = 0
@@ -1880,6 +1929,7 @@ class PhotoViewer(QMainWindow):
             self.show_filename            = False
             self.current_language         = "en"
             self.rotate_all               = False
+            self.advanced_rotation        = False
             self.menu_dock_left           = True
             self.loop_navigation          = False
             self.last_index               = 0
@@ -1960,6 +2010,7 @@ class PhotoViewer(QMainWindow):
                 'show_filename':           self.show_filename,
                 'current_language':        self.current_language,
                 'rotate_all':              self.rotate_all,
+                'advanced_rotation':       self.advanced_rotation,
                 'menu_dock_left':          self.menu_dock_left,
                 'loop_navigation':         self.loop_navigation,
                 'last_index':              self.current_index,
