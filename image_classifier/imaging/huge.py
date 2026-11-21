@@ -98,6 +98,14 @@ def _never() -> bool:
     return False
 
 
+def _prepare(path: str) -> None:
+    """HEIC/HEIF need Pillow's plugin registered before ``Image.open``."""
+    from image_classifier.imaging.loader import HEIF_EXTENSIONS, _ensure_heif_registered
+
+    if os.path.splitext(path)[1].lower() in HEIF_EXTENSIONS:
+        _ensure_heif_registered()
+
+
 def _orientation_op(img: Image.Image):
     try:
         return _ORIENTATION_OPS.get(int(img.getexif().get(EXIF_ORIENTATION, 1)))
@@ -120,6 +128,7 @@ def decode_reduced(path: str, max_dimension: int = DETAIL_DIMENSION, *,
     Returns ``(RGB image, (source_width, source_height))`` with the source size upright too.
     JPEGs are decoded with DCT scaling (fast); other formats are decoded whole and shrunk.
     """
+    _prepare(path)
     reader = _ProgressReader(path, progress or (lambda _f: None), cancelled)
     try:
         with _no_pixel_limit():
@@ -153,6 +162,7 @@ def edit_file(src: str, dst: str, state, *, progress: Progress,
     from image_classifier.editor.render import _integer_crop, output_size, output_to_source_matrix
     from image_classifier.imaging.saver import save_image
 
+    _prepare(src)
     reader = _ProgressReader(src, lambda f: progress("read", f), cancelled)
     try:
         with _no_pixel_limit():
@@ -214,6 +224,7 @@ def rotate_file(src: str, dst: str, quarter_turns: int, *, progress: Progress,
     """
     from image_classifier.imaging.saver import save_image
 
+    _prepare(src)
     reader = _ProgressReader(src, lambda f: progress("read", f), cancelled)
     try:
         with _no_pixel_limit():

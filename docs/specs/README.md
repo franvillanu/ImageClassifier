@@ -23,6 +23,7 @@ acceptance); its output becomes the spec.
 | [SPEC-005-object-removal.md](SPEC-005-object-removal.md) | Editor: remove an object by painting over it | Active, started |
 | [SPEC-006-open-in-explorer.md](SPEC-006-open-in-explorer.md) | Context menu: open the photo in File Explorer | Active, started |
 | [SPEC-007-huge-images.md](SPEC-007-huge-images.md) | Huge maps (100+ MP): detail frame, load progress, rotate and save | Active, started |
+| [SPEC-008-rotate-and-align.md](SPEC-008-rotate-and-align.md) | Advanced rotation: rotate by any angle and straighten without cropping | Active, started |
 
 Backlog (write the spec *before* touching these areas): navigation and preloading, slideshow playback engine,
 rest of the editor, updates, config persistence, favorites/compare/export, i18n.
