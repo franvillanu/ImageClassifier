@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QTransform
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -25,29 +25,39 @@ from image_classifier.i18n.translations import translations
 from image_classifier.ui.huge_job import HugeJob
 from image_classifier.workers.huge_worker import HugeEditWorker
 
-PROXY_SIDE = 2048
+PROXY_SIDE = 8192  # RA-8: the frame keeps its detail so zoom shows something
 RULER_WIDTH = 360
 
 
 class _Canvas(QWidget):
-    """The tilted photo inside the result frame."""
+    """The tilted photo inside the result frame, with zoom and pan (RA-7).
+
+    RA-8: the frame is drawn exactly as given. The 90-degree turns and the angle are one painter rotation, so
+    nothing is copied or rebuilt when they change, and Qt only samples the pixels inside the view.
+    """
+
+    MAX_SCREEN_PER_FRAME_PX = 4.0  # zoom limit: each pixel of the frame covers at most 4 x 4 screen pixels
 
     def __init__(self, image: QImage, true_size: tuple[int, int], rot90: int, parent=None):
         super().__init__(parent)
         self._base = image
         self._true_size = true_size
-        self._rot90 = 0
-        self._oriented = image
+        self._rot90 = rot90
         self._angle = 0.0
         self._grid = False
+        self.smooth = True
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
         self._insets = (EDGE, EDGE, EDGE, EDGE)
-        self.set_view(rot90, 0.0)
+        self.setMouseTracking(False)
+
+    # ---- view state
+    @property
+    def zoom(self) -> float:
+        return self._zoom
 
     def set_view(self, rot90: int, angle: float):
-        if rot90 != self._rot90:
-            self._rot90 = rot90
-            self._oriented = self._base.transformed(
-                QTransform().rotate(90 * rot90), Qt.TransformationMode.SmoothTransformation) if rot90 else self._base
+        self._rot90 = rot90
         self._angle = angle
         self.update()
 
@@ -55,41 +65,98 @@ class _Canvas(QWidget):
         self._insets = (left, top, right, bottom)
         self.update()
 
-    def set_grid(self, on: bool):
-        self._grid = on
+    def set_interacting(self, on: bool):
+        """RA-8: fast sampling and a grid while the ruler or a pan drag is active."""
+        self.smooth = not on
         self.update()
 
-    def frame_rect(self) -> QRectF:
-        cw, ch = align.canvas_size(self._true_size, self._rot90, self._angle)
+    def set_grid(self, on: bool):
+        self._grid = on
+        self.set_interacting(on)
+
+    def _avail(self) -> QRectF:
         left, top, right, bottom = self._insets
-        avail = QRectF(left, top, max(1, self.width() - left - right), max(1, self.height() - top - bottom))
+        return QRectF(left, top, max(1, self.width() - left - right), max(1, self.height() - top - bottom))
+
+    def _fit_frame(self) -> QRectF:
+        cw, ch = align.canvas_size(self._true_size, self._rot90, self._angle)
+        avail = self._avail()
         s = min(avail.width() / cw, avail.height() / ch)
         c = avail.center()
         return QRectF(c.x() - cw * s / 2.0, c.y() - ch * s / 2.0, cw * s, ch * s)
 
+    def _clamped_pan(self, fit: QRectF, zoom: float, pan: QPointF) -> QPointF:
+        avail = self._avail()
+        max_x = max(0.0, (fit.width() * zoom - avail.width()) / 2.0)
+        max_y = max(0.0, (fit.height() * zoom - avail.height()) / 2.0)
+        return QPointF(max(-max_x, min(max_x, pan.x())), max(-max_y, min(max_y, pan.y())))
+
+    def frame_rect(self) -> QRectF:
+        fit = self._fit_frame()
+        pan = self._clamped_pan(fit, self._zoom, self._pan)
+        c = self._avail().center() + pan
+        w, h = fit.width() * self._zoom, fit.height() * self._zoom
+        return QRectF(c.x() - w / 2.0, c.y() - h / 2.0, w, h)
+
+    def screen_per_true_pixel(self) -> float:
+        return self.frame_rect().width() / align.canvas_size(self._true_size, self._rot90, self._angle)[0]
+
+    def max_zoom(self) -> float:
+        """Zoom at which each frame pixel covers MAX_SCREEN_PER_FRAME_PX screen pixels."""
+        fit = self._fit_frame()
+        cw, _ = align.canvas_size(self._true_size, self._rot90, self._angle)
+        frame_px_per_true = self._base.width() / self._true_size[0]
+        limit = self.MAX_SCREEN_PER_FRAME_PX * frame_px_per_true  # screen px per true px
+        return max(1.0, limit / (fit.width() / cw))
+
+    def zoom_by(self, factor: float, anchor: QPointF | None = None):
+        """Zoom about ``anchor`` (widget coordinates; the view centre by default)."""
+        avail_c = self._avail().center()
+        anchor = avail_c if anchor is None else anchor
+        old = self.frame_rect()
+        new_zoom = max(1.0, min(self.max_zoom(), self._zoom * factor))
+        ratio = new_zoom / self._zoom
+        centre = anchor + (old.center() - anchor) * ratio
+        self._zoom = new_zoom
+        self._pan = centre - avail_c
+        self._pan = self._clamped_pan(self._fit_frame(), self._zoom, self._pan)
+        self.update()
+
+    def pan_by(self, dx: float, dy: float):
+        self._pan = self._clamped_pan(self._fit_frame(), self._zoom, self._pan + QPointF(dx, dy))
+        self.update()
+
+    def fit(self):
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self.update()
+
+    # ---- painting
     def paintEvent(self, _event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self.smooth)
         frame = self.frame_rect()
-        p.fillRect(frame, QColor(0, 0, 0))
-        p.setClipRect(frame)
-        oriented = self._oriented
-        true_w, _true_h = (self._true_size[1], self._true_size[0]) if self._rot90 % 2 else self._true_size
-        cw, _ = align.canvas_size(self._true_size, self._rot90, self._angle)
-        screen_per_true = frame.width() / cw
-        k = screen_per_true * true_w / oriented.width()
+        view = frame.intersected(QRectF(self.rect()))
+        p.fillRect(view, QColor(0, 0, 0))
+        p.setClipRect(view)
+        image = self._base
+        k = self.screen_per_true_pixel() * self._true_size[0] / image.width()
         p.translate(frame.center())
-        p.rotate(self._angle)  # Qt: positive turns the photo clockwise, like the editor's straighten
+        p.rotate(90 * self._rot90 + self._angle)  # Qt: positive turns the photo clockwise, like the editor
         p.scale(k, k)
-        p.drawImage(QPointF(-oriented.width() / 2.0, -oriented.height() / 2.0), oriented)
+        p.drawImage(QPointF(-image.width() / 2.0, -image.height() / 2.0), image)
         p.resetTransform()
         if self._grid:
             p.setPen(QPen(QColor(255, 255, 255, 70), 1))
-            for i in range(1, 8):
-                x = frame.left() + frame.width() * i / 8
-                y = frame.top() + frame.height() * i / 8
-                p.drawLine(QPointF(x, frame.top()), QPointF(x, frame.bottom()))
-                p.drawLine(QPointF(frame.left(), y), QPointF(frame.right(), y))
+            step = 96  # fixed screen spacing: useful at any zoom
+            x = view.left() - (view.left() % step) + step
+            while x < view.right():
+                p.drawLine(QPointF(x, view.top()), QPointF(x, view.bottom()))
+                x += step
+            y = view.top() - (view.top() % step) + step
+            while y < view.bottom():
+                p.drawLine(QPointF(view.left(), y), QPointF(view.right(), y))
+                y += step
         p.setClipping(False)
         p.setPen(QPen(QColor(255, 255, 255, 90), 1))
         p.drawRect(frame)
@@ -118,13 +185,14 @@ class AlignScreen(QWidget):
         self._angle = 0.0
         self._job = None
         self._closing = False
+        self._drag_last = None
 
         image = source
         if max(image.width(), image.height()) > PROXY_SIDE:
             image = image.scaled(PROXY_SIDE, PROXY_SIDE, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation)
         self._canvas = _Canvas(image, self._true_size, self._rot90, self)
-        self._canvas.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._canvas.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # the screen handles them
         self._build_controls()
         self._toast = QLabel(self)
         self._toast.setStyleSheet("background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.12);"
@@ -227,17 +295,26 @@ class AlignScreen(QWidget):
 
     def _refresh(self):
         self._canvas.set_view(self._rot90, self._angle)
-        width, height = self.result_size
-        self.info.setText(self._tr("align_result_size").format(w=width, h=height))
-        self.info.adjustSize()
+        self._refresh_info()
         self.btn_save.setEnabled(self.changed)
+
+    def _refresh_info(self):
+        width, height = self.result_size
+        percent = round(self._canvas.screen_per_true_pixel() * 100)
+        self.info.setText(self._tr("align_result_size").format(w=width, h=height) + "  ·  "
+                          + self._tr("align_zoom").format(pct=percent))
+        self.info.adjustSize()
 
     def _reset(self):
         self._rot90 = 0
         self.set_angle(0.0)
 
     def _auto(self):
-        angle = estimate_angle(qimage_to_rgba(self._canvas._oriented))
+        small = self._canvas._base.scaled(1024, 1024, Qt.AspectRatioMode.KeepAspectRatio,
+                                          Qt.TransformationMode.SmoothTransformation)
+        if self._rot90:
+            small = small.transformed(QTransform().rotate(90 * self._rot90))
+        angle = estimate_angle(qimage_to_rgba(small))
         if angle is None:
             self._show_toast(self._tr("editor_no_lines"))
             return
@@ -302,6 +379,40 @@ class AlignScreen(QWidget):
         super().resizeEvent(event)
         self._layout()
 
+    def wheelEvent(self, event):
+        self._canvas.zoom_by(1.15 if event.angleDelta().y() > 0 else 1 / 1.15, event.position())
+        self._after_view_change()
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._canvas.zoom > 1.0:
+            self._drag_last = event.position()
+            self._canvas.set_interacting(True)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_last is not None:
+            delta = event.position() - self._drag_last
+            self._drag_last = event.position()
+            self._canvas.pan_by(delta.x(), delta.y())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_last is not None:
+            self._drag_last = None
+            self._canvas.set_interacting(False)
+            self.unsetCursor()
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self._canvas.fit()
+        self._after_view_change()
+        super().mouseDoubleClickEvent(event)
+
+    def _after_view_change(self):
+        self._refresh_info()
+
     def keyPressEvent(self, e):
         k, mods = e.key(), e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
@@ -315,6 +426,15 @@ class AlignScreen(QWidget):
             self.set_angle(self._angle - step)
         elif k == Qt.Key.Key_Right and not ctrl:
             self.set_angle(self._angle + step)
+        elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._canvas.zoom_by(1.25)
+            self._after_view_change()
+        elif k == Qt.Key.Key_Minus:
+            self._canvas.zoom_by(0.8)
+            self._after_view_change()
+        elif k == Qt.Key.Key_Backspace or (ctrl and k == Qt.Key.Key_0):
+            self._canvas.fit()
+            self._after_view_change()
         elif k == Qt.Key.Key_0:
             self.set_angle(0.0)
         else:

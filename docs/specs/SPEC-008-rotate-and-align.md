@@ -19,16 +19,22 @@ the empty corners are black. It works for every photo size; on maps it is the wa
 | RA-4 | Save renders the result from the file, whatever its size: EXIF upright, 90° turns, the angle, in one resampling; nothing is cropped (the whole photo is inside the result), corners are black (transparent only when the file already has alpha). The output has exactly the canvas size of RA-3. A progress dialog shows a real percentage and can cancel; cancel or failure leaves the original untouched. | The same job as SPEC-007 HI-10, so a 900 MP map and a phone photo take one path. |
 | RA-5 | Save is not offered when nothing changed (angle 0 and no 90° turns). | Avoid rewriting a photo for nothing. |
 | RA-6 | The screen does not open while the photo has unsaved changes in the viewer (rotation by R is not one; sharpen/crop/brightness are): it says to save or undo them first. | The save works on the file, so it would silently drop them. |
+| RA-7 | The screen zooms and pans so the user can check where the photo is being aligned: the wheel and + / - zoom about the pointer (or the centre), from fitted up to 4 screen pixels per pixel of the frame it shows (400 % for a normal photo; a huge map's frame is a reduced copy, so its limit is lower and the percentage shown is still relative to the real pixels); dragging pans while zoomed; double-click, Backspace or Ctrl+0 fit again. The zoom level is shown next to the result size. The frame can never leave the view, and zoom/pan never change the result. A fine grid at a fixed screen spacing shows while the ruler is dragged. | User: some images need the user to see where they are rotating. A grid in screen pixels stays useful at any zoom. |
+| RA-8 | Zoom, pan, turns and angle changes never copy or rebuild the photo frame: the screen draws the one frame it was given (long side up to 8192 px, so zoom shows real detail) and Qt only touches the pixels inside the view. While the ruler or a pan drag is active the photo is drawn with fast sampling and smooth again on release. | User: no performance sacrifice. A per-turn rotated copy of an 8192 px frame is 235 MB. |
 
 ## Evidence
 
 - 2026-11-21: the file render of the expanded frame (reusing `huge.edit_file`) on a 640 x 400 image at 20, -12.5 and 44 degrees:
   output equals the formula size, both corner markers fully inside (red/blue pixel counts within 20% of the original
   1600), corner pixels < 12 (black), centre unchanged; quarter turns alone are bit-exact (`np.rot90`). `py -m pytest -q`: 516 passed.
+- 2026-11-21 (zoom): painting a 8192 x 5461 frame tilted 3.7 degrees into the screen's view (offscreen raster, grab checked to
+  contain the photo): 4.8 ms fitted, 1.3 ms fully zoomed. Turns/zoom/pan/angle keep the same `QImage` (cache key unchanged).
 
 ## Decision log
 
 - 2026-11-21: a separate small screen, not a mode of the crop canvas: the crop canvas is built around keeping its frame
   inside the photo (`fit_to_angle`, `clamp_center`), so letting it grow past the photo would change its core rules.
 - 2026-11-21: user chose black corners (not transparent, not trimmed) and "setting makes R open the screen".
+- 2026-11-21: the zoom limit follows the frame's own detail (4 screen px per frame px), not the real pixel count: past that
+  a map would only get blurrier, and a true 1:1 view of a 32,000 px map needs a tiled viewer (not built).
 - Unverified offscreen: how the screen looks and feels.

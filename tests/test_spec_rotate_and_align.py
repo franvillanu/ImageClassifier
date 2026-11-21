@@ -14,7 +14,7 @@ from image_classifier.config import DEFAULT_CONFIG
 from image_classifier.editor import align
 from image_classifier.imaging import huge
 
-REQUIRES = ["RA-1", "RA-2", "RA-3", "RA-4", "RA-5", "RA-6"]
+REQUIRES = ["RA-1", "RA-2", "RA-3", "RA-4", "RA-5", "RA-6", "RA-7", "RA-8"]
 
 
 def _wait(qapp, cond, timeout=10.0):
@@ -191,3 +191,148 @@ def test_ra6_unsaved_changes_block_the_screen(win, qapp):
     win.rotate_action()
     assert getattr(win, "photo_editor", None) is None
     assert "unsaved" in win.ephemeral_messages[0].text().lower() or "save or undo" in win.ephemeral_messages[0].text().lower()
+
+
+# ------------------------------------------------------------------ RA-7 zoom and pan
+def _screen(win):
+    win.set_advanced_rotation(True)
+    win.rotate_action()
+    return win.photo_editor
+
+
+def test_ra7_zoom_about_the_pointer_with_limits(win, qapp):
+    """RA-7: the point under the pointer stays put; zoom is limited between fit and the maximum."""
+    from PyQt6.QtCore import QPointF
+
+    s = _screen(win)
+    c = s._canvas
+    try:
+        assert c.zoom == 1.0
+        f0 = c.frame_rect()
+        anchor = QPointF(c.width() * 0.55, c.height() * 0.45)
+        u = ((anchor.x() - f0.left()) / f0.width(), (anchor.y() - f0.top()) / f0.height())
+        size_before = s.result_size
+        c.zoom_by(2.0, anchor)
+        f = c.frame_rect()
+        assert c.zoom == pytest.approx(2.0)
+        assert f.left() + u[0] * f.width() == pytest.approx(anchor.x(), abs=1.5)
+        assert f.top() + u[1] * f.height() == pytest.approx(anchor.y(), abs=1.5)
+        assert s.result_size == size_before                   # zoom never changes the result
+        c.zoom_by(1000.0, None)
+        assert c.zoom == pytest.approx(c.max_zoom()) and c.max_zoom() > 1.0
+        c.zoom_by(1e-6, None)
+        assert c.zoom == 1.0
+    finally:
+        s._close()
+
+
+def test_ra7_the_frame_never_leaves_the_view_and_fit_resets(win, qapp):
+    """RA-7: panning stops at the frame's edges; fit restores the fitted view."""
+    s = _screen(win)
+    c = s._canvas
+    try:
+        c.zoom_by(3.0, None)
+        c.pan_by(100000, 100000)
+        f, a = c.frame_rect(), c._avail()
+        assert f.left() <= a.left() + 0.5 and f.top() <= a.top() + 0.5
+        assert f.right() >= a.right() - 0.5 and f.bottom() >= a.bottom() - 0.5
+        c.pan_by(-100000, -100000)
+        f = c.frame_rect()
+        assert f.right() >= a.right() - 0.5 and f.bottom() >= a.bottom() - 0.5
+        c.fit()
+        assert c.zoom == 1.0 and c.frame_rect() == c._fit_frame()
+    finally:
+        s._close()
+
+
+def test_ra7_inputs_zoom_pan_and_fit(win, qapp):
+    """RA-7: wheel and +/- zoom, drag pans, double-click / Backspace / Ctrl+0 fit; the zoom level is shown."""
+    from PyQt6.QtCore import QPoint, QPointF
+    from PyQt6.QtGui import QWheelEvent
+
+    s = _screen(win)
+    c = s._canvas
+    try:
+        pos = QPointF(s.width() / 2, s.height() / 2)
+        s.wheelEvent(QWheelEvent(pos, pos, QPoint(), QPoint(0, 120), Qt.MouseButton.NoButton,
+                                 Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
+        assert c.zoom > 1.0 and "%" in s.info.text()
+        QTest.keyClick(s, Qt.Key.Key_Minus)
+        QTest.keyClick(s, Qt.Key.Key_Minus)
+        QTest.keyClick(s, Qt.Key.Key_Minus)
+        assert c.zoom == 1.0
+        for _ in range(3):
+            QTest.keyClick(s, Qt.Key.Key_Plus)
+        assert c.zoom > 1.0
+        before = c.frame_rect().center()
+        centre = QPoint(s.width() // 2, s.height() // 3)
+        QTest.mousePress(s, Qt.MouseButton.LeftButton, pos=centre)
+        QTest.mouseMove(s, centre + QPoint(-60, -20))
+        QTest.mouseRelease(s, Qt.MouseButton.LeftButton, pos=centre + QPoint(-60, -20))
+        assert c.frame_rect().center() != before
+        QTest.keyClick(s, Qt.Key.Key_Backspace)
+        assert c.zoom == 1.0
+        c.zoom_by(2.0, None)
+        QTest.keyClick(s, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
+        assert c.zoom == 1.0
+        c.zoom_by(2.0, None)
+        QTest.mouseDClick(s, Qt.MouseButton.LeftButton, pos=centre)
+        assert c.zoom == 1.0
+    finally:
+        s._close()
+
+
+# ------------------------------------------------------------------ RA-8 performance
+def test_ra8_nothing_is_copied_or_rebuilt_by_turns_zoom_or_angle(win, qapp):
+    """RA-8: the one frame is drawn as given (no per-turn rotated copy)."""
+    s = _screen(win)
+    c = s._canvas
+    try:
+        key = c._base.cacheKey()
+        for _ in range(4):
+            s.turn(True)
+        s.set_angle(12.3)
+        c.zoom_by(2.0, None)
+        c.pan_by(30, 10)
+        assert c._base.cacheKey() == key and not hasattr(c, "_oriented")
+    finally:
+        s._close()
+
+
+def test_ra8_fast_sampling_while_dragging_and_smooth_after(win, qapp):
+    """RA-8: ruler drag uses fast sampling; release restores smooth sampling."""
+    s = _screen(win)
+    try:
+        assert s._canvas.smooth
+        s.ruler.pressed.emit()
+        assert not s._canvas.smooth and s._canvas._grid
+        s.ruler.released.emit()
+        assert s._canvas.smooth and not s._canvas._grid
+    finally:
+        s._close()
+
+
+def test_ra8_the_frame_keeps_up_to_8192_px_and_painting_it_is_fast(win, qapp):
+    """RA-8: a 8192 px frame is kept whole (zoom shows real detail) and a zoomed, tilted paint stays quick."""
+    from image_classifier.editor.align_screen import AlignScreen
+    from PyQt6.QtGui import QImage
+
+    big = QImage(8192, 5461, QImage.Format.Format_RGB32)
+    big.fill(Qt.GlobalColor.darkGray)
+    s = AlignScreen(win, big, str(win.photos / "a.png"), (32000, 21332))
+    try:
+        assert s._canvas._base.width() == 8192
+        s.set_angle(3.7)
+        timings = {}
+        for name, zoom in (("fit", 1.0), ("zoomed", 99.0)):
+            s._canvas.fit()
+            s._canvas.zoom_by(zoom, None)
+            start = time.perf_counter()
+            grabbed = s._canvas.grab().toImage()
+            timings[name] = time.perf_counter() - start
+            centre = grabbed.pixelColor(grabbed.width() // 2, grabbed.height() // 2)
+            assert centre.red() > 60 and centre.green() > 60   # the photo (dark grey) really was painted
+        print("paint seconds", timings)
+        assert max(timings.values()) < 1.5
+    finally:
+        s._close()

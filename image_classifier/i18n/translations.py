@@ -157,6 +157,7 @@ translations = {
         "settings_group_storage": "Storage",
         "rotate_all_option": "Rotate ⟳ applies to all images",
         "advanced_rotation_option": "Advanced rotation",
+        "align_zoom": "Zoom {pct} %",
         "align_result_size": "Result: {w} × {h} px · nothing is cropped, corners are black",
         "align_modified_first": "Save or undo your changes to this photo first: rotate and align works on the saved file.",
         
@@ -653,6 +654,7 @@ translations = {
         "settings_group_storage": "Almacenamiento",
         "rotate_all_option": "Rotar ⟳ se aplica a todas las imágenes",
         "advanced_rotation_option": "Rotación avanzada",
+        "align_zoom": "Zoom {pct} %",
         "align_result_size": "Resultado: {w} × {h} px · no se recorta nada, las esquinas son negras",
         "align_modified_first": "Guarda o deshaz antes los cambios de esta foto: rotar y alinear trabaja sobre el archivo guardado.",
         
