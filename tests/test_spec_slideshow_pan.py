@@ -228,20 +228,57 @@ def test_sp5_sheet_and_help_name_both_modifiers():
         assert "Ctrl" in key and "Shift" in key
 
 
-def test_sp6_every_painted_frame_shows_the_position_for_its_own_time(player, qapp):
-    """SP-6: while a pan glides, a paint at any moment (not only on the timer) shows a new position,
-    advanced in proportion to the time since the previous paint: no repeated frame, no double step."""
-    shift = Qt.KeyboardModifier.ShiftModifier
-    w = player.surface.width()
-    QTest.keyPress(player, Qt.Key.Key_Right, shift)
-    _run(qapp, 0.6)  # steady hold: the photo moves at PAN_SPEED
-    frames = []
-    for _ in range(6):  # paints off the timer's beat, 5 ms apart
+class _FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+
+def _hold_with_fake_clock(player, monkeypatch, intervals):
+    """Hold Shift+Down and paint once per given interval (seconds) on a fake clock; return pan_y per paint."""
+    import image_classifier.slideshow.player as player_module
+    clock = _FakeClock()
+    monkeypatch.setattr(player_module, "time", clock)
+    QTest.keyPress(player, Qt.Key.Key_Down, SHIFT)
+    ys = []
+    for dt in intervals:
+        clock.now += dt
         player.surface.canvas.repaint()
-        frames.append((time.monotonic(), player.surface.pan[0]))
-        time.sleep(0.005)
-    QTest.keyRelease(player, Qt.Key.Key_Right, shift)
-    speed = player.PAN_SPEED * w
-    for (t0, x0), (t1, x1) in zip(frames, frames[1:]):
-        assert x1 < x0  # a new position in every painted frame
-        assert (x0 - x1) / (t1 - t0) == pytest.approx(speed, rel=0.35)
+        ys.append(player.surface.pan[1])
+    QTest.keyRelease(player, Qt.Key.Key_Down, SHIFT)
+    return ys
+
+
+def test_sp6_steps_are_identical_when_paint_times_wobble(player, qapp, monkeypatch):
+    """SP-6: paints once per refresh but +-2.5 ms late/early (as measured) still give identical steps."""
+    period = player._frame_period()
+    wobble = [period + d for d in (0.0025, -0.0025, 0.0015, -0.0020, 0.0005, -0.0005)] * 8  # stays inside the pan limit
+    ys = _hold_with_fake_clock(player, monkeypatch, wobble)
+    steps = [b - a for a, b in zip(ys, ys[1:])][-20:]  # steady part of the hold, before the pan limit
+    assert all(st < 0 for st in steps)
+    assert max(steps) - min(steps) < 0.01 * abs(steps[0])  # the same step every refresh
+
+
+def test_sp6_dropped_refresh_doubles_and_extra_paint_holds(player, qapp, monkeypatch):
+    """SP-6: a missed refresh moves two steps, a second paint inside one refresh does not move, and
+    the average speed over the hold is exact."""
+    period = player._frame_period()
+    intervals = [period] * 40 + [2 * period] + [period * 0.3, period * 0.7] + [period] * 3
+    ys = _hold_with_fake_clock(player, monkeypatch, intervals)
+    one = ys[39] - ys[38]
+    assert ys[40] - ys[39] == pytest.approx(2 * one, rel=0.08)  # dropped refresh: two steps (plus the ease's catch-up)
+    assert ys[41] == ys[40]                                      # extra paint 5 ms later: no move
+    assert ys[42] - ys[41] == pytest.approx(one, rel=0.08)       # back on the beat
+    assert all(b < a for a, b in zip(ys[42:], ys[43:]))
+
+
+def test_sp6_glide_is_advanced_by_the_paint_not_by_the_timer(player, qapp):
+    """SP-6: the pan timer only requests frames; positions change in paints."""
+    QTest.keyPress(player, Qt.Key.Key_Right, SHIFT)
+    _run(qapp, 0.2)
+    before = player.surface.pan
+    player._request_view_frame()  # a timer tick alone, without a paint, moves nothing
+    assert player.surface.pan == before
+    QTest.keyRelease(player, Qt.Key.Key_Right, SHIFT)

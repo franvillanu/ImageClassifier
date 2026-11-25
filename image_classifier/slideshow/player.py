@@ -5,7 +5,7 @@ import time
 from dataclasses import replace
 import os
 from PyQt6.QtCore import QEvent, QSize, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPalette, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QPalette, QShortcut, QSurfaceFormat
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox,
                             QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
@@ -18,6 +18,7 @@ from .loading import SlideLoader
 from .settings import SlideshowSettings
 from .settings_dialog import SettingsDialog
 from .surface import SlideSurface
+from .vsync import VBlankPacer
 
 
 def whole_pixel_inset(length, dpr, limit=8):
@@ -83,6 +84,17 @@ class PlayerWindow(QDialog):
         palette.setColor(QPalette.ColorRole.Window, QColor("black"))
         self.setPalette(palette)
         self.setAutoFillBackground(True)
+        # SG-2: on Windows frames follow the compositor's refresh; the timers only stand in without it.
+        # The GL swap must not also wait for vsync (measured: frames then reached DWM at its deadline),
+        # so windows created while the slideshow is open get swap interval 0, restored on close.
+        self.pacer = VBlankPacer(self)
+        self._restore_format = None
+        if self.pacer.available:
+            fmt = QSurfaceFormat.defaultFormat()
+            if fmt.swapInterval() != 0:
+                self._restore_format = QSurfaceFormat(fmt)
+                fmt.setSwapInterval(0)
+                QSurfaceFormat.setDefaultFormat(fmt)
         self.surface = SlideSurface(self, raster=raster)
         # Never show the native window's white before the first frame: stay invisible until
         # the surface has painted (black or a photo), with a safety net if nothing paints.
@@ -158,7 +170,8 @@ class PlayerWindow(QDialog):
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.setInterval(16)
-        self.timer.timeout.connect(self.controller.tick)
+        self.timer.timeout.connect(self._timer_tick)
+        self.pacer.tick.connect(self._on_vblank)
         self.decode_refresh_timer = QTimer(self)
         self.decode_refresh_timer.setSingleShot(True)
         self.decode_refresh_timer.setInterval(200)
@@ -189,6 +202,7 @@ class PlayerWindow(QDialog):
         self._view_ease = 0.07  # QUICK_EASE; the softer PAN_EASE / ZOOM_KEY_EASE for the keys (SP-1, SZ-9)
         self._drag = None  # (start pointer, start pan) while dragging the photo (SM-1)
         self._pan_last = 0.0
+        self._pan_lag = 0.0  # real time not yet animated, in seconds (SP-6)
         self.pan_timer = QTimer(self)
         self.pan_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.pan_timer.setInterval(16)
@@ -219,6 +233,7 @@ class PlayerWindow(QDialog):
         self.controller.start()
         self.setFocus()
         self.timer.start()
+        self.pacer.start()
         self.reveal_controls()
 
     def _update_decode_size(self):
@@ -290,6 +305,7 @@ class PlayerWindow(QDialog):
     def _start_view_animation(self):
         if not self.pan_timer.isActive():
             self._pan_last = time.monotonic()
+            self._pan_lag = 0.0
             self.pan_timer.start()
 
     def _handle_wheel(self, event):
@@ -385,9 +401,32 @@ class PlayerWindow(QDialog):
             self._pan_held.discard(direction)
         return True
 
+    def _frame_period(self):
+        """Seconds per screen refresh for the screen the window is on (SP-6); 60 Hz if unknown."""
+        screen = self.screen()
+        rate = screen.refreshRate() if screen is not None else 0
+        return 1.0 / rate if 20 <= rate <= 500 else 1.0 / 60
+
     def _request_view_frame(self):
-        """Pan timer: only asks for the next frame; the paint advances the glide (SP-6)."""
-        self.surface.canvas.update()
+        """Pan timer: only asks for the next frame; the paint advances the glide (SP-6). With the
+        compositor pacer running the refresh tick asks instead, so frames stay on the beat (SG-2)."""
+        if not self.pacer.running:
+            self.surface.canvas.update()
+
+    def _timer_tick(self):
+        if not self.pacer.running:
+            self.controller.tick()
+
+    def _on_vblank(self):
+        """One screen refresh (SG-2): advance the motion clock and the view glide, then paint once."""
+        if self._closing:
+            return
+        if self.timer.isActive():
+            self.controller.tick()
+        if self.timer.isActive() and self.controller.playing or self.pan_timer.isActive():
+            # Paint now, early in the refresh: a deferred update() was measured landing ~15.6 ms
+            # later, right at the next composition, where frames sometimes missed it.
+            self.surface.canvas.repaint()
 
     def _advance_view(self):
         if self.pan_timer.isActive():
@@ -395,8 +434,13 @@ class PlayerWindow(QDialog):
 
     def _pan_tick(self):
         now = time.monotonic()
-        dt = min(0.05, max(0.0, now - self._pan_last))
+        # SP-6: advance in whole screen refreshes. Paint times wobble by a few ms around the refresh,
+        # but the screen shows frames at a fixed rate, so raw intervals made uneven steps (measured).
+        period = self._frame_period()
+        self._pan_lag = min(3 * period, self._pan_lag + max(0.0, now - self._pan_last))
         self._pan_last = now
+        dt = round(self._pan_lag / period) * period
+        self._pan_lag -= dt
         w, h = self.surface.width(), self.surface.height()
         vx = sum(d[0] for d in self._pan_held) * w * self.PAN_SPEED
         vy = sum(d[1] for d in self._pan_held) * h * self.PAN_SPEED
@@ -727,6 +771,10 @@ class PlayerWindow(QDialog):
             source = self.surface._source
             self.closedOnPhoto.emit(shown.path, source.toImage() if source is not None else None)
         self.timer.stop()
+        self.pacer.stop()
+        if self._restore_format is not None:
+            QSurfaceFormat.setDefaultFormat(self._restore_format)
+            self._restore_format = None
         self.hide_timer.stop()
         self.decode_refresh_timer.stop()
         self.notice_timer.stop()
