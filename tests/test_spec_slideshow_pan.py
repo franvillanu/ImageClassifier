@@ -13,7 +13,7 @@ from image_classifier.slideshow.player import PlayerWindow
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.surface import panned_bounds
 
-REQUIRES = ["SP-1", "SP-2", "SP-3", "SP-4", "SP-5", "SD-4"]
+REQUIRES = ["SP-1", "SP-2", "SP-3", "SP-4", "SP-5", "SP-6", "SD-4"]
 CTRL = Qt.KeyboardModifier.ControlModifier
 
 
@@ -226,3 +226,22 @@ def test_sp5_sheet_and_help_name_both_modifiers():
     for lang in ("en", "es"):
         key = translations[lang]["shortcut_slideshow_pan_key"]
         assert "Ctrl" in key and "Shift" in key
+
+
+def test_sp6_every_painted_frame_shows_the_position_for_its_own_time(player, qapp):
+    """SP-6: while a pan glides, a paint at any moment (not only on the timer) shows a new position,
+    advanced in proportion to the time since the previous paint: no repeated frame, no double step."""
+    shift = Qt.KeyboardModifier.ShiftModifier
+    w = player.surface.width()
+    QTest.keyPress(player, Qt.Key.Key_Right, shift)
+    _run(qapp, 0.6)  # steady hold: the photo moves at PAN_SPEED
+    frames = []
+    for _ in range(6):  # paints off the timer's beat, 5 ms apart
+        player.surface.canvas.repaint()
+        frames.append((time.monotonic(), player.surface.pan[0]))
+        time.sleep(0.005)
+    QTest.keyRelease(player, Qt.Key.Key_Right, shift)
+    speed = player.PAN_SPEED * w
+    for (t0, x0), (t1, x1) in zip(frames, frames[1:]):
+        assert x1 < x0  # a new position in every painted frame
+        assert (x0 - x1) / (t1 - t0) == pytest.approx(speed, rel=0.35)

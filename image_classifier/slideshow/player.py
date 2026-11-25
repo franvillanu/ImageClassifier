@@ -192,7 +192,8 @@ class PlayerWindow(QDialog):
         self.pan_timer = QTimer(self)
         self.pan_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.pan_timer.setInterval(16)
-        self.pan_timer.timeout.connect(self._pan_tick)
+        self.pan_timer.timeout.connect(self._request_view_frame)
+        self.surface.before_paint = self._advance_view  # positions computed per painted frame (SP-6)
         self.surface.fallbackActivated.connect(self._install_tracking)
         self._install_tracking()
         QApplication.instance().aboutToQuit.connect(self._shutdown)
@@ -383,6 +384,14 @@ class PlayerWindow(QDialog):
         else:
             self._pan_held.discard(direction)
         return True
+
+    def _request_view_frame(self):
+        """Pan timer: only asks for the next frame; the paint advances the glide (SP-6)."""
+        self.surface.canvas.update()
+
+    def _advance_view(self):
+        if self.pan_timer.isActive():
+            self._pan_tick()
 
     def _pan_tick(self):
         now = time.monotonic()
