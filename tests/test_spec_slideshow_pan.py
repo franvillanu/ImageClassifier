@@ -69,7 +69,7 @@ def test_sp1_tap_glides_through_several_frames_to_five_percent(player, qapp):
 
 
 def test_sp1_holding_moves_continuously_and_stops_on_release(player, qapp):
-    """SP-1: holding keeps moving (about half the window per second); after release it eases to a stop."""
+    """SP-1: holding keeps moving (0.4 of the window per second); after release it eases to a stop."""
     w = player.surface.width()
     QTest.keyPress(player, Qt.Key.Key_Right, CTRL)
     _run(qapp, 0.25)
@@ -82,7 +82,17 @@ def test_sp1_holding_moves_continuously_and_stops_on_release(player, qapp):
     stopped = player.surface.pan[0]
     _run(qapp, 0.2)
     assert player.surface.pan[0] == stopped
-    assert -0.5 * w <= stopped <= -0.2 * w  # 5% tap + ~0.5 s at 0.5 w/s, eased
+    assert -0.45 * w <= stopped <= -0.17 * w  # 5% tap + ~0.5 s at 0.4 w/s, eased
+
+
+def test_sp1_tap_glides_softly_over_about_half_a_second(player, qapp):
+    """SP-1 (2026-11-25): a Shift+Right tap is still under 75% of the way after 0.15 s (old ease: ~88%, new ~61%)."""
+    w = player.surface.width()
+    QTest.keyClick(player, Qt.Key.Key_Right, SHIFT)
+    _run(qapp, 0.15)
+    assert -0.05 * w * 0.75 < player.surface.pan[0] < 0
+    _settled(qapp, player)
+    assert player.surface.pan[0] == pytest.approx(-0.05 * w, abs=0.6)
 
 
 def test_sp1_releasing_ctrl_first_still_stops(player, qapp):

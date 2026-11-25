@@ -185,6 +185,8 @@ class PlayerWindow(QDialog):
         self._pan_held = set()
         self._pan_target = (0.0, 0.0)
         self._zoom_target = 1.0  # mouse wheel zoom (SPEC-002 SZ-1)
+        self._zoom_held = {}  # key -> +1/-1 while a keyboard zoom key is held (SZ-9)
+        self._view_ease = 0.07  # QUICK_EASE; the softer PAN_EASE / ZOOM_KEY_EASE for the keys (SP-1, SZ-9)
         self._drag = None  # (start pointer, start pan) while dragging the photo (SM-1)
         self._pan_last = 0.0
         self.pan_timer = QTimer(self)
@@ -267,13 +269,17 @@ class PlayerWindow(QDialog):
     # Smooth panning (SPEC-002 SP-1): the target moves (tap nudge, or continuously while held) and the
     # photo eases toward it every frame, so taps and holds both glide instead of jumping.
     PAN_TAP = 0.05    # fraction of the window a tap moves the target
-    PAN_SPEED = 0.5   # fraction of the window per second while held
-    PAN_EASE = 0.07   # seconds: how closely the photo follows the target
+    PAN_SPEED = 0.4   # fraction of the window per second while held
+    PAN_EASE = 0.16   # seconds: how closely the photo follows the target for the keys (soft glide)
+    QUICK_EASE = 0.07  # seconds: wheel zoom, drag catch-up and Backspace reset stay responsive
     _PAN_KEYS = {Qt.Key.Key_Left: (1, 0), Qt.Key.Key_Right: (-1, 0), Qt.Key.Key_Up: (0, 1), Qt.Key.Key_Down: (0, -1)}
 
     ZOOM_STEP = 1.25  # per wheel notch (SZ-1)
     ZOOM_MAX = 5.0
     ZOOM_MIN = 0.5  # below the normal framing: the photo smaller, centred, black around it (SZ-8)
+    ZOOM_KEY_STEP = 1.1        # per keyboard tap (SZ-9)
+    ZOOM_KEY_SPEED = 1.8       # zoom factor per second while a zoom key is held (SZ-9)
+    ZOOM_KEY_EASE = 0.16       # seconds: the softer glide for keyboard zoom (SZ-9)
 
     def _clamp_pan(self, x, y, zoom=None):
         zoom = self._zoom_target if zoom is None else zoom
@@ -297,6 +303,7 @@ class PlayerWindow(QDialog):
         if z1 == z0:
             return True
         point = self.surface.mapFromGlobal(event.globalPosition().toPoint())
+        self._view_ease = self.QUICK_EASE
         self._zoom_to(z1, point.x() - self.surface.width() / 2, point.y() - self.surface.height() / 2)
         return True
 
@@ -312,23 +319,38 @@ class PlayerWindow(QDialog):
 
     _ZOOM_KEYS = {Qt.Key.Key_Plus: 1, Qt.Key.Key_Equal: 1, Qt.Key.Key_Minus: -1, Qt.Key.Key_Underscore: -1}
 
-    def _handle_zoom_key(self, event):
-        """+ / - (also Ctrl, numpad): zoom toward the screen centre (SZ-6). True when consumed."""
+    def _handle_zoom_key(self, event, pressed=True):
+        """+ / - (also Ctrl, numpad): zoom toward the screen centre (SZ-6, SZ-9). True when consumed."""
         direction = self._ZOOM_KEYS.get(event.key())
         if direction is None:
             return False
+        if not pressed or event.isAutoRepeat():
+            return self._zoom_key_hold(event, direction, pressed)
         allowed = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
                    | Qt.KeyboardModifier.KeypadModifier)
         if event.modifiers() & ~allowed:
             return False
+        return self._zoom_key_hold(event, direction, True)
+
+    def _zoom_key_hold(self, event, direction, pressed):
+        """Keyboard zoom key press / release (SZ-9): a tap glides x1.1, holding zooms every frame;
+        auto-repeat is ignored. A release (or repeat) of a held key is consumed whatever the modifiers,
+        so letting go of Ctrl first neither changes the speed nor keeps zooming."""
+        key = event.key()
+        if not pressed:
+            return self._zoom_held.pop(key, None) is not None
+        if event.isAutoRepeat():
+            return True
         if self._closing or self.surface.entry is None:
             return True
+        self._zoom_held[key] = direction
         self._zoom_step(direction)
         return True
 
     def _zoom_step(self, direction):
-        """One keyboard zoom step toward the screen centre (SZ-6, SZ-7)."""
-        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_STEP ** direction))
+        """One keyboard zoom tap toward the screen centre, with the soft glide (SZ-6, SZ-7, SZ-9)."""
+        self._view_ease = self.ZOOM_KEY_EASE
+        z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, self._zoom_target * self.ZOOM_KEY_STEP ** direction))
         if z1 != self._zoom_target:
             self._zoom_to(z1)
 
@@ -338,11 +360,12 @@ class PlayerWindow(QDialog):
         if direction is None:
             return False
         modifiers = event.modifiers()
-        if direction[0] == 0 and modifiers & Qt.KeyboardModifier.ControlModifier:
-            # Ctrl+Up / Ctrl+Down zoom in / out; holding repeats (SZ-7)
-            if pressed and not self._closing and self.surface.entry is not None:
-                self._zoom_step(direction[1])
-            return pressed
+        if direction[0] == 0 and (event.key() in self._zoom_held
+                                  or (pressed and modifiers & Qt.KeyboardModifier.ControlModifier)):
+            # Ctrl+Up / Ctrl+Down zoom in / out; holding zooms continuously (SZ-7, SZ-9)
+            return self._zoom_key_hold(event, direction[1], pressed)
+        if direction[0] == 0 and not pressed and modifiers & Qt.KeyboardModifier.ControlModifier:
+            return True  # release of a Ctrl+Up/Down that started while closing or without a photo
         pan_modifiers = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier  # SP-5
         if pressed and not event.modifiers() & pan_modifiers:
             return False
@@ -351,6 +374,7 @@ class PlayerWindow(QDialog):
         if event.isAutoRepeat() or self._closing or self.surface.entry is None:
             return True
         if pressed:
+            self._view_ease = self.PAN_EASE
             self._pan_held.add(direction)
             w, h = self.surface.width(), self.surface.height()
             self._pan_target = self._clamp_pan(self._pan_target[0] + direction[0] * w * self.PAN_TAP,
@@ -367,15 +391,21 @@ class PlayerWindow(QDialog):
         w, h = self.surface.width(), self.surface.height()
         vx = sum(d[0] for d in self._pan_held) * w * self.PAN_SPEED
         vy = sum(d[1] for d in self._pan_held) * h * self.PAN_SPEED
+        zoom_dir = sum(self._zoom_held.values())
+        if zoom_dir:  # held zoom key: the target grows every frame, anchored at the centre (SZ-9)
+            z0 = self._zoom_target
+            z1 = max(self.ZOOM_MIN, min(self.ZOOM_MAX, z0 * self.ZOOM_KEY_SPEED ** (zoom_dir * dt)))
+            self._zoom_target = z1
+            self._pan_target = (self._pan_target[0] * z1 / z0, self._pan_target[1] * z1 / z0)
         tx, ty = self._clamp_pan(self._pan_target[0] + vx * dt, self._pan_target[1] + vy * dt)
         self._pan_target = (tx, ty)
-        follow = 1 - math.exp(-dt / self.PAN_EASE) if dt else 0
+        follow = 1 - math.exp(-dt / self._view_ease) if dt else 0
         cx, cy = self.surface.pan
         cx += (tx - cx) * follow
         cy += (ty - cy) * follow
         zt, zc = self._zoom_target, self.surface.zoom
         zc = math.exp(math.log(zc) + (math.log(zt) - math.log(zc)) * follow)  # eased in log space: even feel
-        if not self._pan_held and abs(tx - cx) < 0.5 and abs(ty - cy) < 0.5 and abs(zt - zc) < 0.002:
+        if not self._pan_held and not self._zoom_held and abs(tx - cx) < 0.5 and abs(ty - cy) < 0.5 and abs(zt - zc) < 0.002:
             self.surface.set_zoom(zt)
             self.surface.set_pan((tx, ty))
             self.pan_timer.stop()
@@ -388,13 +418,16 @@ class PlayerWindow(QDialog):
         if self._closing or self.surface.entry is None:
             return
         self._pan_held.clear()
+        self._zoom_held.clear()
         self._end_drag()
+        self._view_ease = self.QUICK_EASE
         self._pan_target = (0.0, 0.0)
         self._zoom_target = 1.0
         self._start_view_animation()
 
     def _stop_pan_keys(self):
         self._pan_held.clear()
+        self._zoom_held.clear()
         self._end_drag()
 
     def _handle_drag(self, obj, event):
@@ -416,6 +449,7 @@ class PlayerWindow(QDialog):
                 self.surface.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
             target = self._clamp_pan(px + delta.x(), py + delta.y())
             self._pan_target = target
+            self._view_ease = self.QUICK_EASE  # the photo stays close under the pointer
             if not self.pan_timer.isActive():
                 self.surface.set_pan(target)  # direct: the photo stays under the pointer
             return False
@@ -606,7 +640,7 @@ class PlayerWindow(QDialog):
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             if self._handle_pan_key(event, event.type() == QEvent.Type.KeyPress):
                 return True
-            if event.type() == QEvent.Type.KeyPress and self._handle_zoom_key(event):
+            if self._handle_zoom_key(event, event.type() == QEvent.Type.KeyPress):
                 return True
         elif event.type() == QEvent.Type.Wheel:
             return self._handle_wheel(event)
