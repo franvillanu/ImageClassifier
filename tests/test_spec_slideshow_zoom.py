@@ -14,7 +14,7 @@ from image_classifier.slideshow.player import PlayerWindow
 from image_classifier.slideshow.settings import SlideshowSettings
 from image_classifier.slideshow.surface import panned_bounds
 
-REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6", "SZ-7", "SZ-8"]
+REQUIRES = ["SZ-1", "SZ-2", "SZ-3", "SZ-4", "SZ-5", "SV-4", "SZ-6", "SZ-7", "SZ-8", "SZ-9"]
 
 
 def _wait(qapp, cond, timeout=5.0):
@@ -185,10 +185,10 @@ def test_sv4_reset_listed_in_sheet_and_help_both_languages():
     (Qt.Key.Key_Plus, Qt.KeyboardModifier.KeypadModifier),
 ])
 def test_sz6_plus_keys_zoom_in_smoothly_toward_the_centre(player, qapp, key, mods):
-    """SZ-6: + (any standard variant) zooms x1.25 toward the centre, smoothly; pan stays centred."""
+    """SZ-6: + (any standard variant) zooms x1.1 (SZ-9) toward the centre, smoothly; pan stays centred."""
     QTest.keyClick(player, key, mods)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.25, abs=0.003)
+    assert player.surface.zoom == pytest.approx(1.1, abs=0.003)
     assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
     assert player.controller.playing
 
@@ -203,7 +203,7 @@ def test_sz6_minus_keys_zoom_out_and_stop_at_normal(player, qapp, mods):
     for _ in range(4):
         QTest.keyClick(player, Qt.Key.Key_Minus, mods)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.25 ** -2, abs=0.003)
+    assert player.surface.zoom == pytest.approx(1.1 ** -2, abs=0.003)
 
 
 def test_sz6_ctrl_zero_resets_and_both_pan_modifiers_still_pan(player, qapp):
@@ -213,7 +213,7 @@ def test_sz6_ctrl_zero_resets_and_both_pan_modifiers_still_pan(player, qapp):
     QTest.keyClick(player, Qt.Key.Key_Plus)
     _settled(qapp, player)
     assert player.surface.pan[0] > 0  # Shift+Left moved the photo right, as before
-    assert player.surface.pan[1] < 0 and player.surface.zoom > 1.2
+    assert player.surface.pan[1] < 0 and player.surface.zoom > 1.05
     QTest.keyClick(player, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
     _settled(qapp, player)
     assert player.surface.zoom == 1.0 and player.surface.pan == (0.0, 0.0)
@@ -237,31 +237,77 @@ CTRL = Qt.KeyboardModifier.ControlModifier
 
 
 def test_sz7_ctrl_up_zooms_in_and_ctrl_down_out_toward_the_centre(player, qapp):
-    """SZ-7: Ctrl+Up x1.25, Ctrl+Down back, within 0.5x..5x, pan untouched, playback continues."""
+    """SZ-7: Ctrl+Up x1.1 (SZ-9), Ctrl+Down back, within 0.5x..5x, pan untouched, playback continues."""
     QTest.keyClick(player, Qt.Key.Key_Up, CTRL)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.25, abs=0.003)
+    assert player.surface.zoom == pytest.approx(1.1, abs=0.003)
     assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
     QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
     QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(0.8, abs=0.003)  # past the normal framing (SZ-8)
-    for _ in range(20):
+    assert player.surface.zoom == pytest.approx(1 / 1.1, abs=0.003)  # past the normal framing (SZ-8)
+    for _ in range(25):
         QTest.keyClick(player, Qt.Key.Key_Up, CTRL)
     _settled(qapp, player)
     assert player.surface.zoom == pytest.approx(5.0, abs=0.003)
     assert player.controller.playing
 
 
-def test_sz7_holding_ctrl_up_repeats(player, qapp):
-    """SZ-7: key auto-repeat keeps zooming, like holding + (SZ-6)."""
-    from PyQt6.QtGui import QKeyEvent
+def _key(player, kind, key, mods=CTRL, repeat=False):
     from PyQt6.QtCore import QEvent
+    from PyQt6.QtGui import QKeyEvent
+    event_type = QEvent.Type.KeyPress if kind == "press" else QEvent.Type.KeyRelease
+    QApplication.sendEvent(player, QKeyEvent(event_type, key, mods, "", repeat))
 
-    for repeat in (False, True, True):
-        QApplication.sendEvent(player, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Up, CTRL, "", repeat))
+
+def test_sz9_tap_glides_softly_over_about_half_a_second(player, qapp):
+    """SZ-9: one Ctrl+Up tap = x1.1, eased over many small frames, not reached in a fifth of a second."""
+    steps = []
+    original = player.surface.set_zoom
+    player.surface.set_zoom = lambda z: (steps.append((time.monotonic(), z)), original(z))
+    start = time.monotonic()
+    QTest.keyClick(player, Qt.Key.Key_Up, CTRL)
     _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(1.25 ** 3, abs=0.01)
+    assert player.surface.zoom == pytest.approx(1.1, abs=0.003)
+    zooms = [1.0] + [z for _, z in steps]
+    assert max(b - a for a, b in zip(zooms, zooms[1:])) < 0.02  # no visible jump per frame
+    at_02 = [z for t, z in steps if t - start <= 0.2]
+    assert at_02 and at_02[-1] < 1.1 - 0.015  # still gliding after 0.2 s (old ease was ~95% there)
+
+
+def test_sz9_holding_zooms_continuously_and_ignores_auto_repeat(player, qapp):
+    """SZ-9: holding zooms at about x1.8 per second, repeats add nothing, release eases to a stop."""
+    _key(player, "press", Qt.Key.Key_Up)
+    start = time.monotonic()
+    for _ in range(15):  # a burst of OS auto-repeats must not stack x1.1 steps
+        _key(player, "press", Qt.Key.Key_Up, repeat=True)
+    _wait(qapp, lambda: time.monotonic() - start >= 0.5, timeout=1.0)
+    _key(player, "release", Qt.Key.Key_Up)
+    held = time.monotonic() - start
+    target = player._zoom_target
+    assert target == pytest.approx(1.1 * 1.8 ** held, rel=0.12)
+    _settled(qapp, player)
+    assert player.surface.zoom == pytest.approx(target, abs=0.003)  # stopped where it was released
+    _key(player, "press", Qt.Key.Key_Minus, Qt.KeyboardModifier.NoModifier)
+    _wait(qapp, lambda: False, timeout=0.3)
+    _key(player, "release", Qt.Key.Key_Minus, Qt.KeyboardModifier.NoModifier)
+    _settled(qapp, player)
+    assert player.surface.zoom < target / 1.1  # - holds the same way
+    assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
+
+
+def test_sz9_releasing_ctrl_first_still_stops_the_zoom(player, qapp):
+    """SZ-9: Ctrl let go before the arrow: the arrow's release (without Ctrl) still ends the hold."""
+    _key(player, "press", Qt.Key.Key_Up)
+    _wait(qapp, lambda: False, timeout=0.2)
+    _key(player, "press", Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier, repeat=True)  # repeat without Ctrl
+    before = player.controller.active_settings.duration
+    _key(player, "release", Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
+    _settled(qapp, player)
+    assert player.controller.active_settings.duration == before  # the repeat did not change the speed
+    settled = player.surface.zoom
+    _wait(qapp, lambda: False, timeout=0.2)
+    assert player.surface.zoom == settled and not player.pan_timer.isActive()
 
 
 def test_sz7_plain_up_down_still_change_the_speed(player, qapp):
@@ -284,20 +330,22 @@ def test_sz7_keys_listed_in_sheet_and_help():
 
 
 def test_sz8_zoom_out_goes_below_fit_and_stops_at_half(player, qapp):
-    """SZ-8: from the normal view, - / Ctrl+Down / wheel reach 0.8x, 0.64x, 0.512x, then stop at 0.5x; 0 returns to 1x."""
+    """SZ-8: from the normal view wheel notches reach 0.8x, 0.64x, 0.512x, then stop at 0.5x; - / Ctrl+Down stop there too; 0 returns to 1x."""
     for expected in (0.8, 0.64, 0.512, 0.5, 0.5):
-        QTest.keyClick(player, Qt.Key.Key_Minus)
+        _wheel(player, -1)
         _settled(qapp, player)
         assert player.surface.zoom == pytest.approx(expected, abs=0.003)
     assert player.surface.pan == pytest.approx((0.0, 0.0), abs=0.5)
     QTest.keyClick(player, Qt.Key.Key_0)
     _settled(qapp, player)
     assert player.surface.zoom == 1.0
-    for _ in range(5):
-        QTest.keyClick(player, Qt.Key.Key_Down, CTRL)
-    _settled(qapp, player)
-    assert player.surface.zoom == pytest.approx(0.5, abs=0.003)
-    QTest.keyClick(player, Qt.Key.Key_0)
+    for key, mods in ((Qt.Key.Key_Down, CTRL), (Qt.Key.Key_Minus, Qt.KeyboardModifier.NoModifier)):
+        for _ in range(10):
+            QTest.keyClick(player, key, mods)
+        _settled(qapp, player)
+        assert player.surface.zoom == pytest.approx(0.5, abs=0.003)
+        QTest.keyClick(player, Qt.Key.Key_0)
+        _settled(qapp, player)
     _settled(qapp, player)
     _wheel(player, -5)
     _settled(qapp, player)

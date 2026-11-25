@@ -22,9 +22,15 @@ def panned_bounds(bounds, pan, zoom=1.0, viewport=(0, 0)):
 
 
 def paint_slide(widget):
+    surface = widget.surface
+    if surface.before_paint is not None:
+        surface._painting = True  # SPEC-002 SP-6: the view glide advances to this frame's own time
+        try:
+            surface.before_paint()
+        finally:
+            surface._painting = False
     painter = QPainter(widget)
     painter.fillRect(widget.rect(), Qt.GlobalColor.black)
-    surface = widget.surface
     if surface.pixmap is not None and surface.entry is not None:
         frame = EFFECTS[surface.entry.effect_id].evaluate(
             surface.progress, (surface.pixmap.width(), surface.pixmap.height()),
@@ -66,6 +72,8 @@ class SlideSurface(QWidget):
         self.rotation = 0
         self.pan = (0.0, 0.0)
         self.zoom = 1.0
+        self.before_paint = None  # called at the start of every paint (SP-6)
+        self._painting = False
         self.entry = None
         self.progress = 0
         self.fade = True
@@ -126,13 +134,15 @@ class SlideSurface(QWidget):
         """Offset in logical pixels on top of the motion; the player animates it (SP-1)."""
         if pan != self.pan:
             self.pan = pan
-            self.canvas.update()
+            if not self._painting:
+                self.canvas.update()
 
     def set_zoom(self, zoom):
         """User zoom on top of the motion; the player animates it (SZ-1)."""
         if zoom != self.zoom:
             self.zoom = zoom
-            self.canvas.update()
+            if not self._painting:
+                self.canvas.update()
 
     def reset_pan(self):
         self.pan = (0.0, 0.0)
